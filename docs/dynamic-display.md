@@ -2,7 +2,7 @@
 
 The default display is rendered as a complete 90x10 RGB888 Creator frame. Its physical layout starts at the front of the case and uses these fixed regions:
 
-- 24 pixels: compact 24-hour clock
+- 24 pixels: compact 24-hour clock using the same seven-pixel height as the rear clock
 - 4 pixels: black gap
 - 31 pixels: turquoise `CACHYOS` marquee
 - 31 pixels: 24-hour clock

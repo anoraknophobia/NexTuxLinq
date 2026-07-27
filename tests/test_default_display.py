@@ -7,6 +7,7 @@ from nexlinq.default_display import (
     GAP_WIDTH,
     REAR_CLOCK_WIDTH,
     SCROLL_TEXT_WIDTH,
+    FONT_3X7,
     FONT_5X7,
     draw_text_clipped,
     render_default_frame,
@@ -153,3 +154,38 @@ def test_marquee_uses_turquoise_and_stays_inside_its_region() -> None:
 
 def test_cachyos_bitmap_is_wider_than_the_marquee_region() -> None:
     assert text_width("CACHYOS", FONT_5X7) > SCROLL_TEXT_WIDTH
+
+
+def test_front_clock_uses_same_seven_pixel_height_as_rear_clock() -> None:
+    assert all(len(glyph) == 7 for glyph in FONT_3X7.values())
+
+    frame = render_default_frame(datetime(2026, 7, 27, 20, 36), scroll_step=0)
+    payload = frame.to_bytes()
+    white = bytes((0xFF, 0xFF, 0xFF))
+
+    front_rows = {
+        y
+        for y in range(10)
+        for x in range(0, 24)
+        if region_pixel(
+            payload,
+            region_x=0,
+            region_width=24,
+            x=x,
+            y=y,
+        ) == white
+    }
+    rear_rows = {
+        y
+        for y in range(10)
+        for x in range(59, 90)
+        if region_pixel(
+            payload,
+            region_x=59,
+            region_width=31,
+            x=x,
+            y=y,
+        ) == white
+    }
+
+    assert front_rows == rear_rows == set(range(1, 8))
