@@ -24,3 +24,18 @@ def encode_brightness(percentage: int) -> int:
 
     numerator = (60 * 99) + ((percentage - 1) * 120)
     return (numerator + 49) // 99
+
+
+HID_REPORT_SIZE = 64
+REPORT_ID = 0x01
+COMMAND_DISPLAY_SETTINGS = 0x04
+
+
+def build_brightness_report(percentage: int) -> bytes:
+    """Build the verified 64-byte Matrix900 display-settings report."""
+    report = bytearray(HID_REPORT_SIZE)
+    report[0] = REPORT_ID
+    report[1] = COMMAND_DISPLAY_SETTINGS
+    report[5] = 0x01
+    report[6] = encode_brightness(percentage)
+    return bytes(report)
