@@ -63,3 +63,36 @@ This document separates verified observations from assumptions and open question
 - Do not test firmware, bootloader, reset, or update commands.
 - Keep original packet captures unchanged and document their provenance.
 - Remove serial numbers and other machine-specific identifiers before publishing captures.
+
+## Brightness encoding
+
+Brightness is configured by report `0x04` and applied together with reports `0x05` and `0x03` when the user selects **Send to Screen**.
+
+Verified report prefix:
+
+```text
+01 04 00 00 00 01 VV 00 ...
+```
+
+`VV` is the encoded brightness value.
+
+Verified values:
+
+| Percentage | Device value |
+|-----------:|-------------:|
+| 10% | `0x47` |
+| 30% | `0x5f` |
+| 50% | `0x77` |
+| 60% | `0x84` |
+| 80% | `0x9c` |
+| 100% | `0xb4` |
+
+The values match the following integer mapping:
+
+```python
+round(60 + (percentage - 1) * 120 / 99)
+```
+
+The official NexLinq application exposes brightness in ten-percent steps from 10% through 100%.
+
+Changing the slider alone does not update the display. The setting is transmitted only after selecting **Send to Screen**.
