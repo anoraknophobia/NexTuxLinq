@@ -65,6 +65,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Update interval in seconds when using --watch.",
     )
+    telemetry_parser.add_argument(
+        "--rpm-source",
+        choices=("fan", "pump"),
+        default="fan",
+        help=(
+            "RPM source: OpenLinkHub case-fan average or the highest "
+            "nct6798 value used as the pump source."
+        ),
+    )
 
     system_data_parser = subparsers.add_parser(
         "system-data",
@@ -215,7 +224,11 @@ def set_device_brightness(percentage: int) -> int:
     return 0
 
 
-def update_telemetry(watch: bool, interval: float) -> int:
+def update_telemetry(
+    watch: bool,
+    interval: float,
+    rpm_source: str,
+) -> int:
     """Send one or more Linux telemetry updates."""
     if interval <= 0:
         print("Telemetry interval must be greater than zero.", file=sys.stderr)
@@ -229,7 +242,9 @@ def update_telemetry(watch: bool, interval: float) -> int:
 
     try:
         while True:
-            sample = collect_default_telemetry()
+            sample = collect_default_telemetry(
+                rpm_source=rpm_source
+            )
             result = send_telemetry(devices[0].device_path, sample)
             response = (
                 "echo"
@@ -239,7 +254,7 @@ def update_telemetry(watch: bool, interval: float) -> int:
             print(
                 f"CPU {sample.cpu_temperature} C | "
                 f"GPU {sample.gpu_temperature} C | "
-                f"Fan/Pump {sample.fan_rpm} RPM | "
+                f"RPM {sample.fan_rpm} ({sample.rpm_source}) | "
                 f"Response {response}",
                 flush=True,
             )
@@ -509,7 +524,11 @@ def main() -> int:
     if arguments.command == "brightness":
         return set_device_brightness(arguments.percentage)
     if arguments.command == "telemetry":
-        return update_telemetry(arguments.watch, arguments.interval)
+        return update_telemetry(
+            arguments.watch,
+            arguments.interval,
+            arguments.rpm_source,
+        )
     if arguments.command == "system-data":
         return configure_system_data(arguments.source)
     if arguments.command == "text":

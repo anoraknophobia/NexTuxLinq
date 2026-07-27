@@ -246,3 +246,19 @@ The generic-layout name for the second profile is
 FAN is not supported by the regular value bar or the animated single-source
 graph. The Matrix900 falls back to an incomplete CPU display for those
 combinations.
+
+### RPM telemetry sources
+
+The telemetry command supports two explicit RPM sources:
+
+```console
+nexlinqctl telemetry --rpm-source fan
+nexlinqctl telemetry --rpm-source pump
+```
+
+- `fan` reads all active non-AIO fans from OpenLinkHub and sends their rounded
+  average RPM. This is the default.
+- `pump` reads the highest RPM value from the `nct6798` hwmon chip.
+
+The Matrix900 protocol currently exposes one verified RPM telemetry field, so
+fan and pump RPM cannot yet be transmitted simultaneously.

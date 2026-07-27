@@ -257,3 +257,15 @@ Widget `0x03` displayed the FAN source correctly with its background bar.
 Widget `0x01` fell back to CPU, while widget `0x06` displayed a `C` marker
 without its normal graph. FAN support is therefore enabled only for the
 compact variant-one profile and the background-bar profile.
+
+### Linux RPM source mapping
+
+The verified telemetry report contains one generic two-byte RPM field at
+offsets 9-10. On the development system:
+
+- OpenLinkHub reports six case fans at approximately 952-958 RPM.
+- `nct6798/fan6` reports approximately 2450-2470 RPM and is treated as the
+  AIO pump source.
+
+The Linux telemetry command therefore allows either the average case-fan RPM
+or the pump RPM to populate this single protocol field.
