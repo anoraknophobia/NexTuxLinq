@@ -217,3 +217,17 @@ The firmware therefore appears to use a non-ISO, zero-based week counter.
 Linux testing confirmed layout 1 with a digital clock in slot 0 and the GPU
 System Data widget in slot 1. The display rendered the GPU source as `G51`,
 confirming both the source selector and live telemetry path.
+
+## Verified System Data profiles
+
+| Profile | Widget ID | Source behavior |
+|---------|----------:|-----------------|
+| Variant one | `0x00` | CPU, GPU, or FAN verified |
+| Variant two | `0x01` | Captured with CPU |
+| Variant three | `0x03` | Captured with CPU |
+| Combined overview | `0x04` | Fixed captured profile |
+| AIO pump speed | `0x05` | Uses the live RPM telemetry field |
+| CPU/GPU temperatures | `0x06` | Uses both live temperature fields |
+
+Widget ID `0x02` was not emitted by the official application and remains
+reserved, hidden, or otherwise unknown.

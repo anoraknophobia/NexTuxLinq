@@ -174,3 +174,21 @@ Currently supported slot widgets:
 
 Layout geometry and slot counts are verified from the Windows layout capture.
 Not every possible widget and layout combination has been validated on hardware.
+
+### Fullscreen System Data profiles
+
+Display the captured System Data widgets:
+
+```console
+nexlinqctl system-widget variant1-cpu
+nexlinqctl system-widget variant1-gpu
+nexlinqctl system-widget variant1-fan
+nexlinqctl system-widget variant2
+nexlinqctl system-widget variant3
+nexlinqctl system-widget overview
+nexlinqctl system-widget aio-pump
+nexlinqctl system-widget cpu-gpu
+```
+
+The fixed profiles reproduce exact Windows capture reports.
+Source selection has only been verified for System Data variant one.

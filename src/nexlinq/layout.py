@@ -51,10 +51,32 @@ LAYOUT_SLOT_COUNTS: dict[int, int] = {
     0x0C: 3,
 }
 
-_SYSTEM_DATA_VARIANT_ONE_OPTIONS = bytes.fromhex(
-    "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
-    "ff ff ff 32 00 ff 00 00 00 ff ff ff ff"
-)
+_SYSTEM_DATA_PROFILES: dict[SystemDataWidget, bytes] = {
+    SystemDataWidget.VARIANT_ONE: bytes.fromhex(
+        "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
+        "ff ff ff 32 00 ff 00 00 00 ff ff ff ff"
+    ),
+    SystemDataWidget.VARIANT_TWO: bytes.fromhex(
+        "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
+        "ff ff ff ff 00 00 00 00 00 ff ff ff ff"
+    ),
+    SystemDataWidget.VARIANT_THREE: bytes.fromhex(
+        "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
+        "ff ff ff 00 96 ff 00 00 00 ff ff ff ff"
+    ),
+    SystemDataWidget.OVERVIEW: bytes.fromhex(
+        "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
+        "32 00 ff 64 00 ff c8 00 ff ff ff ff ff"
+    ),
+    SystemDataWidget.AIO_PUMP_SPEED: bytes.fromhex(
+        "04 02 04 07 d0 07 d0 07 d0 07 d0 00 01 "
+        "00 00 00 00 ff c8 c8 00 ff ff ff ff ff"
+    ),
+    SystemDataWidget.CPU_GPU_TEMPERATURES: bytes.fromhex(
+        "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
+        "ff 00 00 ff ff ff c8 00 ff ff ff ff ff"
+    ),
+}
 
 
 def _validate_byte(name: str, value: int) -> int:
@@ -107,31 +129,62 @@ def build_widget_report(
     return bytes(report)
 
 
+def build_system_data_report(
+    widget: SystemDataWidget | int,
+    *,
+    source: SystemDataSource | int | None = None,
+    layout_id: int = 0x01,
+    slot_index: int = 0,
+) -> bytes:
+    """Build a captured System Data widget report."""
+    if isinstance(widget, bool):
+        raise TypeError("System Data widget must not be a boolean.")
+
+    try:
+        widget = SystemDataWidget(widget)
+    except ValueError as error:
+        raise ValueError(f"Unsupported System Data widget: {widget}.") from error
+
+    options = bytearray(_SYSTEM_DATA_PROFILES[widget])
+
+    if widget is SystemDataWidget.VARIANT_ONE:
+        if source is None:
+            source = SystemDataSource.CPU
+        if isinstance(source, bool):
+            raise TypeError("System Data source must not be a boolean.")
+
+        try:
+            source = SystemDataSource(source)
+        except ValueError as error:
+            raise ValueError(f"Unsupported System Data source: {source}.") from error
+
+        options[0] = source
+        scale = 2000 if source is SystemDataSource.FAN else 80
+        options[9:11] = scale.to_bytes(2, "big")
+    elif source is not None:
+        raise ValueError(
+            "source selection is currently verified only for variant one."
+        )
+
+    return build_widget_report(
+        layout_id=layout_id,
+        slot_index=slot_index,
+        category=WidgetCategory.SYSTEM_DATA,
+        widget_id=widget,
+        options=bytes(options),
+    )
+
+
 def build_system_data_variant_one_report(
     source: SystemDataSource | int,
     *,
     layout_id: int = 0x01,
     slot_index: int = 0,
 ) -> bytes:
-    """Build a System Data variant-one report for a selected slot."""
-    if isinstance(source, bool):
-        raise TypeError("System Data source must not be a boolean.")
-
-    try:
-        source = SystemDataSource(source)
-    except ValueError as error:
-        raise ValueError(f"Unsupported System Data source: {source}.") from error
-
-    options = bytearray(_SYSTEM_DATA_VARIANT_ONE_OPTIONS)
-    options[0] = source
-
-    scale = 2000 if source is SystemDataSource.FAN else 80
-    options[9:11] = scale.to_bytes(2, "big")
-
-    return build_widget_report(
+    """Build the verified System Data variant-one report."""
+    return build_system_data_report(
+        SystemDataWidget.VARIANT_ONE,
+        source=source,
         layout_id=layout_id,
         slot_index=slot_index,
-        category=WidgetCategory.SYSTEM_DATA,
-        widget_id=SystemDataWidget.VARIANT_ONE,
-        options=bytes(options),
     )

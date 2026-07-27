@@ -19,6 +19,8 @@ from nexlinq.device import find_matrix900
 from nexlinq.free_text import build_fullscreen_free_text_reports
 from nexlinq.layout import (
     SystemDataSource,
+    SystemDataWidget,
+    build_system_data_report,
     build_system_data_variant_one_report,
 )
 from nexlinq.presets import (
@@ -129,8 +131,32 @@ def build_parser() -> argparse.ArgumentParser:
             "system-cpu",
             "system-gpu",
             "system-fan",
+            "system-variant2",
+            "system-variant3",
+            "system-overview",
+            "system-aio-pump",
+            "system-cpu-gpu",
         ),
         help="One widget name for every slot, in slot order.",
+    )
+
+    system_widget_parser = subparsers.add_parser(
+        "system-widget",
+        help="Display a captured fullscreen System Data profile.",
+    )
+    system_widget_parser.add_argument(
+        "profile",
+        choices=(
+            "variant1-cpu",
+            "variant1-gpu",
+            "variant1-fan",
+            "variant2",
+            "variant3",
+            "overview",
+            "aio-pump",
+            "cpu-gpu",
+        ),
+        help="Select the captured System Data profile.",
     )
 
     return parser
@@ -381,6 +407,54 @@ def configure_generic_layout(
 
     return 0
 
+
+def configure_system_widget(profile_name: str) -> int:
+    """Configure a captured fullscreen System Data profile."""
+    profiles = {
+        "variant1-cpu": (
+            SystemDataWidget.VARIANT_ONE,
+            SystemDataSource.CPU,
+        ),
+        "variant1-gpu": (
+            SystemDataWidget.VARIANT_ONE,
+            SystemDataSource.GPU,
+        ),
+        "variant1-fan": (
+            SystemDataWidget.VARIANT_ONE,
+            SystemDataSource.FAN,
+        ),
+        "variant2": (SystemDataWidget.VARIANT_TWO, None),
+        "variant3": (SystemDataWidget.VARIANT_THREE, None),
+        "overview": (SystemDataWidget.OVERVIEW, None),
+        "aio-pump": (SystemDataWidget.AIO_PUMP_SPEED, None),
+        "cpu-gpu": (SystemDataWidget.CPU_GPU_TEMPERATURES, None),
+    }
+    devices = find_matrix900()
+
+    if not devices:
+        print("No Phanteks Matrix900 device found.", file=sys.stderr)
+        return 1
+
+    try:
+        widget, source = profiles[profile_name]
+        report = build_system_data_report(widget, source=source)
+        result = send_configuration_report(devices[0].device_path, report)
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+        print(f"Failed to configure System Data widget: {error}", file=sys.stderr)
+        return 1
+
+    response = (
+        "echo"
+        if result.response == result.report
+        else "none" if result.response is None else "different"
+    )
+
+    print(f"Fullscreen System Data profile enabled: {profile_name}.")
+    print(f"Device: {devices[0].device_path}")
+    print(f"Response: {response}")
+    print("Sent:", result.report.hex(" "))
+    return 0
+
 def main() -> int:
     """Run the nexlinqctl command-line interface."""
     arguments = build_parser().parse_args()
@@ -403,6 +477,8 @@ def main() -> int:
         return configure_clock_system_layout(arguments.source)
     if arguments.command == "layout":
         return configure_generic_layout(arguments.number, arguments.widgets)
+    if arguments.command == "system-widget":
+        return configure_system_widget(arguments.profile)
     return 2
 
 

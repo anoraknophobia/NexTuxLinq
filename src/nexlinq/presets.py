@@ -8,7 +8,8 @@ from nexlinq.clock import TimeAndDateWidget, build_time_and_date_report
 from nexlinq.layout import (
     LAYOUT_SLOT_COUNTS,
     SystemDataSource,
-    build_system_data_variant_one_report,
+    SystemDataWidget,
+    build_system_data_report,
 )
 
 USER_LAYOUT_TO_INTERNAL_ID: dict[int, int] = {
@@ -33,10 +34,18 @@ _TIME_WIDGETS: dict[str, TimeAndDateWidget] = {
     "week": TimeAndDateWidget.WEEK_NUMBER,
 }
 
-_SYSTEM_WIDGETS: dict[str, SystemDataSource] = {
-    "system-cpu": SystemDataSource.CPU,
-    "system-gpu": SystemDataSource.GPU,
-    "system-fan": SystemDataSource.FAN,
+_SYSTEM_WIDGETS: dict[
+    str,
+    tuple[SystemDataWidget, SystemDataSource | None],
+] = {
+    "system-cpu": (SystemDataWidget.VARIANT_ONE, SystemDataSource.CPU),
+    "system-gpu": (SystemDataWidget.VARIANT_ONE, SystemDataSource.GPU),
+    "system-fan": (SystemDataWidget.VARIANT_ONE, SystemDataSource.FAN),
+    "system-variant2": (SystemDataWidget.VARIANT_TWO, None),
+    "system-variant3": (SystemDataWidget.VARIANT_THREE, None),
+    "system-overview": (SystemDataWidget.OVERVIEW, None),
+    "system-aio-pump": (SystemDataWidget.AIO_PUMP_SPEED, None),
+    "system-cpu-gpu": (SystemDataWidget.CPU_GPU_TEMPERATURES, None),
 }
 
 
@@ -83,9 +92,11 @@ def build_layout_reports(
             continue
 
         if widget_name in _SYSTEM_WIDGETS:
+            system_widget, source = _SYSTEM_WIDGETS[widget_name]
             reports.append(
-                build_system_data_variant_one_report(
-                    _SYSTEM_WIDGETS[widget_name],
+                build_system_data_report(
+                    system_widget,
+                    source=source,
                     layout_id=internal_layout_id,
                     slot_index=slot_index,
                 )
