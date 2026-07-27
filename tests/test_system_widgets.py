@@ -50,17 +50,21 @@ class SystemDataProfileTests(unittest.TestCase):
         self.assertEqual(report[9], 0x02)
         self.assertEqual(report[18:20], bytes.fromhex("00 50"))
 
-    def test_bar_widgets_reject_unverified_fan(self) -> None:
-        for widget in (
-            SystemDataWidget.VALUE_BAR,
+    def test_value_bar_rejects_unverified_fan(self) -> None:
+        with self.assertRaises(ValueError):
+            build_system_data_report(
+                SystemDataWidget.VALUE_BAR,
+                source=SystemDataSource.FAN,
+            )
+
+    def test_background_bar_accepts_verified_fan(self) -> None:
+        report = build_system_data_report(
             SystemDataWidget.VALUE_BACKGROUND_BAR,
-        ):
-            with self.subTest(widget=widget):
-                with self.assertRaises(ValueError):
-                    build_system_data_report(
-                        widget,
-                        source=SystemDataSource.FAN,
-                    )
+            source=SystemDataSource.FAN,
+        )
+
+        self.assertEqual(report[9], 0x04)
+        self.assertEqual(report[18:20], bytes.fromhex("07 d0"))
 
     def test_overview_matches_capture(self) -> None:
         self.assert_profile(

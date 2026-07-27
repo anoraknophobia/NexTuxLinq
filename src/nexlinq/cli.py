@@ -135,6 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
             "system-bar-gpu",
             "system-background-bar-cpu",
             "system-background-bar-gpu",
+            "system-background-bar-fan",
             "system-variant2",
             "system-variant3",
             "system-overview",
@@ -159,6 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
             "bar-gpu",
             "background-bar-cpu",
             "background-bar-gpu",
+            "background-bar-fan",
             "variant2",
             "variant3",
             "overview",
@@ -448,6 +450,10 @@ def configure_system_widget(profile_name: str) -> int:
         "background-bar-gpu": (
             SystemDataWidget.VALUE_BACKGROUND_BAR,
             SystemDataSource.GPU,
+        ),
+        "background-bar-fan": (
+            SystemDataWidget.VALUE_BACKGROUND_BAR,
+            SystemDataSource.FAN,
         ),
         "variant2": (
             SystemDataWidget.VALUE_BAR,

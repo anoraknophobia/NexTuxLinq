@@ -57,6 +57,10 @@ _SYSTEM_WIDGETS: dict[
         SystemDataWidget.VALUE_BACKGROUND_BAR,
         SystemDataSource.GPU,
     ),
+    "system-background-bar-fan": (
+        SystemDataWidget.VALUE_BACKGROUND_BAR,
+        SystemDataSource.FAN,
+    ),
     "system-variant2": (
         SystemDataWidget.VALUE_BAR,
         SystemDataSource.CPU,

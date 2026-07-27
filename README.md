@@ -229,3 +229,20 @@ The equivalent generic-layout names are:
 
 The legacy names `variant2` and `variant3` remain CPU-profile aliases.
 FAN source selection is not yet verified for these widgets.
+
+
+### FAN source support
+
+The following fullscreen FAN profiles are hardware-verified:
+
+```console
+nexlinqctl system-widget variant1-fan
+nexlinqctl system-widget background-bar-fan
+```
+
+The generic-layout name for the second profile is
+`system-background-bar-fan`.
+
+FAN is not supported by the regular value bar or the animated single-source
+graph. The Matrix900 falls back to an incomplete CPU display for those
+combinations.

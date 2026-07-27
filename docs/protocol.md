@@ -248,3 +248,12 @@ value with a bar and widget ID `0x03` displays one selected value with a
 background bar. Offset 9 selects CPU with `0x01` or GPU with `0x02`.
 Both widgets changed their visible marker from `C` to `G` when only this source
 byte was changed. FAN source `0x04` remains unverified for these profiles.
+
+
+### Profile-dependent FAN source behavior
+
+Linux hardware testing showed that source `0x04` is not universally supported.
+Widget `0x03` displayed the FAN source correctly with its background bar.
+Widget `0x01` fell back to CPU, while widget `0x06` displayed a `C` marker
+without its normal graph. FAN support is therefore enabled only for the
+compact variant-one profile and the background-bar profile.

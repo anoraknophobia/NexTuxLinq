@@ -168,9 +168,14 @@ def build_system_data_report(
         except ValueError as error:
             raise ValueError(f"Unsupported System Data source: {source}.") from error
 
+        fan_capable_widgets = {
+            SystemDataWidget.VARIANT_ONE,
+            SystemDataWidget.VALUE_BACKGROUND_BAR,
+        }
+
         if (
             source is SystemDataSource.FAN
-            and widget is not SystemDataWidget.VARIANT_ONE
+            and widget not in fan_capable_widgets
         ):
             raise ValueError(
                 "This System Data widget is currently verified only for "
