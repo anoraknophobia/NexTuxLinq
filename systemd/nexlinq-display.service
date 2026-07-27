@@ -1,0 +1,15 @@
+[Unit]
+Description=Phanteks Matrix900 dynamic default display
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nexlinq-linux
+ExecStart=%h/nexlinq-linux/.venv/bin/python -m nexlinq.default_display
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
