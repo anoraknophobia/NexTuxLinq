@@ -21,7 +21,10 @@ from nexlinq.layout import (
     SystemDataSource,
     build_system_data_variant_one_report,
 )
-from nexlinq.presets import build_two_slot_clock_system_reports
+from nexlinq.presets import (
+    build_layout_reports,
+    build_two_slot_clock_system_reports,
+)
 from nexlinq.telemetry import collect_default_telemetry, send_telemetry
 
 
@@ -103,6 +106,31 @@ def build_parser() -> argparse.ArgumentParser:
         "source",
         choices=("cpu", "gpu", "fan"),
         help="Select the System Data source for the second slot.",
+    )
+
+    layout_parser = subparsers.add_parser(
+        "layout",
+        help="Configure a known Matrix900 layout and all of its slots.",
+    )
+    layout_parser.add_argument(
+        "number",
+        type=int,
+        choices=range(1, 13),
+        help="User-facing NexLinq layout number from 1 to 12.",
+    )
+    layout_parser.add_argument(
+        "widgets",
+        nargs="+",
+        choices=(
+            "digital",
+            "graphical",
+            "date",
+            "week",
+            "system-cpu",
+            "system-gpu",
+            "system-fan",
+        ),
+        help="One widget name for every slot, in slot order.",
     )
 
     return parser
@@ -320,6 +348,39 @@ def configure_clock_system_layout(source_name: str) -> int:
 
     return 0
 
+
+def configure_generic_layout(
+    layout_number: int,
+    widget_names: list[str],
+) -> int:
+    """Configure all slots of a known Matrix900 layout."""
+    devices = find_matrix900()
+
+    if not devices:
+        print("No Phanteks Matrix900 device found.", file=sys.stderr)
+        return 1
+
+    try:
+        reports = build_layout_reports(layout_number, widget_names)
+        results = send_report_sequence(devices[0].device_path, reports)
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        print(f"Failed to configure layout: {error}", file=sys.stderr)
+        return 1
+
+    print(f"User layout {layout_number} enabled.")
+    print(f"Device: {devices[0].device_path}")
+
+    for slot_index, result in enumerate(results):
+        response = (
+            "echo"
+            if result.response == result.report
+            else "none" if result.response is None else "different"
+        )
+        print(f"Slot {slot_index} response: {response}")
+        print(f"Slot {slot_index} sent:", result.report.hex(" "))
+
+    return 0
+
 def main() -> int:
     """Run the nexlinqctl command-line interface."""
     arguments = build_parser().parse_args()
@@ -340,6 +401,8 @@ def main() -> int:
         return configure_time_and_date_widget(arguments.widget)
     if arguments.command == "layout-clock-system":
         return configure_clock_system_layout(arguments.source)
+    if arguments.command == "layout":
+        return configure_generic_layout(arguments.number, arguments.widgets)
     return 2
 
 

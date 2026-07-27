@@ -150,3 +150,27 @@ nexlinqctl layout-clock-system fan
 ```
 
 This preset uses user-facing layout 1, internal layout ID `0x02`.
+
+### Generic multi-slot layouts
+
+Configure a user-facing NexLinq layout by supplying exactly one widget for
+every slot, in visual slot order:
+
+```console
+nexlinqctl layout 1 digital system-gpu
+nexlinqctl layout 2 digital system-cpu system-gpu
+nexlinqctl layout 3 digital date system-cpu system-gpu
+```
+
+Currently supported slot widgets:
+
+- `digital`
+- `graphical`
+- `date`
+- `week`
+- `system-cpu`
+- `system-gpu`
+- `system-fan`
+
+Layout geometry and slot counts are verified from the Windows layout capture.
+Not every possible widget and layout combination has been validated on hardware.

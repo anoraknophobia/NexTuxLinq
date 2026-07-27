@@ -196,3 +196,24 @@ is assigned to slot 0 of different layouts.
 During Linux validation on 2026-07-27, the date widget displayed `27` while
 the week-number widget displayed `30`. The ISO week for that date is `31`.
 The firmware therefore appears to use a non-ISO, zero-based week counter.
+
+## User-facing layout mapping
+
+| NexLinq layout | Internal ID | Slots |
+|---------------:|------------:|------:|
+| 1 | `0x02` | 2 |
+| 2 | `0x03` | 3 |
+| 3 | `0x04` | 4 |
+| 4 | `0x05` | 4 |
+| 5 | `0x06` | 5 |
+| 6 | `0x07` | 5 |
+| 7 | `0x08` | 5 |
+| 8 | `0x09` | 6 |
+| 9 | `0x0a` | 3 |
+| 10 | `0x0b` | 4 |
+| 11 | `0x0c` | 3 |
+| 12 | `0x01` | 1 |
+
+Linux testing confirmed layout 1 with a digital clock in slot 0 and the GPU
+System Data widget in slot 1. The display rendered the GPU source as `G51`,
+confirming both the source selector and live telemetry path.
