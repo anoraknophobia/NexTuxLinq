@@ -28,6 +28,7 @@ from nexlinq.presets import (
     build_two_slot_clock_system_reports,
 )
 from nexlinq.telemetry import collect_default_telemetry, send_telemetry
+from nexlinq.writer_lock import WriterLock, WriterLockHeldError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -521,28 +522,36 @@ def main() -> int:
 
     if arguments.command in (None, "detect"):
         return detect_devices()
-    if arguments.command == "brightness":
-        return set_device_brightness(arguments.percentage)
-    if arguments.command == "telemetry":
-        return update_telemetry(
-            arguments.watch,
-            arguments.interval,
-            arguments.rpm_source,
-        )
-    if arguments.command == "system-data":
-        return configure_system_data(arguments.source)
-    if arguments.command == "text":
-        return configure_free_text(arguments.value)
-    if arguments.command == "clock":
-        return configure_digital_clock()
-    if arguments.command == "time-widget":
-        return configure_time_and_date_widget(arguments.widget)
-    if arguments.command == "layout-clock-system":
-        return configure_clock_system_layout(arguments.source)
-    if arguments.command == "layout":
-        return configure_generic_layout(arguments.number, arguments.widgets)
-    if arguments.command == "system-widget":
-        return configure_system_widget(arguments.profile)
+    try:
+        with WriterLock.from_environment(owner=f"nexlinqctl {arguments.command}"):
+            if arguments.command == "brightness":
+                return set_device_brightness(arguments.percentage)
+            if arguments.command == "telemetry":
+                return update_telemetry(
+                    arguments.watch,
+                    arguments.interval,
+                    arguments.rpm_source,
+                )
+            if arguments.command == "system-data":
+                return configure_system_data(arguments.source)
+            if arguments.command == "text":
+                return configure_free_text(arguments.value)
+            if arguments.command == "clock":
+                return configure_digital_clock()
+            if arguments.command == "time-widget":
+                return configure_time_and_date_widget(arguments.widget)
+            if arguments.command == "layout-clock-system":
+                return configure_clock_system_layout(arguments.source)
+            if arguments.command == "layout":
+                return configure_generic_layout(
+                    arguments.number,
+                    arguments.widgets,
+                )
+            if arguments.command == "system-widget":
+                return configure_system_widget(arguments.profile)
+    except WriterLockHeldError as error:
+        print(f"Cannot write to Matrix900: {error}", file=sys.stderr)
+        return 1
     return 2
 
 

@@ -2,8 +2,10 @@
 
 import os
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from nexlinq.transport import write_report
+from nexlinq.transport import HidrawConnection, write_report
 
 
 class WriteReportTests(unittest.TestCase):
@@ -39,6 +41,36 @@ class WriteReportTests(unittest.TestCase):
         finally:
             os.close(read_fd)
             os.close(write_fd)
+
+
+class HidrawConnectionTests(unittest.TestCase):
+    """Verify persistent hidraw connection ownership and transactions."""
+
+    def test_reuses_one_descriptor_until_closed(self) -> None:
+        report = bytes(range(64))
+        with (
+            patch("nexlinq.transport.os.open", return_value=42) as open_mock,
+            patch("nexlinq.transport.os.close") as close_mock,
+            patch("nexlinq.transport.write_report") as write_mock,
+            patch(
+                "nexlinq.transport.select.select",
+                return_value=([42], [], []),
+            ),
+            patch(
+                "nexlinq.transport.read_report",
+                return_value=report,
+            ),
+        ):
+            connection = HidrawConnection(Path("/dev/fake"))
+            first = connection.transact(report)
+            second = connection.transact(report)
+            connection.close()
+
+        open_mock.assert_called_once()
+        self.assertEqual(write_mock.call_count, 2)
+        self.assertEqual(first, report)
+        self.assertEqual(second, report)
+        close_mock.assert_called_once_with(42)
 
 
 if __name__ == "__main__":

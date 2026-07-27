@@ -4,11 +4,42 @@ from __future__ import annotations
 
 import errno
 import os
+import select
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 HID_REPORT_SIZE = 64
+
+
+class HidrawConnection:
+    """One persistent non-blocking hidraw connection."""
+
+    def __init__(self, device_path: Path) -> None:
+        flags = os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC
+        self.device_path = Path(device_path)
+        self.file_descriptor: int | None = os.open(self.device_path, flags)
+
+    def transact(self, report: bytes, timeout: float = 1.0) -> bytes | None:
+        """Write one report and read its response when available."""
+        descriptor = self.file_descriptor
+        if descriptor is None:
+            raise OSError("hidraw connection is closed.")
+        write_report(descriptor, report)
+        readable, _, _ = select.select([descriptor], [], [], timeout)
+        return read_report(descriptor) if readable else None
+
+    def close(self) -> None:
+        descriptor = self.file_descriptor
+        if descriptor is not None:
+            self.file_descriptor = None
+            os.close(descriptor)
+
+    def __enter__(self) -> HidrawConnection:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
 
 @contextmanager

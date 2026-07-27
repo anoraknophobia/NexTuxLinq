@@ -39,3 +39,7 @@ python -m nexlinq.default_display
 ```
 
 The user service is installed from `systemd/nexlinq-display.service`. It must not run concurrently with another process that writes HID reports to the Matrix900.
+
+The standalone command now participates in the same advisory writer lock as
+`nexlinqd` and direct `nexlinqctl` mutations. See
+[`daemon-core.md`](daemon-core.md) for the current single-writer architecture.

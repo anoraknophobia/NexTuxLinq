@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from datetime import datetime
 from typing import Sequence
@@ -28,6 +29,7 @@ from nexlinq.rendering import (
     set_region_pixel,
     text_width,
 )
+from nexlinq.writer_lock import WriterLock, WriterLockHeldError
 
 _DEFAULT_LAYOUT = default_profile().layout
 FRONT_CLOCK_WIDTH = _DEFAULT_LAYOUT.front_clock_width
@@ -65,7 +67,7 @@ def upload_frame(device_path: str, frame: FrameBuffer) -> None:
         raise RuntimeError(f"Creator upload echoed {echoed}/{len(reports)} reports")
 
 
-def run(*, once: bool = False, fps: float = DEFAULT_FPS) -> None:
+def _run_with_lock_held(*, once: bool = False, fps: float = DEFAULT_FPS) -> None:
     if fps <= 0:
         raise ValueError("FPS must be positive")
 
@@ -98,6 +100,12 @@ def run(*, once: bool = False, fps: float = DEFAULT_FPS) -> None:
             next_frame_at = time.monotonic()
 
 
+def run(*, once: bool = False, fps: float = DEFAULT_FPS) -> None:
+    """Run the legacy direct display while holding the project writer lock."""
+    with WriterLock.from_environment(owner="nexlinq.default_display"):
+        _run_with_lock_held(once=once, fps=fps)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Render the default dynamic Matrix900 Creator layout"
@@ -118,7 +126,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    run(once=args.once, fps=args.fps)
+    try:
+        run(once=args.once, fps=args.fps)
+    except WriterLockHeldError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     return 0
 
 

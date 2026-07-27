@@ -5,11 +5,33 @@ from __future__ import annotations
 import select
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol
 
 from nexlinq.controller import CommandResult
 from nexlinq.layout import COMMAND_WIDGET_CONFIGURATION
 from nexlinq.protocol import HID_REPORT_SIZE, REPORT_ID
 from nexlinq.transport import open_hidraw, read_report, write_report
+
+
+class ReportConnection(Protocol):
+    """Persistent transport accepted by report-sequence execution."""
+
+    def transact(self, report: bytes, timeout: float = 1.0) -> bytes | None: ...
+
+
+def send_report_sequence_on_connection(
+    connection: ReportConnection,
+    reports: Sequence[bytes],
+    timeout: float = 1.0,
+) -> tuple[CommandResult, ...]:
+    """Send a complete validated sequence on an existing connection."""
+    validated_reports = tuple(_validate_report(report) for report in reports)
+    if not validated_reports:
+        raise ValueError("at least one report is required.")
+    return tuple(
+        CommandResult(report=report, response=connection.transact(report, timeout))
+        for report in validated_reports
+    )
 
 
 def _validate_report(report: bytes) -> bytes:
