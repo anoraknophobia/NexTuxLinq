@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nexlinq-linux"
+version = "0.1.0"
+description = "Open-source Linux control software for Phanteks NexLinq devices"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "nexlinq-linux contributors" }]
+dependencies = []
+
+[project.scripts]
+nexlinqctl = "nexlinq.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nexlinq"]
