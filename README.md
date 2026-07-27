@@ -101,3 +101,14 @@ nexlinqctl system-data fan
 
 This command currently uses user-facing layout 12, internal layout ID `0x01`.
 The CPU, GPU, and FAN source identifiers are verified from Windows captures.
+
+### Fullscreen free text
+
+Display ASCII text using the captured fullscreen Time and Date widget:
+
+```console
+nexlinqctl text "NEXLINQ"
+```
+
+The current encoder supports up to 49 ASCII bytes.
+Unicode encoding and the exact maximum firmware length are not yet verified.

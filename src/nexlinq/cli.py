@@ -6,9 +6,13 @@ import argparse
 import sys
 import time
 
-from nexlinq.configuration import send_configuration_report
+from nexlinq.configuration import (
+    send_configuration_report,
+    send_report_sequence,
+)
 from nexlinq.controller import set_brightness
 from nexlinq.device import find_matrix900
+from nexlinq.free_text import build_fullscreen_free_text_reports
 from nexlinq.layout import (
     SystemDataSource,
     build_system_data_variant_one_report,
@@ -60,6 +64,15 @@ def build_parser() -> argparse.ArgumentParser:
         "source",
         choices=("cpu", "gpu", "fan"),
         help="Select the value displayed by System Data variant one.",
+    )
+
+    text_parser = subparsers.add_parser(
+        "text",
+        help="Display fullscreen ASCII text.",
+    )
+    text_parser.add_argument(
+        "value",
+        help="ASCII text to show on the Matrix900.",
     )
 
     return parser
@@ -176,6 +189,36 @@ def configure_system_data(source_name: str) -> int:
     print("Sent:", result.report.hex(" "))
     return 0
 
+
+def configure_free_text(value: str) -> int:
+    """Configure captured fullscreen free text."""
+    devices = find_matrix900()
+
+    if not devices:
+        print("No Phanteks Matrix900 device found.", file=sys.stderr)
+        return 1
+
+    try:
+        reports = build_fullscreen_free_text_reports(value)
+        results = send_report_sequence(devices[0].device_path, reports)
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        print(f"Failed to configure free text: {error}", file=sys.stderr)
+        return 1
+
+    print(f"Fullscreen text set to: {value}")
+    print(f"Device: {devices[0].device_path}")
+
+    for index, result in enumerate(results, start=1):
+        response = (
+            "echo"
+            if result.response == result.report
+            else "none" if result.response is None else "different"
+        )
+        print(f"Report {index} response: {response}")
+        print(f"Report {index} sent:", result.report.hex(" "))
+
+    return 0
+
 def main() -> int:
     """Run the nexlinqctl command-line interface."""
     arguments = build_parser().parse_args()
@@ -188,6 +231,8 @@ def main() -> int:
         return update_telemetry(arguments.watch, arguments.interval)
     if arguments.command == "system-data":
         return configure_system_data(arguments.source)
+    if arguments.command == "text":
+        return configure_free_text(arguments.value)
     return 2
 
 

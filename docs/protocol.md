@@ -138,3 +138,21 @@ Command `0x03` configures one widget slot per report.
 | 9+ | variable | Widget-specific options |
 
 The meaning of `0x22` is not yet known.
+
+## Free-text data report
+
+Command `0x02` transfers text used by the Time and Date free-text widget.
+The captured `NEXLINQ` report uses:
+
+| Offset | Size | Meaning |
+|------:|-----:|---------|
+| 0 | 1 byte | HID report ID `0x01` |
+| 1 | 1 byte | Command `0x02` |
+| 5 | 1 byte | Observed text length plus one |
+| 6 | 1 byte | Observed value `0x00` |
+| 7 | variable | ASCII text |
+| remaining text field | variable | Filled with `0xff` |
+
+Linux hardware testing confirmed that command `0x03` immediately applies a
+System Data source change. Command `0x05` was not required for that path.
+Free text still requires a separate live validation of the `0x02`, `0x03` sequence.
