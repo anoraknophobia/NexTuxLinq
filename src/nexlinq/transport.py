@@ -31,3 +31,19 @@ def read_report(file_descriptor: int) -> bytes | None:
         if error.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
             return None
         raise
+
+
+def write_report(file_descriptor: int, report: bytes) -> None:
+    """Write exactly one validated 64-byte HID output report."""
+    if not isinstance(report, bytes):
+        raise TypeError("HID report must be bytes.")
+
+    if len(report) != HID_REPORT_SIZE:
+        raise ValueError(f"HID report must be exactly {HID_REPORT_SIZE} bytes.")
+
+    bytes_written = os.write(file_descriptor, report)
+
+    if bytes_written != HID_REPORT_SIZE:
+        raise OSError(
+            f"Incomplete HID report write: {bytes_written}/{HID_REPORT_SIZE} bytes."
+        )
