@@ -6,8 +6,13 @@ import argparse
 import sys
 import time
 
+from nexlinq.configuration import send_configuration_report
 from nexlinq.controller import set_brightness
 from nexlinq.device import find_matrix900
+from nexlinq.layout import (
+    SystemDataSource,
+    build_system_data_variant_one_report,
+)
 from nexlinq.telemetry import collect_default_telemetry, send_telemetry
 
 
@@ -45,6 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help="Update interval in seconds when using --watch.",
+    )
+
+    system_data_parser = subparsers.add_parser(
+        "system-data",
+        help="Configure the fullscreen System Data widget.",
+    )
+    system_data_parser.add_argument(
+        "source",
+        choices=("cpu", "gpu", "fan"),
+        help="Select the value displayed by System Data variant one.",
     )
 
     return parser
@@ -132,6 +147,35 @@ def update_telemetry(watch: bool, interval: float) -> int:
         return 1
 
 
+
+def configure_system_data(source_name: str) -> int:
+    """Configure the verified fullscreen System Data widget."""
+    devices = find_matrix900()
+
+    if not devices:
+        print("No Phanteks Matrix900 device found.", file=sys.stderr)
+        return 1
+
+    try:
+        source = SystemDataSource[source_name.upper()]
+        report = build_system_data_variant_one_report(source)
+        result = send_configuration_report(devices[0].device_path, report)
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        print(f"Failed to configure System Data: {error}", file=sys.stderr)
+        return 1
+
+    response = (
+        "echo"
+        if result.response == result.report
+        else "none" if result.response is None else "different"
+    )
+
+    print(f"System Data source set to {source_name.upper()}.")
+    print(f"Device: {devices[0].device_path}")
+    print(f"Response: {response}")
+    print("Sent:", result.report.hex(" "))
+    return 0
+
 def main() -> int:
     """Run the nexlinqctl command-line interface."""
     arguments = build_parser().parse_args()
@@ -142,6 +186,8 @@ def main() -> int:
         return set_device_brightness(arguments.percentage)
     if arguments.command == "telemetry":
         return update_telemetry(arguments.watch, arguments.interval)
+    if arguments.command == "system-data":
+        return configure_system_data(arguments.source)
     return 2
 
 

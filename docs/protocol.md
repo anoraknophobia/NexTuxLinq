@@ -120,3 +120,21 @@ Linux hardware testing confirmed the following fields in command `0x01`:
 
 The report uses payload-length marker `0x14` at offset 5 and `0x07` at offset 25.
 The Matrix900 echoes the complete telemetry report after receiving it.
+
+## Widget configuration report
+
+Command `0x03` configures one widget slot per report.
+
+| Offset | Size | Meaning |
+|------:|-----:|---------|
+| 0 | 1 byte | HID report ID `0x01` |
+| 1 | 1 byte | Command `0x03` |
+| 2 | 1 byte | Total slot count for the selected layout |
+| 4 | 1 byte | Zero-based slot index |
+| 5 | 1 byte | Observed constant `0x22` |
+| 6 | 1 byte | Internal layout ID |
+| 7 | 1 byte | Widget category |
+| 8 | 1 byte | Widget ID |
+| 9+ | variable | Widget-specific options |
+
+The meaning of `0x22` is not yet known.

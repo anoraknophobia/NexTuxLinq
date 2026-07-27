@@ -88,3 +88,16 @@ The initial Linux sensor mapping uses:
 - Fan or pump speed: highest RPM reported by `nct6798`
 
 This mapping is currently hardware-specific and will become configurable.
+
+### System Data widget source
+
+Configure the verified fullscreen System Data variant:
+
+```console
+nexlinqctl system-data cpu
+nexlinqctl system-data gpu
+nexlinqctl system-data fan
+```
+
+This command currently uses user-facing layout 12, internal layout ID `0x01`.
+The CPU, GPU, and FAN source identifiers are verified from Windows captures.
