@@ -1,0 +1,14 @@
+[Unit]
+Description=Phanteks Matrix900 telemetry updater
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/nexlinq-linux/.venv/bin/nexlinqctl telemetry --watch
+Restart=on-failure
+RestartSec=3
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target
