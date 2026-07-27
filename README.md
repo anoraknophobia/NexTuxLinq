@@ -51,3 +51,18 @@ MIT
 ## Trademark notice
 
 Phanteks and NexLinq are trademarks of their respective owners. This project is an independent community project and is not affiliated with or endorsed by Phanteks.
+
+## Current Linux control support
+
+The Linux implementation can currently:
+
+- Detect connected Phanteks Matrix900 devices through `hidraw`.
+- Set brightness from 10% through 100% in ten-percent steps.
+- Read and display the Matrix900 response report.
+
+Examples:
+
+```console
+nexlinqctl detect
+nexlinqctl brightness 50
+```

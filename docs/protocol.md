@@ -96,3 +96,13 @@ round(60 + (percentage - 1) * 120 / 99)
 The official NexLinq application exposes brightness in ten-percent steps from 10% through 100%.
 
 Changing the slider alone does not update the display. The setting is transmitted only after selecting **Send to Screen**.
+
+### Linux verification
+
+Direct Linux tests confirmed that report `0x04` is applied immediately without transmitting reports `0x05` or `0x03`.
+
+- Sending the known 10% report while the display was already at 10% left the visible brightness unchanged.
+- Sending the known 100% report immediately increased the visible brightness.
+- The Matrix900 echoed each complete 64-byte report through its interrupt IN endpoint.
+
+Reports `0x05` and `0x03` are therefore not required for brightness-only changes. They remain part of the official applications broader **Send to Screen** workflow.
