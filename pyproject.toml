@@ -10,7 +10,18 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "nexlinq-linux contributors" }]
-dependencies = []
+dependencies = [
+    "fastapi>=0.115,<0.116",
+    "jinja2>=3.1,<4",
+    "pydantic>=2.10,<3",
+    "uvicorn>=0.34,<0.35",
+]
+
+[project.optional-dependencies]
+test = [
+    "hatchling>=1.27,<2",
+    "httpx>=0.28,<1",
+]
 
 [project.scripts]
 nexlinqctl = "nexlinq.cli:main"
@@ -18,3 +29,8 @@ nexlinqd = "nexlinq.daemon:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nexlinq"]
+artifacts = [
+    "src/nexlinq/templates/*.html",
+    "src/nexlinq/static/*.css",
+    "src/nexlinq/static/*.js",
+]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from nexlinq.defaults import default_configuration, default_profile
 from nexlinq.device_worker import DeviceWorker, DeviceWorkerSnapshot
 from nexlinq.models import ConfigurationDocument, ProfileConfig
 from nexlinq.rendering import render_profile_at_elapsed
-from nexlinq.service import NexLinqService
+from nexlinq.service import NexLinqService, WorkerSubmissionError
 from nexlinq.state import DaemonState
 from nexlinq.writer_lock import WriterLock
 
@@ -21,9 +22,13 @@ from nexlinq.writer_lock import WriterLock
 class FakeStore:
     def __init__(self, configuration: ConfigurationDocument) -> None:
         self.configuration = configuration
+        self.saved: list[ConfigurationDocument] = []
 
     def load(self) -> ConfigLoadResult:
         return ConfigLoadResult(self.configuration)
+
+    def save(self, configuration: ConfigurationDocument) -> None:
+        self.saved.append(configuration)
 
 
 class FakeWorker:
@@ -48,6 +53,9 @@ class FakeWorker:
 
     def stop(self, timeout: float | None = 5.0) -> None:
         self.stopped = True
+
+    def snapshot(self) -> DeviceWorkerSnapshot:
+        return DeviceWorkerSnapshot(running=self.started and not self.stopped)
 
 
 class Monotonic:
@@ -312,5 +320,446 @@ def test_late_startup_failure_cancels_render_task_and_stops_worker() -> None:
         assert len(tasks) == 1
         assert tasks[0].cancelled()
         assert service.snapshot().lifecycle_state == "failed"
+
+    asyncio.run(scenario())
+
+
+def test_unexpected_worker_exit_signals_service_failure() -> None:
+    async def scenario() -> None:
+        worker = FakeWorker()
+        block = asyncio.Event()
+
+        async def sleep(delay: float) -> None:
+            block.set()
+            await asyncio.Future()
+
+        service = NexLinqService(
+            config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            monotonic=Monotonic(),
+            sleep=sleep,
+        )
+        await service.start()
+        await asyncio.wait_for(block.wait(), 1)
+        failure = asyncio.create_task(service.wait_for_worker_failure())
+        service.handle_worker_snapshot(DeviceWorkerSnapshot(running=False))
+        await asyncio.wait_for(failure, 1)
+
+        assert service.snapshot().lifecycle_state == "failed"
+        assert service.snapshot().rendering_state == "failed"
+        assert service.snapshot().last_display_error == (
+            "Matrix900 device worker stopped unexpectedly."
+        )
+        await service.stop()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "failure_phase",
+    ["after-thread-start", "during-initialization", "before-running"],
+)
+def test_worker_exit_during_startup_rolls_back(
+    failure_phase: str,
+) -> None:
+    class StartupExitWorker(FakeWorker):
+        def start(self) -> None:
+            super().start()
+            if failure_phase == "after-thread-start":
+                self.stopped = True
+                self.callback(DeviceWorkerSnapshot(running=False))
+
+        def set_brightness(self, percentage: int, revision: int = 0) -> None:
+            if failure_phase == "during-initialization":
+                self.stopped = True
+                self.callback(DeviceWorkerSnapshot(running=False))
+            super().set_brightness(percentage, revision)
+
+    async def scenario() -> None:
+        worker = StartupExitWorker()
+
+        def create_task(coroutine):
+            if failure_phase == "before-running":
+                worker.stopped = True
+                worker.callback(DeviceWorkerSnapshot(running=False))
+            return asyncio.create_task(coroutine)
+
+        service = NexLinqService(
+            config_store=FakeStore(configuration_with(brightness=50)),  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            task_factory=create_task,
+        )
+        with pytest.raises(RuntimeError, match="worker stopped"):
+            await service.start()
+        assert worker.stopped
+        assert not service.owns_resources
+        assert service.snapshot().lifecycle_state == "failed"
+        assert service.snapshot().last_display_error == (
+            "NexLinq service startup failed."
+        )
+
+    asyncio.run(scenario())
+
+
+def test_worker_exit_between_verification_and_running_publication_rolls_back() -> None:
+    verification_reached = threading.Event()
+    callback_started = threading.Event()
+    exit_thread: threading.Thread | None = None
+
+    class PublicationBarrierState(DaemonState):
+        def update(self, **changes: object):
+            if changes.get("lifecycle_state") == "running":
+                verification_reached.set()
+                assert callback_started.wait(1)
+            return super().update(**changes)
+
+    class BarrierWorker(FakeWorker):
+        def start(self) -> None:
+            nonlocal exit_thread
+            super().start()
+
+            def exit_after_verification() -> None:
+                assert verification_reached.wait(1)
+                self.stopped = True
+                callback_started.set()
+                self.callback(DeviceWorkerSnapshot(running=False))
+
+            exit_thread = threading.Thread(target=exit_after_verification)
+            exit_thread.start()
+
+    async def scenario() -> None:
+        worker = BarrierWorker()
+
+        async def sleep(delay: float) -> None:
+            await asyncio.Future()
+
+        service = NexLinqService(
+            config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            state=PublicationBarrierState(),
+            sleep=sleep,
+        )
+        with pytest.raises(RuntimeError, match="worker stopped"):
+            await service.start()
+        assert not service.owns_resources
+        assert service.snapshot().lifecycle_state == "failed"
+        assert service.render_task is None
+
+    asyncio.run(scenario())
+    assert exit_thread is not None
+    exit_thread.join(1)
+    assert not exit_thread.is_alive()
+
+
+def test_worker_exit_immediately_after_running_revokes_service_state() -> None:
+    class ExitAfterRunningState(DaemonState):
+        worker: FakeWorker
+
+        def update(self, **changes: object):
+            snapshot = super().update(**changes)
+            if changes.get("lifecycle_state") == "running":
+                self.worker.stopped = True
+                self.worker.callback(DeviceWorkerSnapshot(running=False))
+            return snapshot
+
+    async def scenario() -> None:
+        worker = FakeWorker()
+        state = ExitAfterRunningState()
+        state.worker = worker
+        service = NexLinqService(
+            config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            state=state,
+        )
+        with pytest.raises(RuntimeError, match="worker stopped"):
+            await service.start()
+        assert service.snapshot().lifecycle_state == "failed"
+        assert not service.owns_resources
+
+    asyncio.run(scenario())
+
+
+def test_concurrent_applies_preserve_publication_and_command_order() -> None:
+    async def scenario() -> None:
+        worker = FakeWorker()
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        gate_calls = 0
+
+        async def gate(kind: str, revision: int) -> None:
+            nonlocal gate_calls
+            gate_calls += 1
+            if gate_calls == 1:
+                entered.set()
+                await release.wait()
+
+        service = NexLinqService(
+            config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            mutation_gate=gate,
+        )
+        service._configuration = default_configuration()
+        service._saved_configuration = default_configuration()
+        service._saved_revision = 1
+        service._saved_revision_counter = 1
+        service.state.update(
+            lifecycle_state="running",
+            active_configuration_revision=1,
+        )
+        first = asyncio.create_task(
+            service.apply_profile(
+                "default",
+                configuration_with(scrolling_text="FIRST").active,
+                expected_revision=1,
+            )
+        )
+        await entered.wait()
+        second = asyncio.create_task(
+            service.apply_profile(
+                "default",
+                configuration_with(
+                    scrolling_text="SECOND",
+                    brightness=70,
+                ).active,
+                expected_revision=2,
+            )
+        )
+        await asyncio.sleep(0)
+        assert not second.done()
+        assert service.snapshot().active_configuration_revision == 1
+        release.set()
+        await asyncio.gather(first, second)
+
+        assert [revision for _, revision in worker.frames] == [2, 3]
+        assert worker.brightness == [(70, 3)]
+        assert service.configuration.active.scrolling_text == "SECOND"
+
+    asyncio.run(scenario())
+
+
+def test_apply_then_save_apply_preserves_command_order() -> None:
+    async def scenario() -> None:
+        worker = FakeWorker()
+        store = FakeStore(default_configuration())
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        first_gate = True
+
+        async def gate(kind: str, revision: int) -> None:
+            nonlocal first_gate
+            if first_gate:
+                first_gate = False
+                entered.set()
+                await release.wait()
+
+        service = NexLinqService(
+            config_store=store,  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            mutation_gate=gate,
+        )
+        service._configuration = default_configuration()
+        service._saved_configuration = default_configuration()
+        service._saved_revision = 1
+        service._saved_revision_counter = 1
+        service.state.update(
+            lifecycle_state="running",
+            active_configuration_revision=1,
+        )
+        first = asyncio.create_task(
+            service.apply_profile(
+                "default",
+                configuration_with(scrolling_text="FIRST").active,
+                expected_revision=1,
+            )
+        )
+        await entered.wait()
+        saved_configuration = configuration_with(
+            scrolling_text="SAVED",
+            brightness=80,
+        )
+        second = asyncio.create_task(
+            service.save_configuration(
+                saved_configuration,
+                expected_active_revision=2,
+                expected_saved_revision=1,
+                apply=True,
+            )
+        )
+        await asyncio.sleep(0)
+        assert not second.done()
+        release.set()
+        await asyncio.gather(first, second)
+
+        assert [revision for _, revision in worker.frames] == [2, 3]
+        assert worker.brightness == [(80, 3)]
+        assert service.configuration == saved_configuration
+        assert store.saved == [saved_configuration]
+
+    asyncio.run(scenario())
+
+
+def test_submission_rejection_rolls_back_runtime_publication() -> None:
+    class RejectingWorker(FakeWorker):
+        def submit_frame(self, frame: bytes, revision: int = 0) -> None:
+            raise RuntimeError("private worker state")
+
+    async def scenario() -> None:
+        worker = RejectingWorker()
+        service = NexLinqService(
+            config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+        )
+        service._configuration = default_configuration()
+        service._saved_configuration = default_configuration()
+        service.state.update(
+            lifecycle_state="running",
+            active_configuration_revision=1,
+        )
+        with pytest.raises(WorkerSubmissionError):
+            await service.apply_profile(
+                "default",
+                configuration_with(scrolling_text="REJECTED").active,
+                expected_revision=1,
+            )
+        assert service.configuration.active.scrolling_text == "CACHYOS"
+        assert service.snapshot().active_configuration_revision == 1
+
+    asyncio.run(scenario())
+
+
+def test_partial_submission_failure_marks_service_failed_without_publication() -> None:
+    class BrightnessRejectingWorker(FakeWorker):
+        def set_brightness(self, percentage: int, revision: int = 0) -> None:
+            raise RuntimeError("private brightness queue state")
+
+    async def scenario() -> None:
+        worker = BrightnessRejectingWorker()
+        service = NexLinqService(
+            config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+        )
+        service._configuration = default_configuration()
+        service._saved_configuration = default_configuration()
+        service.state.update(
+            lifecycle_state="running",
+            active_configuration_revision=1,
+        )
+        with pytest.raises(WorkerSubmissionError):
+            await service.apply_profile(
+                "default",
+                configuration_with(
+                    scrolling_text="PARTIAL",
+                    brightness=60,
+                ).active,
+                expected_revision=1,
+            )
+
+        assert [revision for _, revision in worker.frames] == [2]
+        assert service.configuration.active.scrolling_text == "CACHYOS"
+        snapshot = service.snapshot()
+        assert snapshot.active_configuration_revision == 1
+        assert snapshot.lifecycle_state == "failed"
+        assert "submission failed" in snapshot.last_display_error.lower()
+
+    asyncio.run(scenario())
+
+
+def test_atomic_configuration_and_preview_capture_wait_for_publication() -> None:
+    service = NexLinqService(
+        config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
+        device_worker=FakeWorker(),  # type: ignore[arg-type]
+        monotonic=lambda: 10.0,
+    )
+    service._configuration = default_configuration()
+    service._saved_configuration = default_configuration()
+    service._saved_revision = 1
+    service.state.update(
+        lifecycle_state="running",
+        active_configuration_revision=1,
+    )
+    candidate = configuration_with(scrolling_text="ATOMIC")
+    partial = threading.Event()
+    release = threading.Event()
+
+    def publish() -> None:
+        with service._coordination_lock:
+            service._configuration = candidate
+            partial.set()
+            assert release.wait(1)
+            service.state.update(active_configuration_revision=2)
+
+    thread = threading.Thread(target=publish)
+    thread.start()
+    assert partial.wait(1)
+    captured: list[object] = []
+
+    def read() -> None:
+        captured.extend((service.get_configuration(), service.get_preview()))
+
+    reader = threading.Thread(target=read)
+    reader.start()
+    assert reader.is_alive()
+    release.set()
+    thread.join(1)
+    reader.join(1)
+
+    configuration, preview = captured
+    assert configuration.configuration.active.scrolling_text == "ATOMIC"
+    assert configuration.active_revision == 2
+    assert preview.profile.scrolling_text == "ATOMIC"
+    assert preview.active_revision == 2
+
+
+def test_render_loop_submits_one_atomic_profile_revision_pair() -> None:
+    partial = threading.Event()
+    capture_attempted = threading.Event()
+    worker = FakeWorker()
+    candidate = configuration_with(scrolling_text="ATOMIC")
+    now = datetime(2026, 7, 27, 20, 36)
+
+    class CoordinatedService(NexLinqService):
+        def _capture_active_profile(self):
+            capture_attempted.set()
+            return super()._capture_active_profile()
+
+    async def scenario() -> None:
+        rendered = asyncio.Event()
+
+        async def sleep(delay: float) -> None:
+            rendered.set()
+            await asyncio.Future()
+
+        service = CoordinatedService(
+            config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            monotonic=lambda: 0.0,
+            wall_clock=lambda: now,
+            sleep=sleep,
+        )
+        service._configuration = default_configuration()
+        service.state.update(
+            lifecycle_state="running",
+            active_configuration_revision=1,
+        )
+
+        def publish() -> None:
+            with service._coordination_lock:
+                service._configuration = candidate
+                partial.set()
+                assert capture_attempted.wait(1)
+                service.state.update(active_configuration_revision=2)
+
+        publisher = threading.Thread(target=publish)
+        publisher.start()
+        assert partial.wait(1)
+        task = asyncio.create_task(service._render_loop())
+        await asyncio.wait_for(rendered.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        publisher.join(1)
+
+        expected = render_profile_at_elapsed(candidate.active, now, 0.0)
+        assert worker.frames == [(expected.to_bytes(), 2)]
 
     asyncio.run(scenario())

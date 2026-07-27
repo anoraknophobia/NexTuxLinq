@@ -1,0 +1,55 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  background: #0b1016;
+  color: #e8f0f7;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+header, main { width: min(1100px, calc(100% - 2rem)); margin-inline: auto; }
+header {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 1rem; padding: 2rem 0 1rem;
+}
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 0; font-size: clamp(1.6rem, 4vw, 2.6rem); }
+h2 { font-size: 1.15rem; }
+.eyebrow { color: #65ded5; letter-spacing: .12em; text-transform: uppercase; }
+.daemon-pill { padding: .65rem 1rem; border: 1px solid #2d4252; border-radius: 2rem; }
+main { display: grid; gap: 1rem; padding-bottom: 3rem; }
+section { background: #131c25; border: 1px solid #263746; border-radius: .8rem; padding: 1.25rem; }
+.status-grid, .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .8rem; }
+.status-grid div { background: #0d151d; padding: .8rem; border-radius: .5rem; }
+dt { color: #9ab0c1; font-size: .85rem; }
+dd { margin: .25rem 0 0; overflow-wrap: anywhere; }
+.section-heading { display: flex; justify-content: space-between; gap: 1rem; }
+.canvas-shell { overflow-x: auto; padding: 1rem 0; }
+canvas {
+  display: block; width: 100%; min-width: 630px; height: auto;
+  image-rendering: pixelated; background: #000; border: 1px solid #4e6678;
+}
+.region-labels { display: flex; padding: 0; margin: 0; list-style: none; min-width: 630px; }
+.region-labels li {
+  flex: var(--region-width); padding: .45rem; border-left: 1px solid #527084;
+  color: #b9c9d5; font-size: .75rem;
+}
+.region-labels strong { display: block; color: #fff; }
+label { display: grid; gap: .4rem; color: #c6d4df; }
+input, select, button {
+  font: inherit; color: inherit; background: #0b1219;
+  border: 1px solid #40576a; border-radius: .4rem; padding: .7rem;
+}
+input[type="color"] { min-height: 2.8rem; width: 100%; }
+button { cursor: pointer; background: #1b2a36; }
+button.primary, button[type="submit"] { background: #087d76; border-color: #27aaa1; }
+button:disabled { opacity: .55; cursor: wait; }
+button:hover:not(:disabled) { border-color: #65ded5; }
+:focus-visible { outline: 3px solid #65ded5; outline-offset: 2px; }
+.actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1rem; }
+.message { min-height: 1.5rem; margin: 1rem 0 0; }
+.message.error { color: #ffb4aa; }
+.message.success { color: #78e4bc; }
+@media (max-width: 650px) {
+  header, .section-heading { align-items: flex-start; flex-direction: column; }
+}

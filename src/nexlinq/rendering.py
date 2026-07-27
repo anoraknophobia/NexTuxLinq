@@ -223,3 +223,27 @@ def render_profile_at_elapsed(
         now,
         profile_scroll_offset(profile, elapsed_seconds),
     )
+
+
+def physical_preview_bytes(frame: FrameBuffer, profile: ProfileConfig) -> bytes:
+    """Convert Creator-region placement to physical front-to-rear RGB888."""
+    raw = frame.to_bytes()
+    output = bytearray(len(raw))
+    widths = (
+        profile.layout.front_clock_width,
+        profile.layout.gap_width,
+        profile.layout.scroll_text_width,
+        profile.layout.rear_clock_width,
+    )
+    region_x = 0
+    for width in widths:
+        raw_region_x = MATRIX_WIDTH - region_x - width
+        for y in range(MATRIX_HEIGHT):
+            for offset_x in range(width):
+                physical_offset = (y * MATRIX_WIDTH + region_x + offset_x) * 3
+                raw_offset = (y * MATRIX_WIDTH + raw_region_x + offset_x) * 3
+                output[physical_offset : physical_offset + 3] = raw[
+                    raw_offset : raw_offset + 3
+                ]
+        region_x += width
+    return bytes(output)

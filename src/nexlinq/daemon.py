@@ -4,16 +4,74 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import logging
 import signal
+import socket
 from collections.abc import Callable, Sequence
+from contextlib import contextmanager
+from typing import Protocol
 
+import uvicorn
+from fastapi import FastAPI
 from nexlinq.config_store import ConfigStore
 from nexlinq.device_worker import DeviceWorker
 from nexlinq.service import NexLinqService
+from nexlinq.web import create_app
 from nexlinq.writer_lock import WriterLock, WriterLockHeldError
 
 ServiceFactory = Callable[[], NexLinqService]
+
+
+class HttpServer(Protocol):
+    should_exit: bool
+
+    async def serve(self) -> None: ...
+
+
+ServerFactory = Callable[[FastAPI, str, int], HttpServer]
+
+
+class LocalUvicornServer(uvicorn.Server):
+    """Uvicorn server that leaves signal ownership to nexlinqd."""
+
+    @contextmanager
+    def capture_signals(self):
+        yield
+
+
+def validate_host(value: str) -> str:
+    """Accept only IP addresses or hostnames resolving entirely to loopback."""
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        try:
+            addresses = {
+                item[4][0]
+                for item in socket.getaddrinfo(value, None, type=socket.SOCK_STREAM)
+            }
+        except socket.gaierror as error:
+            raise argparse.ArgumentTypeError("Host could not be resolved.") from error
+        if not addresses or any(
+            not ipaddress.ip_address(address).is_loopback
+            for address in addresses
+        ):
+            raise argparse.ArgumentTypeError("Host must resolve only to loopback.")
+    else:
+        if not address.is_loopback:
+            raise argparse.ArgumentTypeError("Host must be a loopback address.")
+    return value
+
+
+def validate_port(value: str | int) -> int:
+    """Return one valid TCP port."""
+    try:
+        port = int(value)
+    except (TypeError, ValueError) as error:
+        raise argparse.ArgumentTypeError("Port must be an integer.") from error
+    if isinstance(value, bool) or not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError("Port must be between 1 and 65535.")
+    return port
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +83,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--foreground",
         action="store_true",
         help="run in the foreground (the current and only mode)",
+    )
+    parser.add_argument(
+        "--host",
+        type=validate_host,
+        default="127.0.0.1",
+        help="loopback address to bind (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=validate_port,
+        default=8765,
+        help="local HTTP port (default: 8765)",
     )
     return parser
 
@@ -58,12 +128,28 @@ def _create_service() -> NexLinqService:
     return NexLinqService(config_store=ConfigStore(), device_worker=worker)
 
 
+def _create_http_server(app: FastAPI, host: str, port: int) -> HttpServer:
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        workers=1,
+        log_level="info",
+    )
+    return LocalUvicornServer(config)
+
+
 async def run_service(
     *,
     service_factory: ServiceFactory = _create_service,
     stop_requested: asyncio.Event | None = None,
+    server_factory: ServerFactory = _create_http_server,
+    host: str = "127.0.0.1",
+    port: int = 8765,
 ) -> int:
-    """Run until a signal or renderer failure requests shutdown."""
+    """Run the service and local HTTP server until shutdown or failure."""
+    host = validate_host(host)
+    port = validate_port(port)
     loop = asyncio.get_running_loop()
     install_signal_handlers = stop_requested is None
     if stop_requested is None:
@@ -73,18 +159,73 @@ async def run_service(
             loop.add_signal_handler(signal_number, stop_requested.set)
 
     service = service_factory()
-    logging.info("Starting NexLinq Matrix900 service core.")
+    server: HttpServer | None = None
+    server_task: asyncio.Task[None] | None = None
+    stop_task: asyncio.Task[bool] | None = None
+    worker_failure_task: asyncio.Task[None] | None = None
+    logging.info("Starting NexLinq Matrix900 controller at http://%s:%d.", host, port)
     exit_code = 0
     try:
         await service.start()
-        await wait_for_shutdown(service, stop_requested)
+        app = create_app(
+            service,
+            allowed_hosts={host, "127.0.0.1", "::1", "localhost"},
+            configured_port=port,
+        )
+        server = server_factory(app, host, port)
+        server_task = asyncio.create_task(
+            server.serve(),
+            name="nexlinq-http-server",
+        )
+        stop_task = asyncio.create_task(stop_requested.wait())
+        worker_failure_task = asyncio.create_task(
+            service.wait_for_worker_failure()
+        )
+        render_task = service.render_task
+        if render_task is None:
+            raise RuntimeError("NexLinq renderer did not start.")
+        done, _ = await asyncio.wait(
+            (stop_task, render_task, server_task, worker_failure_task),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if server_task in done:
+            await server_task
+            if stop_task not in done:
+                raise RuntimeError("The local HTTP server stopped unexpectedly.")
+        if render_task in done:
+            await render_task
+        if worker_failure_task in done:
+            await worker_failure_task
+            raise RuntimeError("The Matrix900 device worker stopped.")
     except WriterLockHeldError as error:
         logging.error("%s", error)
         exit_code = 1
-    except Exception:
-        logging.error("NexLinq Matrix900 rendering failed.")
+    except (Exception, SystemExit):
+        if service.snapshot().rendering_state == "failed":
+            logging.error("NexLinq Matrix900 rendering failed.")
+        else:
+            logging.error("NexLinq Matrix900 service failed.")
         exit_code = 1
     finally:
+        if server is not None:
+            server.should_exit = True
+        if server_task is not None and not server_task.done():
+            try:
+                await server_task
+            except (Exception, SystemExit):
+                exit_code = 1
+        if stop_task is not None and not stop_task.done():
+            stop_task.cancel()
+            try:
+                await stop_task
+            except asyncio.CancelledError:
+                pass
+        if worker_failure_task is not None and not worker_failure_task.done():
+            worker_failure_task.cancel()
+            try:
+                await worker_failure_task
+            except asyncio.CancelledError:
+                pass
         if service.owns_resources:
             try:
                 await service.stop()
@@ -97,12 +238,12 @@ async def run_service(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse arguments and run the foreground service."""
-    build_parser().parse_args(argv)
+    arguments = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    return asyncio.run(run_service())
+    return asyncio.run(run_service(host=arguments.host, port=arguments.port))
 
 
 if __name__ == "__main__":

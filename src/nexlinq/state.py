@@ -19,6 +19,7 @@ class DaemonSnapshot:
     last_frame_generation_time: float | None = None
     last_successful_upload_time: float | None = None
     last_display_error: str | None = None
+    configuration_warning: str | None = None
 
 
 class DaemonState:
