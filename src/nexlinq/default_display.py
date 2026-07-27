@@ -86,12 +86,27 @@ def text_width(text: str, font: Mapping[str, Glyph], spacing: int = 1) -> int:
     return sum(widths) + spacing * (len(widths) - 1)
 
 
-def set_physical_pixel(frame: FrameBuffer, x: int, y: int, color: RGB) -> None:
-    """Set a pixel using case coordinates where x=0 is the physical front."""
+def set_region_pixel(
+    frame: FrameBuffer,
+    *,
+    region_x: int,
+    region_width: int,
+    x: int,
+    y: int,
+    color: RGB,
+) -> None:
+    """Map a case region to reversed Creator placement without mirroring its content."""
 
-    if not 0 <= x < MATRIX_WIDTH or not 0 <= y < MATRIX_HEIGHT:
+    if region_width <= 0:
+        raise ValueError("Region width must be positive")
+    if not 0 <= region_x < MATRIX_WIDTH or region_x + region_width > MATRIX_WIDTH:
+        raise ValueError("Region must fit inside the Matrix900 width")
+    if not region_x <= x < region_x + region_width or not 0 <= y < MATRIX_HEIGHT:
         return
-    frame.set_pixel(MATRIX_WIDTH - 1 - x, y, color)
+
+    raw_region_x = MATRIX_WIDTH - region_x - region_width
+    raw_x = raw_region_x + (x - region_x)
+    frame.set_pixel(raw_x, y, color)
 
 
 def draw_text_clipped(
@@ -121,7 +136,14 @@ def draw_text_clipped(
                 physical_x = cursor_x + column
                 physical_y = origin_y + row
                 if enabled == "1" and clip_x <= physical_x < clip_end:
-                    set_physical_pixel(frame, physical_x, physical_y, color)
+                    set_region_pixel(
+                        frame,
+                        region_x=clip_x,
+                        region_width=clip_width,
+                        x=physical_x,
+                        y=physical_y,
+                        color=color,
+                    )
         cursor_x += glyph_width + spacing
 
 

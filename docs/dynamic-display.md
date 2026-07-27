@@ -7,7 +7,7 @@ The default display is rendered as a complete 90x10 RGB888 Creator frame. Its ph
 - 31 pixels: turquoise `CACHYOS` marquee
 - 31 pixels: 24-hour clock
 
-The Matrix900 Creator coordinate system is horizontally reversed relative to the physical case. `nexlinq.default_display` hides that protocol detail and exposes physical coordinates where `x=0` is the front.
+The Matrix900 Creator regions are arranged in reverse order relative to the physical case, but the pixel order inside each region must remain left-to-right. `nexlinq.default_display` handles this mapping so text and clocks are not mirrored.
 
 Run one frame manually:
 
