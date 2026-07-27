@@ -66,3 +66,25 @@ Examples:
 nexlinqctl detect
 nexlinqctl brightness 50
 ```
+
+### Linux telemetry
+
+Send one hardware telemetry update:
+
+```console
+nexlinqctl telemetry
+```
+
+Continuously update the display once per second:
+
+```console
+nexlinqctl telemetry --watch
+```
+
+The initial Linux sensor mapping uses:
+
+- CPU temperature: `k10temp` / `Tctl`
+- GPU temperature: `amdgpu` / `edge`
+- Fan or pump speed: highest RPM reported by `nct6798`
+
+This mapping is currently hardware-specific and will become configurable.

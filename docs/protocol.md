@@ -106,3 +106,17 @@ Direct Linux tests confirmed that report `0x04` is applied immediately without t
 - The Matrix900 echoed each complete 64-byte report through its interrupt IN endpoint.
 
 Reports `0x05` and `0x03` are therefore not required for brightness-only changes. They remain part of the official applications broader **Send to Screen** workflow.
+
+## Live telemetry report
+
+Linux hardware testing confirmed the following fields in command `0x01`:
+
+| Offset | Size | Meaning |
+|------:|-----:|---------|
+| 6 | 1 byte | CPU temperature in whole degrees Celsius |
+| 7 | 1 byte | GPU temperature in whole degrees Celsius |
+| 9 | 2 bytes | Fan or pump speed in RPM, big-endian |
+| 21 | 4 bytes | Unix timestamp, big-endian |
+
+The report uses payload-length marker `0x14` at offset 5 and `0x07` at offset 25.
+The Matrix900 echoes the complete telemetry report after receiving it.

@@ -39,3 +39,39 @@ def build_brightness_report(percentage: int) -> bytes:
     report[5] = 0x01
     report[6] = encode_brightness(percentage)
     return bytes(report)
+
+
+COMMAND_TELEMETRY = 0x01
+TELEMETRY_PAYLOAD_LENGTH = 0x14
+
+
+def build_telemetry_report(
+    cpu_temperature: int,
+    gpu_temperature: int,
+    fan_rpm: int,
+    timestamp: int,
+) -> bytes:
+    """Build a verified Matrix900 telemetry report."""
+    values = {
+        "CPU temperature": (cpu_temperature, 0xFF),
+        "GPU temperature": (gpu_temperature, 0xFF),
+        "fan RPM": (fan_rpm, 0xFFFF),
+        "timestamp": (timestamp, 0xFFFFFFFF),
+    }
+
+    for name, (value, maximum) in values.items():
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer.")
+        if not 0 <= value <= maximum:
+            raise ValueError(f"{name} must be between 0 and {maximum}.")
+
+    report = bytearray(HID_REPORT_SIZE)
+    report[0] = REPORT_ID
+    report[1] = COMMAND_TELEMETRY
+    report[5] = TELEMETRY_PAYLOAD_LENGTH
+    report[6] = cpu_temperature
+    report[7] = gpu_temperature
+    report[9:11] = fan_rpm.to_bytes(2, "big")
+    report[21:25] = timestamp.to_bytes(4, "big")
+    report[25] = 0x07
+    return bytes(report)

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 
 from nexlinq.controller import set_brightness
 from nexlinq.device import find_matrix900
+from nexlinq.telemetry import collect_default_telemetry, send_telemetry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -27,6 +29,22 @@ def build_parser() -> argparse.ArgumentParser:
         "percentage",
         type=int,
         help="Brightness from 10 to 100 in ten-percent steps.",
+    )
+
+    telemetry_parser = subparsers.add_parser(
+        "telemetry",
+        help="Send Linux hardware telemetry to the display.",
+    )
+    telemetry_parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Continue sending telemetry until interrupted.",
+    )
+    telemetry_parser.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Update interval in seconds when using --watch.",
     )
 
     return parser
@@ -69,17 +87,49 @@ def set_device_brightness(percentage: int) -> int:
     print(f"Brightness set to {percentage}%.")
     print(f"Device: {devices[0].device_path}")
     print("Sent:", result.report.hex(" "))
-
-    if result.response is None:
-        print("Response: none")
-        return 0
-
-    print("Response:", result.response.hex(" "))
-
-    if result.response != result.report:
-        print("Warning: the response differs from the transmitted report.")
-
+    print("Response:", result.response.hex(" ") if result.response else "none")
     return 0
+
+
+def update_telemetry(watch: bool, interval: float) -> int:
+    """Send one or more Linux telemetry updates."""
+    if interval <= 0:
+        print("Telemetry interval must be greater than zero.", file=sys.stderr)
+        return 1
+
+    devices = find_matrix900()
+
+    if not devices:
+        print("No Phanteks Matrix900 device found.", file=sys.stderr)
+        return 1
+
+    try:
+        while True:
+            sample = collect_default_telemetry()
+            result = send_telemetry(devices[0].device_path, sample)
+            response = (
+                "echo"
+                if result.response == result.report
+                else "none" if result.response is None else "different"
+            )
+            print(
+                f"CPU {sample.cpu_temperature} C | "
+                f"GPU {sample.gpu_temperature} C | "
+                f"Fan/Pump {sample.fan_rpm} RPM | "
+                f"Response {response}",
+                flush=True,
+            )
+
+            if not watch:
+                return 0
+
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print("Telemetry stopped.")
+        return 0
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        print(f"Failed to update telemetry: {error}", file=sys.stderr)
+        return 1
 
 
 def main() -> int:
@@ -88,10 +138,10 @@ def main() -> int:
 
     if arguments.command in (None, "detect"):
         return detect_devices()
-
     if arguments.command == "brightness":
         return set_device_brightness(arguments.percentage)
-
+    if arguments.command == "telemetry":
+        return update_telemetry(arguments.watch, arguments.interval)
     return 2
 
 
