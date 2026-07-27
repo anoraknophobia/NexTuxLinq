@@ -187,8 +187,23 @@ nexlinqctl system-widget variant2
 nexlinqctl system-widget variant3
 nexlinqctl system-widget overview
 nexlinqctl system-widget aio-pump
-nexlinqctl system-widget cpu-gpu
+nexlinqctl system-widget graph-cpu
+nexlinqctl system-widget graph-gpu
 ```
 
 The fixed profiles reproduce exact Windows capture reports.
 Source selection has only been verified for System Data variant one.
+
+
+### Single-source System Data graph
+
+Display an animated graph for one selected temperature source:
+
+```console
+nexlinqctl system-widget graph-cpu
+nexlinqctl system-widget graph-gpu
+```
+
+The same widgets can be used in generic layouts as `system-graph-cpu` and
+`system-graph-gpu`. CPU and GPU are hardware-verified. FAN is not yet verified
+for this widget.

@@ -227,7 +227,15 @@ confirming both the source selector and live telemetry path.
 | Variant three | `0x03` | Captured with CPU |
 | Combined overview | `0x04` | Fixed captured profile |
 | AIO pump speed | `0x05` | Uses the live RPM telemetry field |
-| CPU/GPU temperatures | `0x06` | Uses both live temperature fields |
+| Single-source graph | `0x06` | CPU or GPU source verified |
 
 Widget ID `0x02` was not emitted by the official application and remains
 reserved, hidden, or otherwise unknown.
+
+
+### Single-source graph validation
+
+Linux hardware testing confirmed that widget ID `0x06` displays one selected
+source as an animated graph. Source `0x01` renders CPU with a `C` marker and
+source `0x02` renders GPU with a `G` marker. FAN source `0x04` has not yet
+been validated for this widget.

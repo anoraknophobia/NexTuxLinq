@@ -25,7 +25,8 @@ class SystemDataWidget(IntEnum):
     VARIANT_THREE = 0x03
     OVERVIEW = 0x04
     AIO_PUMP_SPEED = 0x05
-    CPU_GPU_TEMPERATURES = 0x06
+    SINGLE_SOURCE_GRAPH = 0x06
+    CPU_GPU_TEMPERATURES = SINGLE_SOURCE_GRAPH  # Compatibility alias
 
 
 class SystemDataSource(IntEnum):
@@ -72,7 +73,7 @@ _SYSTEM_DATA_PROFILES: dict[SystemDataWidget, bytes] = {
         "04 02 04 07 d0 07 d0 07 d0 07 d0 00 01 "
         "00 00 00 00 ff c8 c8 00 ff ff ff ff ff"
     ),
-    SystemDataWidget.CPU_GPU_TEMPERATURES: bytes.fromhex(
+    SystemDataWidget.SINGLE_SOURCE_GRAPH: bytes.fromhex(
         "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
         "ff 00 00 ff ff ff c8 00 ff ff ff ff ff"
     ),
@@ -147,7 +148,12 @@ def build_system_data_report(
 
     options = bytearray(_SYSTEM_DATA_PROFILES[widget])
 
-    if widget is SystemDataWidget.VARIANT_ONE:
+    source_selectable_widgets = {
+        SystemDataWidget.VARIANT_ONE,
+        SystemDataWidget.SINGLE_SOURCE_GRAPH,
+    }
+
+    if widget in source_selectable_widgets:
         if source is None:
             source = SystemDataSource.CPU
         if isinstance(source, bool):
@@ -158,12 +164,21 @@ def build_system_data_report(
         except ValueError as error:
             raise ValueError(f"Unsupported System Data source: {source}.") from error
 
+        if (
+            widget is SystemDataWidget.SINGLE_SOURCE_GRAPH
+            and source is SystemDataSource.FAN
+        ):
+            raise ValueError(
+                "The single-source graph is currently verified only for "
+                "CPU and GPU."
+            )
+
         options[0] = source
         scale = 2000 if source is SystemDataSource.FAN else 80
         options[9:11] = scale.to_bytes(2, "big")
     elif source is not None:
         raise ValueError(
-            "source selection is currently verified only for variant one."
+            "source selection is not verified for this System Data widget."
         )
 
     return build_widget_report(

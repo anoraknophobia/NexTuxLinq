@@ -135,7 +135,8 @@ def build_parser() -> argparse.ArgumentParser:
             "system-variant3",
             "system-overview",
             "system-aio-pump",
-            "system-cpu-gpu",
+            "system-graph-cpu",
+            "system-graph-gpu",
         ),
         help="One widget name for every slot, in slot order.",
     )
@@ -154,7 +155,8 @@ def build_parser() -> argparse.ArgumentParser:
             "variant3",
             "overview",
             "aio-pump",
-            "cpu-gpu",
+            "graph-cpu",
+            "graph-gpu",
         ),
         help="Select the captured System Data profile.",
     )
@@ -427,7 +429,14 @@ def configure_system_widget(profile_name: str) -> int:
         "variant3": (SystemDataWidget.VARIANT_THREE, None),
         "overview": (SystemDataWidget.OVERVIEW, None),
         "aio-pump": (SystemDataWidget.AIO_PUMP_SPEED, None),
-        "cpu-gpu": (SystemDataWidget.CPU_GPU_TEMPERATURES, None),
+        "graph-cpu": (
+            SystemDataWidget.SINGLE_SOURCE_GRAPH,
+            SystemDataSource.CPU,
+        ),
+        "graph-gpu": (
+            SystemDataWidget.SINGLE_SOURCE_GRAPH,
+            SystemDataSource.GPU,
+        ),
     }
     devices = find_matrix900()
 

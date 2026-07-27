@@ -45,7 +45,14 @@ _SYSTEM_WIDGETS: dict[
     "system-variant3": (SystemDataWidget.VARIANT_THREE, None),
     "system-overview": (SystemDataWidget.OVERVIEW, None),
     "system-aio-pump": (SystemDataWidget.AIO_PUMP_SPEED, None),
-    "system-cpu-gpu": (SystemDataWidget.CPU_GPU_TEMPERATURES, None),
+    "system-graph-cpu": (
+        SystemDataWidget.SINGLE_SOURCE_GRAPH,
+        SystemDataSource.CPU,
+    ),
+    "system-graph-gpu": (
+        SystemDataWidget.SINGLE_SOURCE_GRAPH,
+        SystemDataSource.GPU,
+    ),
 }
 
 
