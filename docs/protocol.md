@@ -168,3 +168,16 @@ The fullscreen digital clock uses:
 The current implementation reproduces the complete option sequence observed
 in the Windows capture. Individual option meanings are not yet assigned until
 they are validated through controlled one-setting-at-a-time captures.
+
+### Verified fullscreen Time and Date profiles
+
+| Widget | ID | Linux command |
+|--------|---:|---------------|
+| Digital clock | `0x01` | `nexlinqctl time-widget digital` |
+| Graphical clock | `0x02` | `nexlinqctl time-widget graphical` |
+| Date | `0x03` | `nexlinqctl time-widget date` |
+| Week number | `0x04` | `nexlinqctl time-widget week` |
+
+The complete option bytes are reproduced from the sequential Windows capture.
+Their individual meanings remain intentionally undocumented until controlled
+one-option differential captures confirm them.

@@ -6,7 +6,10 @@ import argparse
 import sys
 import time
 
-from nexlinq.clock import build_fullscreen_digital_clock_report
+from nexlinq.clock import (
+    TimeAndDateWidget,
+    build_fullscreen_time_and_date_report,
+)
 from nexlinq.configuration import (
     send_configuration_report,
     send_report_sequence,
@@ -79,6 +82,16 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "clock",
         help="Display the captured fullscreen digital clock.",
+    )
+
+    time_widget_parser = subparsers.add_parser(
+        "time-widget",
+        help="Display a captured fullscreen Time and Date widget.",
+    )
+    time_widget_parser.add_argument(
+        "widget",
+        choices=("digital", "graphical", "date", "week"),
+        help="Select the fullscreen Time and Date widget.",
     )
 
     return parser
@@ -226,8 +239,14 @@ def configure_free_text(value: str) -> int:
     return 0
 
 
-def configure_digital_clock() -> int:
-    """Configure the captured fullscreen digital clock."""
+def configure_time_and_date_widget(widget_name: str) -> int:
+    """Configure a captured fullscreen Time and Date widget."""
+    widget_map = {
+        "digital": TimeAndDateWidget.DIGITAL_CLOCK,
+        "graphical": TimeAndDateWidget.GRAPHICAL_CLOCK,
+        "date": TimeAndDateWidget.DATE,
+        "week": TimeAndDateWidget.WEEK_NUMBER,
+    }
     devices = find_matrix900()
 
     if not devices:
@@ -235,10 +254,11 @@ def configure_digital_clock() -> int:
         return 1
 
     try:
-        report = build_fullscreen_digital_clock_report()
+        widget = widget_map[widget_name]
+        report = build_fullscreen_time_and_date_report(widget)
         result = send_configuration_report(devices[0].device_path, report)
-    except (OSError, RuntimeError, TypeError, ValueError) as error:
-        print(f"Failed to configure digital clock: {error}", file=sys.stderr)
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+        print(f"Failed to configure Time and Date widget: {error}", file=sys.stderr)
         return 1
 
     response = (
@@ -247,11 +267,16 @@ def configure_digital_clock() -> int:
         else "none" if result.response is None else "different"
     )
 
-    print("Fullscreen digital clock enabled.")
+    print(f"Fullscreen Time and Date widget enabled: {widget_name}.")
     print(f"Device: {devices[0].device_path}")
     print(f"Response: {response}")
     print("Sent:", result.report.hex(" "))
     return 0
+
+
+def configure_digital_clock() -> int:
+    """Preserve the original digital-clock CLI command."""
+    return configure_time_and_date_widget("digital")
 
 def main() -> int:
     """Run the nexlinqctl command-line interface."""
@@ -269,6 +294,8 @@ def main() -> int:
         return configure_free_text(arguments.value)
     if arguments.command == "clock":
         return configure_digital_clock()
+    if arguments.command == "time-widget":
+        return configure_time_and_date_widget(arguments.widget)
     return 2
 
 

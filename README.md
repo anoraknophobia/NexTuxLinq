@@ -124,3 +124,17 @@ nexlinqctl clock
 The background telemetry service supplies the current Unix timestamp.
 Clock option fields such as timezone, position, colors, and 12/24-hour mode
 are currently preserved as an exact captured profile.
+
+### Fullscreen Time and Date widgets
+
+Display the verified captured profiles:
+
+```console
+nexlinqctl time-widget digital
+nexlinqctl time-widget graphical
+nexlinqctl time-widget date
+nexlinqctl time-widget week
+```
+
+`nexlinqctl clock` remains available as an alias for the digital clock.
+The captured digital profile displays local time using the 24-hour format.
