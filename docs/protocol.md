@@ -156,3 +156,15 @@ The captured `NEXLINQ` report uses:
 Linux hardware testing confirmed that command `0x03` immediately applies a
 System Data source change. Command `0x05` was not required for that path.
 Free text still requires a separate live validation of the `0x02`, `0x03` sequence.
+
+## Digital-clock widget
+
+The fullscreen digital clock uses:
+
+- Internal layout ID `0x01`
+- Time and Date category `0x01`
+- Widget ID `0x01`
+
+The current implementation reproduces the complete option sequence observed
+in the Windows capture. Individual option meanings are not yet assigned until
+they are validated through controlled one-setting-at-a-time captures.

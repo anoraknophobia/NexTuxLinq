@@ -112,3 +112,15 @@ nexlinqctl text "NEXLINQ"
 
 The current encoder supports up to 49 ASCII bytes.
 Unicode encoding and the exact maximum firmware length are not yet verified.
+
+### Fullscreen digital clock
+
+Display the captured fullscreen digital-clock configuration:
+
+```console
+nexlinqctl clock
+```
+
+The background telemetry service supplies the current Unix timestamp.
+Clock option fields such as timezone, position, colors, and 12/24-hour mode
+are currently preserved as an exact captured profile.

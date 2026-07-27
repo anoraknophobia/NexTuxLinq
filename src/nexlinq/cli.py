@@ -6,6 +6,7 @@ import argparse
 import sys
 import time
 
+from nexlinq.clock import build_fullscreen_digital_clock_report
 from nexlinq.configuration import (
     send_configuration_report,
     send_report_sequence,
@@ -73,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
     text_parser.add_argument(
         "value",
         help="ASCII text to show on the Matrix900.",
+    )
+
+    subparsers.add_parser(
+        "clock",
+        help="Display the captured fullscreen digital clock.",
     )
 
     return parser
@@ -219,6 +225,34 @@ def configure_free_text(value: str) -> int:
 
     return 0
 
+
+def configure_digital_clock() -> int:
+    """Configure the captured fullscreen digital clock."""
+    devices = find_matrix900()
+
+    if not devices:
+        print("No Phanteks Matrix900 device found.", file=sys.stderr)
+        return 1
+
+    try:
+        report = build_fullscreen_digital_clock_report()
+        result = send_configuration_report(devices[0].device_path, report)
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        print(f"Failed to configure digital clock: {error}", file=sys.stderr)
+        return 1
+
+    response = (
+        "echo"
+        if result.response == result.report
+        else "none" if result.response is None else "different"
+    )
+
+    print("Fullscreen digital clock enabled.")
+    print(f"Device: {devices[0].device_path}")
+    print(f"Response: {response}")
+    print("Sent:", result.report.hex(" "))
+    return 0
+
 def main() -> int:
     """Run the nexlinqctl command-line interface."""
     arguments = build_parser().parse_args()
@@ -233,6 +267,8 @@ def main() -> int:
         return configure_system_data(arguments.source)
     if arguments.command == "text":
         return configure_free_text(arguments.value)
+    if arguments.command == "clock":
+        return configure_digital_clock()
     return 2
 
 
