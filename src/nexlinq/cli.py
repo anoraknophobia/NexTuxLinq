@@ -21,6 +21,7 @@ from nexlinq.layout import (
     SystemDataSource,
     build_system_data_variant_one_report,
 )
+from nexlinq.presets import build_two_slot_clock_system_reports
 from nexlinq.telemetry import collect_default_telemetry, send_telemetry
 
 
@@ -92,6 +93,16 @@ def build_parser() -> argparse.ArgumentParser:
         "widget",
         choices=("digital", "graphical", "date", "week"),
         help="Select the fullscreen Time and Date widget.",
+    )
+
+    two_slot_parser = subparsers.add_parser(
+        "layout-clock-system",
+        help="Display a two-slot clock and System Data layout.",
+    )
+    two_slot_parser.add_argument(
+        "source",
+        choices=("cpu", "gpu", "fan"),
+        help="Select the System Data source for the second slot.",
     )
 
     return parser
@@ -278,6 +289,37 @@ def configure_digital_clock() -> int:
     """Preserve the original digital-clock CLI command."""
     return configure_time_and_date_widget("digital")
 
+
+def configure_clock_system_layout(source_name: str) -> int:
+    """Configure a two-slot clock and System Data layout."""
+    devices = find_matrix900()
+
+    if not devices:
+        print("No Phanteks Matrix900 device found.", file=sys.stderr)
+        return 1
+
+    try:
+        source = SystemDataSource[source_name.upper()]
+        reports = build_two_slot_clock_system_reports(source)
+        results = send_report_sequence(devices[0].device_path, reports)
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+        print(f"Failed to configure two-slot layout: {error}", file=sys.stderr)
+        return 1
+
+    print(f"Two-slot clock and {source_name.upper()} layout enabled.")
+    print(f"Device: {devices[0].device_path}")
+
+    for index, result in enumerate(results, start=1):
+        response = (
+            "echo"
+            if result.response == result.report
+            else "none" if result.response is None else "different"
+        )
+        print(f"Slot {index - 1} response: {response}")
+        print(f"Slot {index - 1} sent:", result.report.hex(" "))
+
+    return 0
+
 def main() -> int:
     """Run the nexlinqctl command-line interface."""
     arguments = build_parser().parse_args()
@@ -296,6 +338,8 @@ def main() -> int:
         return configure_digital_clock()
     if arguments.command == "time-widget":
         return configure_time_and_date_widget(arguments.widget)
+    if arguments.command == "layout-clock-system":
+        return configure_clock_system_layout(arguments.source)
     return 2
 
 

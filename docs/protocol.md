@@ -181,3 +181,18 @@ they are validated through controlled one-setting-at-a-time captures.
 The complete option bytes are reproduced from the sequential Windows capture.
 Their individual meanings remain intentionally undocumented until controlled
 one-option differential captures confirm them.
+
+## Multi-slot configuration
+
+The layout capture confirmed that each slot is transferred in a separate
+command `0x03` report. All reports carry the same layout ID and total slot
+count, while offset 4 selects the zero-based destination slot.
+
+The captured Time and Date profile bytes remain unchanged when the same widget
+is assigned to slot 0 of different layouts.
+
+### Week-number behavior
+
+During Linux validation on 2026-07-27, the date widget displayed `27` while
+the week-number widget displayed `30`. The ISO week for that date is `31`.
+The firmware therefore appears to use a non-ISO, zero-based week counter.

@@ -1,4 +1,4 @@
-"""Fullscreen Time and Date widget encoding for the Matrix900."""
+"""Fullscreen and multi-slot Time and Date encoding for the Matrix900."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class TimeAndDateWidget(IntEnum):
     WEEK_NUMBER = 0x04
 
 
-_FULLSCREEN_PROFILES: dict[TimeAndDateWidget, bytes] = {
+_PROFILES: dict[TimeAndDateWidget, bytes] = {
     TimeAndDateWidget.DIGITAL_CLOCK: bytes.fromhex(
         "02 01 16 1e 00 00 0d 01 ff ff ff 00 00 00 ff 00 00 00 00 ff"
     ),
@@ -32,10 +32,13 @@ _FULLSCREEN_PROFILES: dict[TimeAndDateWidget, bytes] = {
 }
 
 
-def build_fullscreen_time_and_date_report(
+def build_time_and_date_report(
     widget: TimeAndDateWidget | int,
+    *,
+    layout_id: int = 0x01,
+    slot_index: int = 0,
 ) -> bytes:
-    """Build a captured fullscreen Time and Date widget report."""
+    """Build a Time and Date report for a selected layout slot."""
     if isinstance(widget, bool):
         raise TypeError("Time and Date widget must not be a boolean.")
 
@@ -45,35 +48,36 @@ def build_fullscreen_time_and_date_report(
         raise ValueError(f"Unsupported Time and Date widget: {widget}.") from error
 
     return build_widget_report(
-        layout_id=0x01,
-        slot_index=0,
+        layout_id=layout_id,
+        slot_index=slot_index,
         category=WidgetCategory.TIME_AND_DATE,
         widget_id=widget,
-        options=_FULLSCREEN_PROFILES[widget],
+        options=_PROFILES[widget],
     )
+
+
+def build_fullscreen_time_and_date_report(
+    widget: TimeAndDateWidget | int,
+) -> bytes:
+    """Build a captured fullscreen Time and Date report."""
+    return build_time_and_date_report(widget)
 
 
 def build_fullscreen_digital_clock_report() -> bytes:
     """Build the captured fullscreen digital-clock report."""
-    return build_fullscreen_time_and_date_report(
-        TimeAndDateWidget.DIGITAL_CLOCK
-    )
+    return build_time_and_date_report(TimeAndDateWidget.DIGITAL_CLOCK)
 
 
 def build_fullscreen_graphical_clock_report() -> bytes:
     """Build the captured fullscreen graphical-clock report."""
-    return build_fullscreen_time_and_date_report(
-        TimeAndDateWidget.GRAPHICAL_CLOCK
-    )
+    return build_time_and_date_report(TimeAndDateWidget.GRAPHICAL_CLOCK)
 
 
 def build_fullscreen_date_report() -> bytes:
     """Build the captured fullscreen date report."""
-    return build_fullscreen_time_and_date_report(TimeAndDateWidget.DATE)
+    return build_time_and_date_report(TimeAndDateWidget.DATE)
 
 
 def build_fullscreen_week_number_report() -> bytes:
     """Build the captured fullscreen week-number report."""
-    return build_fullscreen_time_and_date_report(
-        TimeAndDateWidget.WEEK_NUMBER
-    )
+    return build_time_and_date_report(TimeAndDateWidget.WEEK_NUMBER)

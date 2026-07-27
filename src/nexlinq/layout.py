@@ -109,8 +109,11 @@ def build_widget_report(
 
 def build_system_data_variant_one_report(
     source: SystemDataSource | int,
+    *,
+    layout_id: int = 0x01,
+    slot_index: int = 0,
 ) -> bytes:
-    """Build the verified fullscreen System Data variant-one report."""
+    """Build a System Data variant-one report for a selected slot."""
     if isinstance(source, bool):
         raise TypeError("System Data source must not be a boolean.")
 
@@ -126,8 +129,8 @@ def build_system_data_variant_one_report(
     options[9:11] = scale.to_bytes(2, "big")
 
     return build_widget_report(
-        layout_id=0x01,
-        slot_index=0,
+        layout_id=layout_id,
+        slot_index=slot_index,
         category=WidgetCategory.SYSTEM_DATA,
         widget_id=SystemDataWidget.VARIANT_ONE,
         options=bytes(options),

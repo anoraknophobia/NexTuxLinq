@@ -138,3 +138,15 @@ nexlinqctl time-widget week
 
 `nexlinqctl clock` remains available as an alias for the digital clock.
 The captured digital profile displays local time using the 24-hour format.
+
+### Two-slot clock and System Data layout
+
+Display a digital clock beside a live System Data widget:
+
+```console
+nexlinqctl layout-clock-system cpu
+nexlinqctl layout-clock-system gpu
+nexlinqctl layout-clock-system fan
+```
+
+This preset uses user-facing layout 1, internal layout ID `0x02`.
