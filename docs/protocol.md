@@ -223,8 +223,8 @@ confirming both the source selector and live telemetry path.
 | Profile | Widget ID | Source behavior |
 |---------|----------:|-----------------|
 | Variant one | `0x00` | CPU, GPU, or FAN verified |
-| Variant two | `0x01` | Captured with CPU |
-| Variant three | `0x03` | Captured with CPU |
+| Single-value bar | `0x01` | CPU and GPU sources verified |
+| Single-value background bar | `0x03` | CPU and GPU sources verified |
 | Combined overview | `0x04` | Fixed captured profile |
 | AIO pump speed | `0x05` | Uses the live RPM telemetry field |
 | Single-source graph | `0x06` | CPU or GPU source verified |
@@ -239,3 +239,12 @@ Linux hardware testing confirmed that widget ID `0x06` displays one selected
 source as an animated graph. Source `0x01` renders CPU with a `C` marker and
 source `0x02` renders GPU with a `G` marker. FAN source `0x04` has not yet
 been validated for this widget.
+
+
+### Source-selectable bar validation
+
+Linux hardware testing confirmed that widget ID `0x01` displays one selected
+value with a bar and widget ID `0x03` displays one selected value with a
+background bar. Offset 9 selects CPU with `0x01` or GPU with `0x02`.
+Both widgets changed their visible marker from `C` to `G` when only this source
+byte was changed. FAN source `0x04` remains unverified for these profiles.

@@ -21,8 +21,10 @@ class SystemDataWidget(IntEnum):
     """Verified System Data widget identifiers."""
 
     VARIANT_ONE = 0x00
-    VARIANT_TWO = 0x01
-    VARIANT_THREE = 0x03
+    VALUE_BAR = 0x01
+    VARIANT_TWO = VALUE_BAR  # Compatibility alias
+    VALUE_BACKGROUND_BAR = 0x03
+    VARIANT_THREE = VALUE_BACKGROUND_BAR  # Compatibility alias
     OVERVIEW = 0x04
     AIO_PUMP_SPEED = 0x05
     SINGLE_SOURCE_GRAPH = 0x06
@@ -57,11 +59,11 @@ _SYSTEM_DATA_PROFILES: dict[SystemDataWidget, bytes] = {
         "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
         "ff ff ff 32 00 ff 00 00 00 ff ff ff ff"
     ),
-    SystemDataWidget.VARIANT_TWO: bytes.fromhex(
+    SystemDataWidget.VALUE_BAR: bytes.fromhex(
         "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
         "ff ff ff ff 00 00 00 00 00 ff ff ff ff"
     ),
-    SystemDataWidget.VARIANT_THREE: bytes.fromhex(
+    SystemDataWidget.VALUE_BACKGROUND_BAR: bytes.fromhex(
         "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
         "ff ff ff 00 96 ff 00 00 00 ff ff ff ff"
     ),
@@ -150,6 +152,8 @@ def build_system_data_report(
 
     source_selectable_widgets = {
         SystemDataWidget.VARIANT_ONE,
+        SystemDataWidget.VALUE_BAR,
+        SystemDataWidget.VALUE_BACKGROUND_BAR,
         SystemDataWidget.SINGLE_SOURCE_GRAPH,
     }
 
@@ -165,11 +169,11 @@ def build_system_data_report(
             raise ValueError(f"Unsupported System Data source: {source}.") from error
 
         if (
-            widget is SystemDataWidget.SINGLE_SOURCE_GRAPH
-            and source is SystemDataSource.FAN
+            source is SystemDataSource.FAN
+            and widget is not SystemDataWidget.VARIANT_ONE
         ):
             raise ValueError(
-                "The single-source graph is currently verified only for "
+                "This System Data widget is currently verified only for "
                 "CPU and GPU."
             )
 

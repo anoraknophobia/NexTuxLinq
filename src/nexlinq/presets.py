@@ -41,8 +41,30 @@ _SYSTEM_WIDGETS: dict[
     "system-cpu": (SystemDataWidget.VARIANT_ONE, SystemDataSource.CPU),
     "system-gpu": (SystemDataWidget.VARIANT_ONE, SystemDataSource.GPU),
     "system-fan": (SystemDataWidget.VARIANT_ONE, SystemDataSource.FAN),
-    "system-variant2": (SystemDataWidget.VARIANT_TWO, None),
-    "system-variant3": (SystemDataWidget.VARIANT_THREE, None),
+    "system-bar-cpu": (
+        SystemDataWidget.VALUE_BAR,
+        SystemDataSource.CPU,
+    ),
+    "system-bar-gpu": (
+        SystemDataWidget.VALUE_BAR,
+        SystemDataSource.GPU,
+    ),
+    "system-background-bar-cpu": (
+        SystemDataWidget.VALUE_BACKGROUND_BAR,
+        SystemDataSource.CPU,
+    ),
+    "system-background-bar-gpu": (
+        SystemDataWidget.VALUE_BACKGROUND_BAR,
+        SystemDataSource.GPU,
+    ),
+    "system-variant2": (
+        SystemDataWidget.VALUE_BAR,
+        SystemDataSource.CPU,
+    ),
+    "system-variant3": (
+        SystemDataWidget.VALUE_BACKGROUND_BAR,
+        SystemDataSource.CPU,
+    ),
     "system-overview": (SystemDataWidget.OVERVIEW, None),
     "system-aio-pump": (SystemDataWidget.AIO_PUMP_SPEED, None),
     "system-graph-cpu": (

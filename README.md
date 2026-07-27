@@ -207,3 +207,25 @@ nexlinqctl system-widget graph-gpu
 The same widgets can be used in generic layouts as `system-graph-cpu` and
 `system-graph-gpu`. CPU and GPU are hardware-verified. FAN is not yet verified
 for this widget.
+
+
+### Single-value System Data bars
+
+Display one live CPU or GPU value using the verified bar profiles:
+
+```console
+nexlinqctl system-widget bar-cpu
+nexlinqctl system-widget bar-gpu
+nexlinqctl system-widget background-bar-cpu
+nexlinqctl system-widget background-bar-gpu
+```
+
+The equivalent generic-layout names are:
+
+- `system-bar-cpu`
+- `system-bar-gpu`
+- `system-background-bar-cpu`
+- `system-background-bar-gpu`
+
+The legacy names `variant2` and `variant3` remain CPU-profile aliases.
+FAN source selection is not yet verified for these widgets.

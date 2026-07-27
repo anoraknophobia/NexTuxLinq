@@ -20,19 +20,47 @@ class SystemDataProfileTests(unittest.TestCase):
         self.assertEqual(len(expected), 64)
         self.assertEqual(build_system_data_report(widget), expected)
 
-    def test_variant_two_matches_capture(self) -> None:
+    def test_value_bar_cpu_matches_capture(self) -> None:
         self.assert_profile(
-            SystemDataWidget.VARIANT_TWO,
+            SystemDataWidget.VALUE_BAR,
             "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
             "ff ff ff ff 00 00 00 00 00 ff ff ff ff",
         )
 
-    def test_variant_three_matches_capture(self) -> None:
+    def test_value_bar_accepts_gpu(self) -> None:
+        report = build_system_data_report(
+            SystemDataWidget.VALUE_BAR,
+            source=SystemDataSource.GPU,
+        )
+        self.assertEqual(report[9], 0x02)
+        self.assertEqual(report[18:20], bytes.fromhex("00 50"))
+
+    def test_background_bar_cpu_matches_capture(self) -> None:
         self.assert_profile(
-            SystemDataWidget.VARIANT_THREE,
+            SystemDataWidget.VALUE_BACKGROUND_BAR,
             "01 02 04 07 d0 07 d0 07 d0 00 50 00 01 "
             "ff ff ff 00 96 ff 00 00 00 ff ff ff ff",
         )
+
+    def test_background_bar_accepts_gpu(self) -> None:
+        report = build_system_data_report(
+            SystemDataWidget.VALUE_BACKGROUND_BAR,
+            source=SystemDataSource.GPU,
+        )
+        self.assertEqual(report[9], 0x02)
+        self.assertEqual(report[18:20], bytes.fromhex("00 50"))
+
+    def test_bar_widgets_reject_unverified_fan(self) -> None:
+        for widget in (
+            SystemDataWidget.VALUE_BAR,
+            SystemDataWidget.VALUE_BACKGROUND_BAR,
+        ):
+            with self.subTest(widget=widget):
+                with self.assertRaises(ValueError):
+                    build_system_data_report(
+                        widget,
+                        source=SystemDataSource.FAN,
+                    )
 
     def test_overview_matches_capture(self) -> None:
         self.assert_profile(
@@ -60,9 +88,7 @@ class SystemDataProfileTests(unittest.TestCase):
             SystemDataWidget.SINGLE_SOURCE_GRAPH,
             source=SystemDataSource.GPU,
         )
-
         self.assertEqual(report[9], 0x02)
-        self.assertEqual(report[18:20], bytes.fromhex("00 50"))
 
     def test_single_source_graph_rejects_unverified_fan(self) -> None:
         with self.assertRaises(ValueError):
@@ -71,14 +97,26 @@ class SystemDataProfileTests(unittest.TestCase):
                 source=SystemDataSource.FAN,
             )
 
-    def test_variant_one_gpu_source(self) -> None:
-        report = build_system_data_report(
+    def test_variant_one_accepts_gpu_and_fan(self) -> None:
+        gpu = build_system_data_report(
             SystemDataWidget.VARIANT_ONE,
             source=SystemDataSource.GPU,
         )
+        fan = build_system_data_report(
+            SystemDataWidget.VARIANT_ONE,
+            source=SystemDataSource.FAN,
+        )
 
-        self.assertEqual(report[9], 0x02)
-        self.assertEqual(report[18:20], bytes.fromhex("00 50"))
+        self.assertEqual(gpu[9], 0x02)
+        self.assertEqual(fan[9], 0x04)
+        self.assertEqual(fan[18:20], bytes.fromhex("07 d0"))
+
+    def test_compatibility_aliases(self) -> None:
+        self.assertIs(SystemDataWidget.VARIANT_TWO, SystemDataWidget.VALUE_BAR)
+        self.assertIs(
+            SystemDataWidget.VARIANT_THREE,
+            SystemDataWidget.VALUE_BACKGROUND_BAR,
+        )
 
     def test_rejects_source_for_fixed_profile(self) -> None:
         with self.assertRaises(ValueError):
