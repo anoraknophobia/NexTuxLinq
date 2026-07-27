@@ -1,4 +1,5 @@
 from datetime import datetime
+from hashlib import sha256
 
 from nexlinq.creator import FRAME_SIZE, MATRIX_WIDTH, FrameBuffer
 from nexlinq.default_display import (
@@ -189,3 +190,13 @@ def test_front_clock_uses_same_seven_pixel_height_as_rear_clock() -> None:
     }
 
     assert front_rows == rear_rows == set(range(1, 8))
+
+
+def test_compatibility_renderer_preserves_previous_frame_bytes() -> None:
+    frame = render_default_frame(
+        datetime(2026, 7, 27, 20, 36),
+        scroll_step=35,
+    )
+    assert sha256(frame.to_bytes()).hexdigest() == (
+        "3bfb134dda185d007e919b7a1f067c6fadd1155db22ae023b5833861760b946e"
+    )

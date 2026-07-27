@@ -9,6 +9,23 @@ The default display is rendered as a complete 90x10 RGB888 Creator frame. Its ph
 
 The Matrix900 Creator regions are arranged in reverse order relative to the physical case, but the pixel order inside each region must remain left-to-right. `nexlinq.default_display` handles this mapping so text and clocks are not mirrored.
 
+The renderer also accepts a validated display profile. Configuration fields
+cover scrolling text, text and clock colors, scroll speed, optional brightness,
+and the fixed first-version layout. Text is normalized to uppercase and supports
+`A-Z`, `0-9`, spaces, and `. - _ : ! ? /`. Brightness defaults to `null`, which
+means that rendering does not request a brightness change.
+
+Configuration is stored as versioned JSON at:
+
+```text
+${XDG_CONFIG_HOME:-~/.config}/nexlinq/config.json
+```
+
+Missing or invalid files fall back to the built-in display without overwriting
+the file. Saves use a temporary file and atomic replacement. The current
+standalone display command continues to use the built-in `CACHYOS` profile;
+loading saved profiles into a long-running daemon is outside this phase.
+
 Run one frame manually:
 
 ```console
