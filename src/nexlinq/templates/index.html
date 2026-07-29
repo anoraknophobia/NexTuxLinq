@@ -53,21 +53,36 @@
       <h2 id="settings-heading">Profile settings</h2>
       <form id="profile-form">
         <div class="form-grid">
-          <label>Scrolling text
-            <input id="scrolling-text" name="scrolling_text" maxlength="64" required>
+          <label class="profile-field">
+            <span class="profile-field-label">Scrolling text</span>
+            <input class="profile-control" id="scrolling-text"
+                   name="scrolling_text" maxlength="64" required>
           </label>
-          <label>Text color
-            <input id="text-color" name="text_color" type="color" required>
+          <label class="profile-field">
+            <span class="profile-field-label">Text color</span>
+            <span class="profile-control color-control">
+              <input class="color-picker" id="text-color" name="text_color"
+                     type="color" required>
+            </span>
           </label>
-          <label>Clock color
-            <input id="clock-color" name="clock_color" type="color" required>
+          <label class="profile-field">
+            <span class="profile-field-label">Clock color</span>
+            <span class="profile-control color-control">
+              <input class="color-picker" id="clock-color" name="clock_color"
+                     type="color" required>
+            </span>
           </label>
-          <label>Scroll speed (pixels per second)
-            <input id="scroll-speed" name="scroll_speed" type="number"
+          <label class="profile-field">
+            <span class="profile-field-label">
+              Scroll speed (pixels per second)
+            </span>
+            <input class="profile-control" id="scroll-speed"
+                   name="scroll_speed" type="number"
                    min="0.5" max="20" step="0.5" required>
           </label>
-          <label>Brightness
-            <select id="brightness" name="brightness">
+          <label class="profile-field">
+            <span class="profile-field-label">Brightness</span>
+            <select class="profile-control" id="brightness" name="brightness">
               <option value="">Leave unchanged</option>
               <option value="10">10%</option><option value="20">20%</option>
               <option value="30">30%</option><option value="40">40%</option>
@@ -84,6 +99,8 @@
           <button type="button" data-action="revert">Revert unsaved edits</button>
         </div>
       </form>
+      <p id="connection-message" class="message error connection-message"
+         role="status" aria-live="polite"></p>
       <p id="message" class="message" role="status" aria-live="polite"></p>
     </section>
   </main>
