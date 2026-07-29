@@ -21,12 +21,21 @@ from pydantic import ValidationError
 from nextuxlinq.api_models import (
     ApplyRequest,
     ApplyResponse,
+    CanonicalApplyRequest,
+    CanonicalApplyResponse,
+    CanonicalConfigurationModel,
+    CanonicalConfigResponse,
+    CanonicalSaveRequest,
+    CanonicalSaveResponse,
+    CanonicalValidateRequest,
+    CanonicalValidateResponse,
     ConfigResponse,
     ConfigurationModel,
     DomainValidationError,
     ErrorResponse,
     PreviewRegion,
     PreviewResponse,
+    ProfileSelectionRequest,
     ProfileModel,
     SaveRequest,
     SaveResponse,
@@ -35,14 +44,16 @@ from nextuxlinq.api_models import (
 from nextuxlinq.config_store import ConfigSaveError
 from nextuxlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH
 from nextuxlinq.service import (
+    CandidateValidationError,
     NexTuxLinqService,
     RevisionConflictError,
     ServiceUnavailableError,
 )
+from nextuxlinq.legacy_compat import LegacyEditorUnsupportedError
 
 LOGGER = logging.getLogger(__name__)
 API_PREFIX = "/api/v1"
-MAX_REQUEST_BODY = 32 * 1024
+MAX_REQUEST_BODY = 1024 * 1024
 PACKAGE_DIRECTORY = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=PACKAGE_DIRECTORY / "templates")
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -181,7 +192,7 @@ def create_app(
                         request,
                         413,
                         "request_too_large",
-                        "The request body exceeds 32 KiB.",
+                        "The request body exceeds 1 MiB.",
                     )
             except ValueError:
                 return _error(
@@ -219,7 +230,7 @@ def create_app(
                     request,
                     413,
                     "request_too_large",
-                    "The request body exceeds 32 KiB.",
+                    "The request body exceeds 1 MiB.",
                 )
         try:
             response = await call_next(request)
@@ -229,6 +240,37 @@ def create_app(
                 409,
                 "revision_conflict",
                 "The configuration changed; reload before trying again.",
+            )
+        except LegacyEditorUnsupportedError:
+            return _error(
+                request,
+                409,
+                "legacy_editor_unsupported",
+                "This free-layout profile is read-only in the current editor.",
+            )
+        except CandidateValidationError as error:
+            field = error.field or "renderer"
+            region = error.region_id or "configuration"
+            widget = (
+                error.widget_type.value
+                if error.widget_type is not None
+                else None
+            )
+            return _error(
+                request,
+                422,
+                "candidate_rendering_failed",
+                "The free-layout candidate could not be rendered.",
+                field_errors=[
+                    {
+                        "field": f"regions.{region}.{field}",
+                        "message": "The widget settings cannot be rendered.",
+                        "region_id": error.region_id,
+                        "widget_type": widget,
+                        "category": error.category,
+                        "renderer_field": error.field,
+                    }
+                ],
             )
         except ConfigSaveError:
             return _error(
@@ -250,6 +292,14 @@ def create_app(
                 422,
                 "validation_failed",
                 str(error),
+                field_errors=[
+                    {
+                        "field": error.field,
+                        "message": (
+                            "The supplied value is not valid for this field."
+                        ),
+                    }
+                ],
             )
         except ValidationError as error:
             LOGGER.error(
@@ -400,6 +450,7 @@ def create_app(
             saved_revision=configuration.saved_revision,
             dirty=configuration.dirty,
             rendering_state=state.rendering_state,
+            update_policy=state.update_policy,
             frame_rate=service.frame_rate,
             last_frame_generation_time=state.last_frame_generation_time,
             last_successful_upload_time=state.last_successful_upload_time,
@@ -411,9 +462,25 @@ def create_app(
     async def config() -> ConfigResponse:
         snapshot = service.get_configuration()
         return ConfigResponse(
-            configuration=ConfigurationModel.from_domain(snapshot.configuration),
+            configuration=(
+                ConfigurationModel.from_domain(
+                    snapshot.legacy_configuration
+                )
+                if snapshot.legacy_configuration is not None
+                else None
+            ),
             built_in_default=ConfigurationModel.from_domain(
-                snapshot.built_in_default
+                snapshot.legacy_built_in_default
+            ),
+            canonical_configuration=snapshot.configuration.to_dict(),
+            legacy_editor_supported=snapshot.legacy_editor_supported,
+            legacy_editor_message=(
+                None
+                if snapshot.legacy_editor_supported
+                else (
+                    "This free-layout profile is read-only in the current "
+                    "editor."
+                )
             ),
             active_revision=snapshot.active_revision,
             saved_revision=snapshot.saved_revision,
@@ -453,25 +520,47 @@ def create_app(
     @app.get(f"{API_PREFIX}/preview", response_model=PreviewResponse)
     async def preview() -> PreviewResponse:
         snapshot = service.get_preview()
-        layout = snapshot.profile.layout
-        widths = (
-            ("Front clock", layout.front_clock_width, "clock"),
-            ("Gap", layout.gap_width, "gap"),
-            ("Scrolling text", layout.scroll_text_width, "scrolling-text"),
-            ("Rear clock", layout.rear_clock_width, "clock"),
-        )
-        start = 0
         regions: list[PreviewRegion] = []
-        for name, width, region_type in widths:
-            regions.append(
-                PreviewRegion(
-                    name=name,
-                    start_pixel=start,
-                    width=width,
-                    type=region_type,
-                )
+        configuration = service.get_configuration()
+        if configuration.legacy_configuration is not None:
+            layout = configuration.legacy_configuration.active.layout
+            widths = (
+                ("Front clock", layout.front_clock_width, "clock"),
+                ("Gap", layout.gap_width, "gap"),
+                (
+                    "Scrolling text",
+                    layout.scroll_text_width,
+                    "scrolling-text",
+                ),
+                ("Rear clock", layout.rear_clock_width, "clock"),
             )
-            start += width
+            start = 0
+            for name, width, region_type in widths:
+                regions.append(
+                    PreviewRegion(
+                        name=name,
+                        start_pixel=start,
+                        width=width,
+                        type=region_type,
+                    )
+                )
+                start += width
+        else:
+            for region in snapshot.profile.regions:
+                regions.append(
+                    PreviewRegion(
+                        id=region.id,
+                        name=region.name or region.id,
+                        start_pixel=region.x,
+                        y=region.y,
+                        width=region.width,
+                        height=region.height,
+                        enabled=region.enabled,
+                        background_color=region.background_color,
+                        type=region.widget.type.value.replace("_", "-"),
+                        widget_type=region.widget.type.value,
+                    )
+                )
         return PreviewResponse(
             width=MATRIX_WIDTH,
             height=MATRIX_HEIGHT,
@@ -481,6 +570,109 @@ def create_app(
             active_revision=snapshot.active_revision,
             generation_timestamp=snapshot.generated_at,
             regions=regions,
+            update_policy=snapshot.render_result.update_policy.value,
+            animated_content=snapshot.render_result.animated_content,
+        )
+
+    @app.get(
+        f"{API_PREFIX}/free-layout/config",
+        response_model=CanonicalConfigResponse,
+    )
+    async def canonical_config() -> CanonicalConfigResponse:
+        snapshot = service.get_configuration()
+        return CanonicalConfigResponse(
+            configuration=CanonicalConfigurationModel.from_domain(
+                snapshot.configuration
+            ),
+            built_in_default=CanonicalConfigurationModel.from_domain(
+                snapshot.built_in_default
+            ),
+            active_revision=snapshot.active_revision,
+            saved_revision=snapshot.saved_revision,
+            dirty=snapshot.dirty,
+            legacy_editor_supported=snapshot.legacy_editor_supported,
+        )
+
+    @app.post(
+        f"{API_PREFIX}/free-layout/validate",
+        response_model=CanonicalValidateResponse,
+    )
+    async def validate_candidate(
+        request: CanonicalValidateRequest,
+    ) -> CanonicalValidateResponse:
+        result = service.validate_configuration(
+            request.configuration.to_domain()
+        )
+        return CanonicalValidateResponse(
+            valid=True,
+            update_policy=result.update_policy.value,
+            animated_content=result.animated_content,
+            framebuffer_base64=base64.b64encode(
+                result.logical_framebuffer
+            ).decode("ascii"),
+        )
+
+    @app.post(
+        f"{API_PREFIX}/free-layout/apply",
+        response_model=CanonicalApplyResponse,
+    )
+    async def apply_candidate(
+        request: CanonicalApplyRequest,
+    ) -> CanonicalApplyResponse:
+        result = await service.apply_configuration(
+            request.configuration.to_domain(),
+            expected_revision=request.expected_revision,
+        )
+        return CanonicalApplyResponse(
+            configuration=CanonicalConfigurationModel.from_domain(
+                result.configuration
+            ),
+            active_revision=result.active_revision,
+            dirty=result.dirty,
+            update_policy=result.render_result.update_policy.value,
+        )
+
+    @app.put(
+        f"{API_PREFIX}/free-layout/config",
+        response_model=CanonicalSaveResponse,
+    )
+    async def save_candidate(
+        request: CanonicalSaveRequest,
+    ) -> CanonicalSaveResponse:
+        result = await service.save_canonical_configuration(
+            request.configuration.to_domain(),
+            expected_active_revision=request.expected_active_revision,
+            expected_saved_revision=request.expected_saved_revision,
+            apply=request.apply,
+        )
+        return CanonicalSaveResponse(
+            configuration=CanonicalConfigurationModel.from_domain(
+                result.configuration
+            ),
+            active_revision=result.active_revision,
+            saved_revision=result.saved_revision,
+            dirty=result.dirty,
+            warning=result.warning,
+        )
+
+    @app.post(
+        f"{API_PREFIX}/free-layout/profile",
+        response_model=CanonicalApplyResponse,
+    )
+    async def select_canonical_profile(
+        request: ProfileSelectionRequest,
+    ) -> CanonicalApplyResponse:
+        result = await service.select_profile(
+            request.profile_name,
+            expected_revision=request.expected_revision,
+        )
+        return CanonicalApplyResponse(
+            configuration=CanonicalConfigurationModel.from_domain(
+                result.configuration
+            ),
+            active_revision=result.active_revision,
+            dirty=result.dirty,
+            update_policy=result.render_result.update_policy.value,
         )
 
     return app

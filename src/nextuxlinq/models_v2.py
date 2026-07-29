@@ -275,6 +275,32 @@ class ProfileConfigV2:
             "regions": [region.to_dict() for region in self.regions],
         }
 
+    def _legacy_projection(self):
+        """Return the strict current-editor projection when representable."""
+        from nextuxlinq.legacy_compat import legacy_profile_from_v2
+
+        return legacy_profile_from_v2(self)
+
+    @property
+    def scrolling_text(self) -> str:
+        return self._legacy_projection().scrolling_text
+
+    @property
+    def text_color(self) -> str:
+        return self._legacy_projection().text_color
+
+    @property
+    def clock_color(self) -> str:
+        return self._legacy_projection().clock_color
+
+    @property
+    def scroll_speed(self) -> float:
+        return self._legacy_projection().scroll_speed
+
+    @property
+    def layout(self):
+        return self._legacy_projection().layout
+
 
 @dataclass(frozen=True, slots=True)
 class ConfigurationDocumentV2:

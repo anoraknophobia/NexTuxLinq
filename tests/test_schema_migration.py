@@ -410,15 +410,16 @@ def test_active_defaults_remain_v1_and_future_empty_profile_is_separate() -> Non
     assert legacy_equivalent_configuration_v2().schema_version == 2
 
 
-def test_current_parse_and_persistence_paths_remain_schema_v1(
+def test_legacy_parser_remains_available_but_persistence_is_schema_v2(
     tmp_path,
 ) -> None:
     path = tmp_path / "config.json"
     current = parse_configuration(default_configuration().to_dict())
-    ConfigStore(path).save(current)
+    canonical = migrate_configuration_v1_to_v2(current)
+    ConfigStore(path).save(canonical)
 
     assert isinstance(current, ConfigurationDocument)
     assert current.schema_version == 1
-    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 1
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 2
     with pytest.raises(ValueError, match="newer than supported schema 1"):
         parse_configuration(legacy_equivalent_configuration_v2().to_dict())

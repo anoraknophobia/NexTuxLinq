@@ -1,14 +1,13 @@
 # Free-layout widget renderers
 
-Phase 3B implements Clock and Date, and Phase 3C implements Static Text and
-Scrolling Text, for the inactive NexTuxLinq schema-v2 and rendering-v2
-foundation. Phase 3D integrates all five widget types into one canonical
-inactive registry and compositor. The active daemon, API, GUI, persistence,
-schema-v1 renderer, DeviceWorker, Creator output, and physical Matrix900 upload
-path remain unchanged.
+Phase 3B implemented Clock and Date, Phase 3C implemented Static Text and
+Scrolling Text, and Phase 3D integrated all five widget types into one
+canonical registry and compositor. Phase 4 activates that registry through
+the canonical schema-v2 service. DeviceWorker, Creator reports, and physical
+orientation remain unchanged.
 
-The future editor will provide one widget dropdown per region. Production
-runtime activation and editor exposure remain later work.
+The future visual editor will provide one widget dropdown per region. The
+current GUI remains a compatibility form and cannot edit arbitrary regions.
 
 ## Clock
 
@@ -122,16 +121,16 @@ Text supports start, center, and end plus top, center, and bottom alignment;
 Scrolling Text uses its configured initial and vertical alignments. Unset glyph
 pixels preserve the region's existing background.
 
-## Inactive registry and update policies
+## Registry and update policies
 
-Each call to the canonical inactive registry factory returns a fresh immutable
+Each call to the canonical registry factory returns a fresh immutable
 registry in stable order: Nothing / Gap, Clock, Static Text, Scrolling Text,
 and Date. Every definition binds exactly one canonical settings model, one
 renderer, validated defaults, broad minimum-size editor guidance, and an
 immutable settings-aware update-policy resolver. No registry instance is
 created during package import.
 
-Update policies describe future scheduling needs without scheduling work:
+Update policies describe service scheduling needs:
 
 - `continuous` for Scrolling Text;
 - `half_second` for a Clock with blinking separators;
@@ -149,9 +148,11 @@ Two independent five-pixel rows can use automatic `3x5` fonts without vertical
 bleed. The compositor does not use editor minimum guidance to reject narrower
 valid scrolling, clipping, truncation, or blank regions.
 
-## Deferred work
+## Phase 4 activation and deferred work
 
-Schema-v2 and rendering-v2 runtime activation, update scheduling, API and GUI
-editing, configuration persistence cutover, daemon scheduling, and physical
-upload remain deferred. The current web GUI cannot configure free-layout
-regions or these widgets.
+Schema v2, compositor rendering, update-policy scheduling, persistence, and
+canonical local API operations are active in the backend. The current web GUI
+can still edit only an exactly representable migrated legacy layout; other
+profiles are safely read-only. The visual free-layout editor and live physical
+Matrix900 validation remain deferred. See
+[Phase 4 backend activation](phase4-backend.md).

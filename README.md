@@ -93,7 +93,10 @@ the running profile, while **Save configuration** validates and persists the
 complete configuration. **Reload applied settings** discards only browser
 draft edits; it does not restore the saved file. If the daemon reconnects
 after its configuration changed, the GUI preserves the draft and asks whether
-to keep it or reload the newly applied settings.
+to keep it or reload the newly applied settings. The backend uses canonical
+schema-v2 free-layout profiles; the current form remains compatible with
+migrated legacy layouts and becomes read-only for arbitrary layouts. See
+[`docs/phase4-backend.md`](docs/phase4-backend.md).
 
 Install and uninstall operations use a private, non-blocking manager lock.
 Replaced or uninstalled managed units are retained as private `.bak` files

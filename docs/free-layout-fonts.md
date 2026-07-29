@@ -1,13 +1,12 @@
 # Free-layout font foundation
 
-Phase 3A implements an inactive bitmap-font and local text-drawing foundation
-for future NexTuxLinq Matrix900 free-layout widgets. It is not connected to the
-daemon, API, GUI, configuration persistence, active schema-v1 renderer, or
-physical output.
+Phase 3A established the bitmap-font and local text-drawing foundation for
+NexTuxLinq Matrix900 free-layout widgets. Phase 4 activates its widget users
+through the canonical compositor; the visual editor remains deferred.
 
 ## Fonts
 
-The inactive registry factory creates three concrete fonts:
+The font registry factory creates three concrete fonts:
 
 - `3x5`: a compact five-row general font for regions such as either row of a
   two-row, five-pixel-high layout;
@@ -65,14 +64,14 @@ orientation, or implement animation.
 
 ## Widget use and deferred work
 
-Clock, Static Text, Scrolling Text, and Date in the inactive
+Clock, Static Text, Scrolling Text, and Date in the
 [widget registry](free-layout-widgets.md) use this foundation without scaling
 or stretching. Blank does not use fonts. Two independent five-pixel rows can
 each select `3x5` while remaining clipped to their own regions. Full
 migration-equivalence tests confirm exact legacy 3×7 and 5×7 glyphs, spacing,
 alignment, colors, and scrolling framebuffers.
 
-Update scheduling, API and GUI exposure, persistence cutover, daemon
-activation, and physical Matrix900 output remain future phases. The current
-web GUI cannot configure free-layout widgets, and active schema-v1 framebuffer
-behavior remains unchanged.
+The Phase 4 service schedules and exposes these widget renderers through the
+canonical API. The current web GUI cannot configure arbitrary free-layout
+widgets. Migration-equivalence tests preserve schema-v1 framebuffer behavior,
+and physical Matrix900 validation remains pending.

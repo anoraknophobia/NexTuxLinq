@@ -156,7 +156,8 @@ def test_preview_regions_use_safe_dynamic_dom_rendering() -> None:
         "Viewer perspective, matching how the installed Matrix900 is seen."
         in page
     )
-    assert "normalizeRegions(preview.regions, preview.width)" in javascript
+    assert "normalizeRegions(" in javascript
+    assert "preview.height" in javascript
     assert "placeRegionsForViewer(" in javascript
     assert "copyFramebufferForViewer(" in javascript
     assert "name.textContent = region.name;" in javascript

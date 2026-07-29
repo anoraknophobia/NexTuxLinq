@@ -1,10 +1,9 @@
-# Free-layout compositor foundation
+# Free-layout compositor
 
-This document describes the implemented but inactive software compositor for
-future NexTuxLinq Matrix900 free-form layouts. Phase 3D connects all five
-inactive widget renderers and update-policy metadata. The daemon,
-HTTP API, GUI, persistence layer, DeviceWorker, and physical output continue
-to use the schema-v1 renderer.
+This document describes the NexTuxLinq Matrix900 free-layout compositor.
+Phase 3D integrated all five renderers and update-policy metadata; Phase 4
+activates that compositor in the service while preserving the existing
+DeviceWorker and Creator output path.
 
 ## Regions and widgets
 
@@ -14,7 +13,7 @@ background color, and exactly one widget assignment. A widget supplies the
 content and content-specific settings. Geometry does not change when a user
 selects another widget type.
 
-The future editor will show one widget dropdown for each region. Initial
+The future visual editor will show one widget dropdown for each region. Initial
 choices will include:
 
 - Nothing / Gap
@@ -30,7 +29,7 @@ Canvas pixels need no region at all, so uncovered pixels are also valid gaps.
 
 The compositor does not stretch widget content to fill a region. A clock in a
 90-pixel-wide region receives the complete 90-pixel local surface. The
-inactive Phase 3B clock renderer chooses its intrinsic pixel size and applies
+Clock renderer chooses its intrinsic pixel size and applies
 its own alignment settings. Font choice, fitting, alignment, and animation
 behavior belong to widget renderers rather than the region compositor.
 
@@ -85,7 +84,7 @@ exactly 2,700 bytes.
 
 Widget definitions bind one stable schema widget type to its exact settings
 model, renderer, default settings, immutable update-policy resolver, safe
-display label, and optional minimum editor guidance. The canonical inactive
+display label, and optional minimum editor guidance. The canonical
 registry contains exactly `blank`, `clock`, `static_text`, `scrolling_text`,
 and `date`, in that order. Each factory call creates a fresh registry; package
 import creates no global registry.
@@ -110,27 +109,24 @@ Only successfully rendered enabled regions contribute to the immutable
 Empty layouts and layouts containing only disabled regions are `static`.
 `animated_content` remains as compatibility metadata: it is true for
 `continuous`, `half_second`, and `second_boundary`, and false for
-`minute_boundary`, `day_boundary`, and `static`. No runtime scheduler is
-implemented in this phase.
+`minute_boundary`, `day_boundary`, and `static`. Phase 4's single service
+scheduler consumes this metadata without creating one task per region.
 
 Two separate five-pixel rows are supported. Each renderer receives only its
 own five-pixel local surface, automatic font selection can choose `3x5`, and
 neither row can draw into the other. No content is scaled or stretched.
 
 Integrated migration tests compare complete framebuffer bytes for default and
-customized schema-v1 profiles. The inactive logical framebuffer exactly
-matches the active physical-preview order, while the inactive device
-framebuffer exactly matches active Creator order across entry, scrolling,
+customized schema-v1 profiles. The logical framebuffer exactly matches the
+schema-v1 physical-preview order, while the device framebuffer exactly matches
+Creator order across entry, scrolling,
 clipping, trailing-gap, intermediate, and cycle-reset phases.
 
-## Deferred activation
+## Runtime activation
 
-This compositor is imported only by its hardware-independent tests. It is not
-connected to the active renderer or exposed through the API or GUI. The
-inactive [widget renderers](free-layout-widgets.md) are integrated only in the
-inactive registry. Editor dropdowns, configuration persistence cutover,
-runtime scheduling, daemon activation, and physical upload remain future
-phases. The separate
-[free-layout font foundation](free-layout-fonts.md) now provides inactive
-immutable bitmap fonts and local text primitives. No physical hardware test is
-required for these foundations.
+The service uses this compositor to validate candidates and to generate both
+preview and DeviceWorker framebuffers. The canonical API exposes validation
+and update-policy metadata. The current GUI still cannot edit arbitrary
+regions; it uses a strict compatibility adapter and becomes read-only for
+profiles it cannot represent. Physical Matrix900 validation remains pending.
+See [Phase 4 backend activation](phase4-backend.md).

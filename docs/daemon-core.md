@@ -19,8 +19,11 @@ authentication because it is local-only, but other processes running as the
 same machine user can still connect to loopback. Do not treat loopback as a
 security boundary between local processes.
 
-The GUI's **Apply** action changes only the running configuration. **Save
-configuration** atomically writes the complete configuration and applies it.
+The service keeps canonical schema-v2 configuration in memory. Valid schema-v1
+files migrate deterministically in memory without an automatic rewrite. The
+GUI's **Apply** action changes only the running configuration. **Save
+configuration** atomically writes the complete schema-v2 configuration and
+applies it.
 Configuration is stored at:
 
 ```text
@@ -36,6 +39,11 @@ existing canonical file. Migration reads accept only a bounded, privately
 owned regular file from a private legacy directory; symlinks, non-regular
 files, unsafe permissions, and oversized input are rejected without exposing
 filesystem details in the warning.
+
+When an explicit save first replaces a canonical schema-v1 file, a private
+unpredictably named rollback backup is synchronized beside it before the
+replacement. A failed validation or pre-commit write leaves the original
+intact.
 
 The GUI tracks three related states explicitly:
 
@@ -60,8 +68,12 @@ Frontend transition and minimal DOM tests use Node.js 20 or newer through
 Python's normal pytest suite. They use only built-in Node modules; Node.js is
 not needed to run the daemon or packaged web GUI.
 
-The versioned local API is available below `/api/v1`. It is intended for the
-packaged GUI and future local clients, not remote access.
+The versioned local API is available below `/api/v1`. Canonical schema-v2
+state, validation, apply, save, and profile selection are under
+`/api/v1/free-layout`; validation has no persistence or upload side effect.
+The existing legacy-shaped endpoints remain available to the packaged GUI.
+Profiles that cannot be represented by that form are read-only rather than
+flattened. See [`phase4-backend.md`](phase4-backend.md).
 
 Runtime and persisted configuration use independent monotonic revisions.
 `POST /api/v1/apply` checks and advances the active revision only.

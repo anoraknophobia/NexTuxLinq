@@ -19,7 +19,10 @@ from nextuxlinq.config_store import (
     resolve_config_path,
     resolve_legacy_config_path,
 )
-from nextuxlinq.defaults import default_configuration
+from nextuxlinq.defaults import (
+    default_configuration,
+    legacy_equivalent_configuration_v2,
+)
 
 
 def _write_private_legacy(path: Path, contents: str) -> None:
@@ -79,7 +82,7 @@ def test_save_after_legacy_load_migrates_without_deleting_legacy(
     store.save(loaded.configuration)
 
     assert json.loads(canonical.read_text(encoding="utf-8")) == (
-        default_configuration().to_dict()
+        legacy_equivalent_configuration_v2().to_dict()
     )
     assert legacy.read_text(encoding="utf-8") == original
     assert canonical.stat().st_mode & 0o777 == 0o600
@@ -103,8 +106,8 @@ def test_canonical_configuration_always_wins_over_legacy(
 
     assert result.configuration.active.scrolling_text == "CANONICAL"
     assert result.persisted is True
-    assert result.migration_pending is False
-    assert result.warning is None
+    assert result.migration_pending is True
+    assert result.warning == LEGACY_MIGRATION_WARNING
 
 
 def test_migration_never_overwrites_canonical_file_created_after_load(
@@ -144,7 +147,7 @@ def test_invalid_canonical_configuration_does_not_fall_back_to_legacy(
 
     result = ConfigStore(canonical, legacy_path=legacy).load()
 
-    assert result.configuration == default_configuration()
+    assert result.configuration == legacy_equivalent_configuration_v2()
     assert result.persisted is False
     assert result.migration_pending is False
     assert result.warning is not None
@@ -157,7 +160,7 @@ def _assert_legacy_rejected(
 ) -> None:
     result = ConfigStore(canonical, legacy_path=legacy).load()
 
-    assert result.configuration == default_configuration()
+    assert result.configuration == legacy_equivalent_configuration_v2()
     assert result.persisted is False
     assert result.migration_pending is False
     assert result.warning == LEGACY_LOAD_WARNING
@@ -317,14 +320,14 @@ def test_canonical_appearing_during_legacy_load_wins(tmp_path: Path) -> None:
 
     assert result.configuration.active.scrolling_text == "CANONICAL"
     assert result.persisted is True
-    assert result.migration_pending is False
-    assert result.warning is None
+    assert result.migration_pending is True
+    assert result.warning == LEGACY_MIGRATION_WARNING
 
 
 def test_missing_file_uses_defaults_without_writing(tmp_path: Path) -> None:
     path = tmp_path / "nextuxlinq" / "config.json"
     result = ConfigStore(path).load()
-    assert result.configuration == default_configuration()
+    assert result.configuration == legacy_equivalent_configuration_v2()
     assert result.persisted is False
     assert result.warning is None
     assert not path.exists()
@@ -333,10 +336,10 @@ def test_missing_file_uses_defaults_without_writing(tmp_path: Path) -> None:
 def test_round_trip_is_normalized_and_private(tmp_path: Path) -> None:
     path = tmp_path / "nextuxlinq" / "config.json"
     store = ConfigStore(path)
-    store.save(default_configuration())
+    store.save(legacy_equivalent_configuration_v2())
     result = store.load()
 
-    assert result.configuration == default_configuration()
+    assert result.configuration == legacy_equivalent_configuration_v2()
     assert result.persisted is True
     assert result.warning is None
     assert path.stat().st_mode & 0o777 == 0o600
@@ -344,12 +347,67 @@ def test_round_trip_is_normalized_and_private(tmp_path: Path) -> None:
     assert not [entry for entry in path.parent.iterdir() if entry.suffix == ".tmp"]
 
 
+def test_schema_v1_load_is_in_memory_until_explicit_save_with_backup(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "nextuxlinq" / "config.json"
+    path.parent.mkdir()
+    original = json.dumps(
+        default_configuration().to_dict(),
+        separators=(",", ":"),
+    ).encode("utf-8")
+    path.write_bytes(original)
+    store = ConfigStore(path)
+
+    loaded = store.load()
+
+    assert loaded.configuration == legacy_equivalent_configuration_v2()
+    assert loaded.migration_pending is True
+    assert path.read_bytes() == original
+    assert list(path.parent.glob("*.bak")) == []
+
+    store.save(loaded.configuration)
+
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 2
+    backups = list(path.parent.glob(".config.json.schema-v1.*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    assert backups[0].stat().st_mode & 0o777 == 0o600
+
+
+def test_failed_first_schema_v2_save_preserves_schema_v1_and_backup(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "nextuxlinq" / "config.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps(default_configuration().to_dict()), encoding="utf-8")
+    original = path.read_bytes()
+    store = ConfigStore(path)
+    loaded = store.load()
+
+    with patch(
+        "nextuxlinq.config_store.os.replace",
+        side_effect=OSError("test-only secret"),
+    ):
+        with pytest.raises(ConfigSaveError) as raised:
+            store.save(loaded.configuration)
+
+    assert raised.value.committed is False
+    assert raised.value.__context__ is None
+    assert raised.value.__cause__ is None
+    assert path.read_bytes() == original
+    backups = list(path.parent.glob(".config.json.schema-v1.*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    assert "test-only secret" not in str(raised.value)
+
+
 def test_invalid_file_is_preserved_and_defaults_are_safe(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
     path.write_text("{broken", encoding="utf-8")
     result = ConfigStore(path).load()
 
-    assert result.configuration == default_configuration()
+    assert result.configuration == legacy_equivalent_configuration_v2()
     assert result.warning is not None
     assert path.read_text(encoding="utf-8") == "{broken"
 
@@ -361,7 +419,9 @@ def test_newer_schema_is_not_overwritten(tmp_path: Path) -> None:
     result = ConfigStore(path).load()
 
     assert result.persisted is False
-    assert "newer" in (result.warning or "")
+    assert result.warning == (
+        "Could not load configuration safely; using defaults."
+    )
     assert path.read_text(encoding="utf-8") == contents
 
 
@@ -380,7 +440,7 @@ def test_huge_numeric_value_falls_back_safely(tmp_path: Path) -> None:
 
     result = ConfigStore(path).load()
 
-    assert result.configuration == default_configuration()
+    assert result.configuration == legacy_equivalent_configuration_v2()
     assert result.persisted is False
     assert result.warning is not None
 
@@ -391,7 +451,7 @@ def test_existing_configuration_directory_is_restricted(tmp_path: Path) -> None:
     directory.chmod(0o755)
     path = directory / "config.json"
 
-    ConfigStore(path).save(default_configuration())
+    ConfigStore(path).save(legacy_equivalent_configuration_v2())
 
     assert directory.stat().st_mode & 0o777 == 0o700
 
@@ -405,7 +465,7 @@ def assert_pre_commit_failure(
     path.write_text('{"old": true}\n', encoding="utf-8")
     with patch(target, side_effect=failure):
         with pytest.raises(ConfigSaveError) as raised:
-            ConfigStore(path).save(default_configuration())
+            ConfigStore(path).save(legacy_equivalent_configuration_v2())
 
     assert raised.value.committed is False
     assert path.read_text(encoding="utf-8") == '{"old": true}\n'
@@ -441,7 +501,7 @@ def test_directory_chmod_failure_is_pre_commit(tmp_path: Path) -> None:
     path.write_text('{"old": true}\n', encoding="utf-8")
     with patch("nextuxlinq.config_store.os.chmod", side_effect=OSError("failed")):
         with pytest.raises(ConfigSaveError) as raised:
-            ConfigStore(path).save(default_configuration())
+            ConfigStore(path).save(legacy_equivalent_configuration_v2())
 
     assert raised.value.committed is False
     assert path.read_text(encoding="utf-8") == '{"old": true}\n'
@@ -463,11 +523,11 @@ def test_descriptor_close_failure_does_not_prevent_temp_cleanup(
         patch("nextuxlinq.config_store.os.close", side_effect=close_then_fail),
     ):
         with pytest.raises(ConfigSaveError) as raised:
-            ConfigStore(path).save(default_configuration())
+            ConfigStore(path).save(legacy_equivalent_configuration_v2())
 
     assert raised.value.committed is False
-    assert raised.value.__cause__ is not None
-    assert str(raised.value.__cause__) == "open failed"
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
     assert path.read_text(encoding="utf-8") == '{"old": true}\n'
     assert not [entry for entry in tmp_path.iterdir() if entry.suffix == ".tmp"]
 
@@ -485,10 +545,10 @@ def test_directory_open_failure_reports_committed_state(tmp_path: Path) -> None:
 
     with patch("nextuxlinq.config_store.os.open", side_effect=fail_directory_open):
         with pytest.raises(ConfigSaveError) as raised:
-            ConfigStore(path).save(default_configuration())
+            ConfigStore(path).save(legacy_equivalent_configuration_v2())
 
     assert raised.value.committed is True
-    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 1
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 2
     assert not [entry for entry in tmp_path.iterdir() if entry.suffix == ".tmp"]
 
 
@@ -497,14 +557,14 @@ def test_directory_fsync_failure_reports_committed_state(tmp_path: Path) -> None
     fsync = Mock(side_effect=[None, OSError("failed")])
     with patch("nextuxlinq.config_store.os.fsync", fsync):
         with pytest.raises(ConfigSaveError) as raised:
-            ConfigStore(path).save(default_configuration())
+            ConfigStore(path).save(legacy_equivalent_configuration_v2())
 
     assert raised.value.committed is True
-    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 1
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 2
     assert not [entry for entry in tmp_path.iterdir() if entry.suffix == ".tmp"]
 
 
 def test_saved_json_has_expected_schema(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
-    ConfigStore(path).save(default_configuration())
-    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 1
+    ConfigStore(path).save(legacy_equivalent_configuration_v2())
+    assert json.loads(path.read_text(encoding="utf-8"))["schema_version"] == 2

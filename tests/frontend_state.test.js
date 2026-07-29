@@ -357,6 +357,82 @@ test("configuration presentation uses API dirty and supports combined state", ()
   );
 });
 
+test("arbitrary free-layout profiles make the legacy editor safely read-only", () => {
+  const {controller} = controllerFixture();
+  const canonical = {
+    schema_version: 2,
+    active_profile: "free",
+    profiles: {
+      free: {
+        brightness: null,
+        canvas: {width: 90, height: 10, background_color: "#000000"},
+        regions: [],
+      },
+    },
+  };
+
+  controller.acceptRemoteSnapshot({
+    status: statusPayload({active_profile: "free"}),
+    config: {
+      ...configPayload(),
+      configuration: null,
+      canonical_configuration: canonical,
+      legacy_editor_supported: false,
+      legacy_editor_message: "Free layout is read-only.",
+    },
+  });
+
+  assert.equal(controller.state.runtime.configuration, null);
+  assert.equal(controller.state.runtime.activeProfileName, "free");
+  assert.equal(controller.state.runtime.legacyEditorSupported, false);
+  assert.equal(controller.elements.configurationSummary.textContent,
+    "Free-layout profile is read-only");
+  assert.equal(controller.elements.applyButton.disabled, true);
+  assert.equal(controller.elements.saveButton.disabled, true);
+  assert.equal(controller.elements.defaultsButton.disabled, true);
+  for (const control of Object.values(controller.controls)) {
+    assert.equal(control.disabled, true);
+  }
+});
+
+test("reconnect preserves a draft until unsupported free layout is accepted", async () => {
+  const canonical = {
+    schema_version: 2,
+    active_profile: "free",
+    profiles: {
+      free: {
+        brightness: null,
+        canvas: {width: 90, height: 10, background_color: "#000000"},
+        regions: [],
+      },
+    },
+  };
+  const remoteConfig = {
+    ...configPayload({active_revision: 2}),
+    configuration: null,
+    canonical_configuration: canonical,
+    legacy_editor_supported: false,
+  };
+  const {controller} = controllerFixture([
+    response(statusPayload({active_profile: "free", active_revision: 2})),
+    response(remoteConfig),
+  ]);
+  controller.controls.scrolling_text.value = "LOCAL DRAFT";
+  controller.updateDraftFromForm();
+
+  await controller.beginReconciliation("reconnect");
+
+  assert.equal(controller.state.connection.reconciliationState, "pending");
+  assert.equal(controller.controls.scrolling_text.value, "LOCAL DRAFT");
+  assert.equal(controller.elements.keepDraftButton.disabled, true);
+  assert.equal(controller.elements.reloadReconciliationButton.disabled, false);
+
+  controller.reloadPendingAppliedSettings();
+  assert.equal(controller.state.runtime.configuration, null);
+  assert.equal(controller.state.runtime.activeProfileName, "free");
+  assert.equal(controller.state.runtime.legacyEditorSupported, false);
+});
+
 test("Apply success updates runtime while preserving saved revision", async () => {
   const normalized = profile({scrolling_text: "LOWERCASE"});
   const fetch = [
@@ -1137,8 +1213,6 @@ test("unchanged preview regions are not rebuilt", async () => {
 test("invalid preview region variants use the Matrix900 fallback", () => {
   const variants = [
     null,
-    [],
-    [{name: "Only", start_pixel: 0, width: 20, type: "clock"}],
     [
       {name: "A", start_pixel: 0, width: 50, type: "clock"},
       {name: "B", start_pixel: 40, width: 50, type: "clock"},
@@ -1151,6 +1225,26 @@ test("invalid preview region variants use the Matrix900 fallback", () => {
     assert.equal(result.valid, false);
     assert.deepEqual(result.regions, frontend.FALLBACK_REGIONS);
   }
+});
+
+test("empty and noncontiguous free-layout preview regions are valid", () => {
+  assert.deepEqual(frontend.normalizeRegions([], 90, 10), {
+    regions: [],
+    valid: true,
+  });
+  const result = frontend.normalizeRegions([
+    {
+      name: "Only",
+      start_pixel: 10,
+      y: 5,
+      width: 20,
+      height: 5,
+      type: "static-text",
+    },
+  ], 90, 10);
+  assert.equal(result.valid, true);
+  assert.equal(result.regions[0].start_pixel, 10);
+  assert.equal(result.regions[0].y, 5);
 });
 
 test("duplicate normalized preview-region names use the fallback", () => {

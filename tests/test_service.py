@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from datetime import datetime
+import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -13,8 +14,14 @@ from nextuxlinq.config_store import LEGACY_MIGRATION_WARNING, ConfigLoadResult
 from nextuxlinq.defaults import default_configuration, default_profile
 from nextuxlinq.device_worker import DeviceWorker, DeviceWorkerSnapshot
 from nextuxlinq.models import ConfigurationDocument, ProfileConfig
+from nextuxlinq.models_v2 import ConfigurationDocumentV2
+from nextuxlinq.migration import migrate_configuration_v1_to_v2
 from nextuxlinq.rendering import render_profile_at_elapsed
-from nextuxlinq.service import NexTuxLinqService, WorkerSubmissionError
+from nextuxlinq.service import (
+    CandidateValidationError,
+    NexTuxLinqService,
+    WorkerSubmissionError,
+)
 from nextuxlinq.state import DaemonState
 from nextuxlinq.writer_lock import WriterLock
 
@@ -129,7 +136,7 @@ def test_service_uses_profile_speed_and_preserves_rendered_output() -> None:
             scrolling_text="matrix",
             scroll_speed=3.0,
         )
-        now = datetime(2026, 7, 27, 20, 36)
+        now = datetime(2026, 7, 27, 20, 36, tzinfo=timezone.utc)
         service = NexTuxLinqService(
             config_store=FakeStore(configuration),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
@@ -139,11 +146,11 @@ def test_service_uses_profile_speed_and_preserves_rendered_output() -> None:
         )
         await service.start()
         await asyncio.wait_for(rendered.wait(), 1)
-        expected = render_profile_at_elapsed(configuration.active, now, 1.0)
+        expected = render_profile_at_elapsed(configuration.active, now, 0.0)
 
         assert worker.frames == [(expected.to_bytes(), 1)]
         assert worker.brightness == []
-        assert service.snapshot().last_frame_generation_time == 1.0
+        assert service.snapshot().last_frame_generation_time == 0.0
         await service.stop()
         assert worker.stopped
 
@@ -635,8 +642,9 @@ def test_apply_then_save_apply_preserves_command_order() -> None:
 
         assert [revision for _, revision in worker.frames] == [2, 3]
         assert worker.brightness == [(80, 3)]
-        assert service.configuration == saved_configuration
-        assert store.saved == [saved_configuration]
+        canonical = migrate_configuration_v1_to_v2(saved_configuration)
+        assert service.configuration == canonical
+        assert store.saved == [canonical]
 
     asyncio.run(scenario())
 
@@ -658,16 +666,64 @@ def test_submission_rejection_rolls_back_runtime_publication() -> None:
             lifecycle_state="running",
             active_configuration_revision=1,
         )
-        with pytest.raises(WorkerSubmissionError):
+        with pytest.raises(WorkerSubmissionError) as raised:
             await service.apply_profile(
                 "default",
                 configuration_with(scrolling_text="REJECTED").active,
                 expected_revision=1,
             )
+        assert raised.value.__context__ is None
+        assert raised.value.__cause__ is None
+        assert "private worker state" not in "".join(
+            traceback.format_exception(raised.value)
+        )
         assert service.configuration.active.scrolling_text == "CACHYOS"
         assert service.snapshot().active_configuration_revision == 1
 
     asyncio.run(scenario())
+
+
+def test_candidate_translation_does_not_retain_renderer_failure() -> None:
+    service = NexTuxLinqService(
+        config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
+        device_worker=FakeWorker(),  # type: ignore[arg-type]
+        monotonic=lambda: 10.0,
+        wall_clock=lambda: datetime(
+            2026,
+            7,
+            29,
+            16,
+            26,
+            tzinfo=timezone.utc,
+        ),
+    )
+    raw = migrate_configuration_v1_to_v2(
+        default_configuration()
+    ).to_dict()
+    secret = "PHASE4_SECRET_\u2603"
+    raw["profiles"]["default"]["regions"][1]["widget"]["settings"][
+        "content"
+    ] = secret
+    candidate = ConfigurationDocumentV2.from_dict(raw)
+
+    with pytest.raises(CandidateValidationError) as raised:
+        service.validate_configuration(candidate)
+
+    error = raised.value
+    assert error.category == "unsupported_glyph"
+    assert error.region_id == "legacy-scrolling-text"
+    assert error.widget_type is not None
+    assert error.__context__ is None
+    assert error.__cause__ is None
+    assert all(not isinstance(value, BaseException) for value in error.args)
+    assert all(
+        not isinstance(value, BaseException)
+        for value in vars(error).values()
+    )
+    formatted = "".join(traceback.format_exception(error))
+    assert secret not in formatted
+    assert "WidgetRenderingError" not in formatted
+    assert "CompositorError" not in formatted
 
 
 def test_partial_submission_failure_marks_service_failed_without_publication() -> None:
@@ -758,7 +814,7 @@ def test_render_loop_submits_one_atomic_profile_revision_pair() -> None:
     capture_attempted = threading.Event()
     worker = FakeWorker()
     candidate = configuration_with(scrolling_text="ATOMIC")
-    now = datetime(2026, 7, 27, 20, 36)
+    now = datetime(2026, 7, 27, 20, 36, tzinfo=timezone.utc)
 
     class CoordinatedService(NexTuxLinqService):
         def _capture_active_profile(self):

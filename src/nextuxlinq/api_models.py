@@ -7,17 +7,26 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
 from nextuxlinq.models import ConfigurationDocument, LayoutConfig, ProfileConfig
+from nextuxlinq.models_v2 import ConfigurationDocumentV2
 
 
 class DomainValidationError(ValueError):
     """Field-safe validation failure raised at the HTTP/domain boundary."""
 
+    def __init__(self, *, field: str) -> None:
+        self.field = field
+        super().__init__("The request contains invalid configuration data.")
 
-def _convert_domain(factory, value):
+
+def _convert_domain(factory, value, *, field: str = "configuration"):
+    failed = False
     try:
         return factory(value)
-    except (TypeError, ValueError) as error:
-        raise DomainValidationError(str(error)) from error
+    except (TypeError, ValueError):
+        failed = True
+    if failed:
+        raise DomainValidationError(field=field)
+    raise AssertionError("Unreachable domain conversion state.")
 
 
 class StrictModel(BaseModel):
@@ -31,7 +40,11 @@ class LayoutModel(StrictModel):
     rear_clock_width: StrictInt
 
     def to_domain(self) -> LayoutConfig:
-        return _convert_domain(LayoutConfig.from_dict, self.model_dump())
+        return _convert_domain(
+            LayoutConfig.from_dict,
+            self.model_dump(),
+            field="profile.layout",
+        )
 
 
 class ProfileModel(StrictModel):
@@ -43,7 +56,11 @@ class ProfileModel(StrictModel):
     layout: LayoutModel
 
     def to_domain(self) -> ProfileConfig:
-        return _convert_domain(ProfileConfig.from_dict, self.model_dump())
+        return _convert_domain(
+            ProfileConfig.from_dict,
+            self.model_dump(),
+            field="profile",
+        )
 
     @classmethod
     def from_domain(cls, profile: ProfileConfig) -> ProfileModel:
@@ -99,8 +116,11 @@ class SaveResponse(StrictModel):
 
 
 class ConfigResponse(StrictModel):
-    configuration: ConfigurationModel
+    configuration: ConfigurationModel | None
     built_in_default: ConfigurationModel
+    canonical_configuration: dict[str, Any]
+    legacy_editor_supported: bool
+    legacy_editor_message: str | None
     active_revision: int
     saved_revision: int | None
     dirty: bool
@@ -119,6 +139,7 @@ class StatusResponse(StrictModel):
     saved_revision: int | None
     dirty: bool
     rendering_state: str
+    update_policy: str
     frame_rate: float
     last_frame_generation_time: float | None
     last_successful_upload_time: float | None
@@ -131,6 +152,12 @@ class PreviewRegion(StrictModel):
     start_pixel: int
     width: int
     type: str
+    id: str | None = None
+    y: int = 0
+    height: int = 10
+    enabled: bool = True
+    background_color: str | None = None
+    widget_type: str | None = None
 
 
 class PreviewResponse(StrictModel):
@@ -142,6 +169,83 @@ class PreviewResponse(StrictModel):
     active_revision: int
     generation_timestamp: float
     regions: list[PreviewRegion]
+    update_policy: str
+    animated_content: bool
+
+
+class CanonicalConfigurationModel(StrictModel):
+    schema_version: StrictInt
+    active_profile: str
+    profiles: dict[str, Any]
+
+    def to_domain(self) -> ConfigurationDocumentV2:
+        return _convert_domain(
+            ConfigurationDocumentV2.from_dict,
+            self.model_dump(),
+        )
+
+    @classmethod
+    def from_domain(
+        cls,
+        configuration: ConfigurationDocumentV2,
+    ) -> CanonicalConfigurationModel:
+        return cls.model_validate(configuration.to_dict())
+
+
+class CanonicalConfigResponse(StrictModel):
+    configuration: CanonicalConfigurationModel
+    built_in_default: CanonicalConfigurationModel
+    active_revision: int
+    saved_revision: int | None
+    dirty: bool
+    legacy_editor_supported: bool
+
+
+class CanonicalValidateRequest(StrictModel):
+    configuration: CanonicalConfigurationModel
+
+
+class CanonicalValidateResponse(StrictModel):
+    valid: bool
+    update_policy: str
+    animated_content: bool
+    framebuffer_base64: str
+
+
+class CanonicalApplyRequest(StrictModel):
+    configuration: CanonicalConfigurationModel
+    expected_revision: StrictInt | None = None
+
+
+class CanonicalApplyResponse(StrictModel):
+    configuration: CanonicalConfigurationModel
+    active_revision: int
+    dirty: bool
+    update_policy: str
+
+
+class CanonicalSaveRequest(StrictModel):
+    configuration: CanonicalConfigurationModel
+    expected_active_revision: StrictInt | None
+    expected_saved_revision: StrictInt | None
+    apply: bool = True
+
+
+class CanonicalSaveResponse(StrictModel):
+    configuration: CanonicalConfigurationModel
+    active_revision: int
+    saved_revision: int | None
+    dirty: bool
+    warning: str | None
+
+
+class ProfileSelectionRequest(StrictModel):
+    profile_name: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    expected_revision: StrictInt | None = None
 
 
 class ErrorResponse(StrictModel):

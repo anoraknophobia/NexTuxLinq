@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Mapping
 
-from nextuxlinq.config_store import parse_configuration
 from nextuxlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH
 from nextuxlinq.models import ConfigurationDocument
 from nextuxlinq.models_v2 import (
@@ -204,5 +203,13 @@ def parse_or_migrate_configuration_v2(
     if detection.kind is SchemaKind.VERSION_2:
         return ConfigurationDocumentV2.from_dict(raw)
     if detection.kind in {SchemaKind.PRE_VERSIONED, SchemaKind.VERSION_1}:
-        return migrate_configuration_v1_to_v2(parse_configuration(raw))
+        assert isinstance(raw, Mapping)
+        normalized = (
+            {**raw, "schema_version": SCHEMA_VERSION_V1}
+            if detection.kind is SchemaKind.PRE_VERSIONED
+            else raw
+        )
+        return migrate_configuration_v1_to_v2(
+            ConfigurationDocument.from_dict(normalized)
+        )
     raise AssertionError("Unhandled configuration schema classification.")

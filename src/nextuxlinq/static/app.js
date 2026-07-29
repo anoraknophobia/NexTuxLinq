@@ -72,6 +72,8 @@
         savedRevision: null,
         dirty: false,
         acceptedFingerprint: null,
+        activeProfileName: null,
+        legacyEditorSupported: true,
       },
       draft: {
         values: null,
@@ -146,6 +148,13 @@
   }
 
   function deriveConfigurationState(state) {
+    if (!state.runtime.legacyEditorSupported) {
+      return {
+        primary: "Free-layout profile is read-only",
+        detail: "The current editor cannot modify this profile. Preview and status remain available.",
+        className: "state-read-only",
+      };
+    }
     if (state.runtime.configuration === null) {
       return {
         primary: "Loading settings…",
@@ -179,25 +188,30 @@
   }
 
   function remoteFingerprint(snapshot) {
+    const canonical = snapshot.config.canonical_configuration
+      || snapshot.config.configuration;
     return stableStringify({
-      configuration: snapshot.config.configuration,
+      configuration: canonical,
       active_revision: snapshot.config.active_revision,
       saved_revision: snapshot.config.saved_revision,
       dirty: snapshot.config.dirty,
-      active_profile: snapshot.config.configuration.active_profile,
+      active_profile: canonical.active_profile,
     });
   }
 
   function remoteMatchesAccepted(state, snapshot) {
     return (
-      state.runtime.configuration !== null
-      && state.runtime.activeRevision === snapshot.config.active_revision
+      state.runtime.activeRevision === snapshot.config.active_revision
       && state.runtime.savedRevision === snapshot.config.saved_revision
       && state.runtime.dirty === snapshot.config.dirty
       && state.runtime.acceptedFingerprint
-        === configurationFingerprint(snapshot.config.configuration)
-      && state.runtime.configuration.active_profile
-        === snapshot.config.configuration.active_profile
+        === configurationFingerprint(
+          snapshot.config.canonical_configuration
+            || snapshot.config.configuration
+        )
+      && state.runtime.activeProfileName
+        === (snapshot.config.canonical_configuration
+          || snapshot.config.configuration).active_profile
     );
   }
 
@@ -206,6 +220,8 @@
     configuration.profiles[result.profile_name] = deepClone(result.profile);
     configuration.active_profile = result.profile_name;
     state.runtime.configuration = configuration;
+    state.runtime.activeProfileName = result.profile_name;
+    state.runtime.legacyEditorSupported = true;
     state.runtime.activeRevision = result.active_revision;
     state.runtime.dirty = Boolean(result.dirty);
     state.runtime.acceptedFingerprint = configurationFingerprint(configuration);
@@ -216,6 +232,8 @@
 
   function saveSuccessfulResponse(state, result) {
     state.runtime.configuration = deepClone(result.configuration);
+    state.runtime.activeProfileName = result.configuration.active_profile;
+    state.runtime.legacyEditorSupported = true;
     state.runtime.activeRevision = result.active_revision;
     state.runtime.savedRevision = result.saved_revision;
     state.runtime.dirty = Boolean(result.dirty);
@@ -230,12 +248,12 @@
     state.draft.dirty = false;
   }
 
-  function normalizeRegions(regions, previewWidth = 90) {
+  function normalizeRegions(regions, previewWidth = 90, previewHeight = 10) {
     if (!Number.isInteger(previewWidth) || previewWidth <= 0
-        || !Array.isArray(regions) || regions.length === 0) {
+        || !Number.isInteger(previewHeight) || previewHeight <= 0
+        || !Array.isArray(regions)) {
       return {regions: FALLBACK_REGIONS, valid: false};
     }
-    let expectedStart = 0;
     const normalized = [];
     const normalizedNames = new Set();
     for (const region of regions) {
@@ -249,12 +267,18 @@
           || /[\p{C}\p{Zl}\p{Zp}]/u.test(region.name)
           || !/[\p{L}\p{N}\p{P}\p{S}]/u.test(displayName)
           || normalizedNames.has(normalizedName)
-          || !Number.isInteger(region.start_pixel)
+          || !Number.isInteger(
+            region.start_pixel === undefined ? region.x : region.start_pixel
+          )
           || !Number.isInteger(region.width)
-          || region.start_pixel !== expectedStart
           || region.width <= 0
-          || region.start_pixel < 0
-          || region.start_pixel + region.width > previewWidth
+          || (region.start_pixel ?? region.x) < 0
+          || (region.start_pixel ?? region.x) + region.width > previewWidth
+          || !Number.isInteger(region.y ?? 0)
+          || !Number.isInteger(region.height ?? previewHeight)
+          || (region.y ?? 0) < 0
+          || (region.height ?? previewHeight) <= 0
+          || (region.y ?? 0) + (region.height ?? previewHeight) > previewHeight
           || typeof region.type !== "string"
           || !/^[a-z0-9-]+$/.test(region.type)) {
         return {regions: FALLBACK_REGIONS, valid: false};
@@ -262,14 +286,25 @@
       normalizedNames.add(normalizedName);
       normalized.push({
         name: displayName,
-        start_pixel: region.start_pixel,
+        start_pixel: region.start_pixel ?? region.x,
+        y: region.y ?? 0,
         width: region.width,
+        height: region.height ?? previewHeight,
+        enabled: region.enabled !== false,
         type: region.type,
       });
-      expectedStart += region.width;
     }
-    if (expectedStart !== previewWidth) {
-      return {regions: FALLBACK_REGIONS, valid: false};
+    for (let index = 0; index < normalized.length; index += 1) {
+      const left = normalized[index];
+      for (const right of normalized.slice(index + 1)) {
+        const overlaps = (
+          left.start_pixel < right.start_pixel + right.width
+          && right.start_pixel < left.start_pixel + left.width
+          && left.y < right.y + right.height
+          && right.y < left.y + left.height
+        );
+        if (overlaps) return {regions: FALLBACK_REGIONS, valid: false};
+      }
     }
     return {regions: normalized, valid: true};
   }
@@ -302,8 +337,21 @@
     canvasHeight,
     regions,
   ) {
+    for (let y = 0; y < canvasHeight; y += 1) {
+      for (let x = 0; x < canvasWidth; x += 1) {
+        const sourcePixel = ((y * canvasWidth) + x) * 3;
+        const targetPixel = ((y * canvasWidth) + x) * 4;
+        image.data[targetPixel] = binary.charCodeAt(sourcePixel);
+        image.data[targetPixel + 1] = binary.charCodeAt(sourcePixel + 1);
+        image.data[targetPixel + 2] = binary.charCodeAt(sourcePixel + 2);
+        image.data[targetPixel + 3] = 255;
+      }
+    }
     for (const region of regions) {
-      for (let y = 0; y < canvasHeight; y += 1) {
+      if (region.enabled === false) continue;
+      const regionY = region.y ?? 0;
+      const regionHeight = region.height ?? canvasHeight;
+      for (let y = regionY; y < regionY + regionHeight; y += 1) {
         for (let localX = 0; localX < region.width; localX += 1) {
           const sourcePixel = (
             (y * canvasWidth) + region.start_pixel + localX
@@ -473,6 +521,7 @@
     let renderedRegionFingerprint = null;
 
     function activeProfile(configuration = state.runtime.configuration) {
+      if (configuration === null) return null;
       return configuration.profiles[configuration.active_profile];
     }
 
@@ -536,7 +585,7 @@
       elements.devicePath.textContent = status.device_path || "—";
       elements.activeProfile.textContent = state.runtime.configuration
         ? state.runtime.configuration.active_profile
-        : status.active_profile;
+        : state.runtime.activeProfileName || status.active_profile;
       elements.configurationRevision.textContent =
         state.runtime.activeRevision === null
           ? String(status.active_revision)
@@ -576,7 +625,9 @@
       }
       const previousProfile = state.runtime.configuration
         ? state.runtime.configuration.active_profile : null;
-      const remoteProfile = pending.config.configuration.active_profile;
+      const remoteConfiguration = pending.config.canonical_configuration
+        || pending.config.configuration;
+      const remoteProfile = remoteConfiguration.active_profile;
       const profileChange = previousProfile !== null
         && previousProfile !== remoteProfile
         ? ` The applied profile changed from ${previousProfile} to ${remoteProfile}.`
@@ -592,6 +643,7 @@
       const unavailable = (
         state.connection.reachable !== true
         || state.runtime.configuration === null
+        || !state.runtime.legacyEditorSupported
       );
       const reconciling = ["fetching", "pending"].includes(
         state.connection.reconciliationState
@@ -600,13 +652,25 @@
       elements.applyButton.disabled = mutationDisabled;
       elements.saveButton.disabled = mutationDisabled;
       elements.reloadButton.disabled = mutationDisabled;
-      elements.defaultsButton.disabled = state.ui.submitting || defaults === null;
+      elements.defaultsButton.disabled = mutationDisabled || defaults === null;
+      for (const control of Object.values(controls)) {
+        control.disabled = mutationDisabled;
+      }
+      const pending = state.connection.pendingRemoteSnapshot;
+      const pendingSupportsLegacyEditor = (
+        pending !== null
+        && pending.config.legacy_editor_supported !== false
+        && pending.config.configuration !== null
+      );
       elements.keepDraftButton.disabled = (
         state.ui.submitting
         || state.connection.reconciliationState !== "pending"
+        || !pendingSupportsLegacyEditor
       );
-      elements.reloadReconciliationButton.disabled =
-        elements.keepDraftButton.disabled;
+      elements.reloadReconciliationButton.disabled = (
+        state.ui.submitting
+        || state.connection.reconciliationState !== "pending"
+      );
     }
 
     function showActionMessage(text, kind = "") {
@@ -756,20 +820,39 @@
       snapshot,
       {fill = true, preservedDraft = null} = {},
     ) {
-      state.runtime.configuration = deepClone(snapshot.config.configuration);
+      const canonical = snapshot.config.canonical_configuration
+        || snapshot.config.configuration;
+      const supported = snapshot.config.legacy_editor_supported !== false
+        && snapshot.config.configuration !== null;
+      state.runtime.configuration = supported
+        ? deepClone(snapshot.config.configuration) : null;
+      state.runtime.legacyEditorSupported = supported;
+      state.runtime.activeProfileName = canonical.active_profile;
       state.runtime.activeRevision = snapshot.config.active_revision;
       state.runtime.savedRevision = snapshot.config.saved_revision;
       state.runtime.dirty = Boolean(snapshot.config.dirty);
       state.runtime.acceptedFingerprint = configurationFingerprint(
-        snapshot.config.configuration
+        canonical
       );
       defaults = deepClone(snapshot.config.built_in_default);
       latestStatus = snapshot.status || latestStatus;
-      const profile = activeProfile();
-      setDraftBaseline(profile, {
-        fill,
-        values: preservedDraft,
-      });
+      if (supported) {
+        const profile = activeProfile();
+        setDraftBaseline(profile, {
+          fill,
+          values: preservedDraft,
+        });
+      } else {
+        state.draft.values = null;
+        state.draft.baseline = null;
+        state.draft.dirty = false;
+        showActionMessage(
+          snapshot.config.legacy_editor_message
+            || "This free-layout profile is read-only in the current editor.",
+          "warning",
+        );
+        renderConfigurationState();
+      }
       state.connection.pendingRemoteSnapshot = null;
       state.connection.reconciliationState = "idle";
       state.connection.warnedRemoteFingerprint = null;
@@ -863,13 +946,12 @@
     }
 
     function statusNeedsReconciliation(status = latestStatus) {
-      if (!status || state.runtime.configuration === null) return true;
+      if (!status || state.runtime.activeRevision === null) return true;
       return (
         status.active_revision !== state.runtime.activeRevision
         || status.saved_revision !== state.runtime.savedRevision
         || Boolean(status.dirty) !== state.runtime.dirty
-        || status.active_profile
-          !== state.runtime.configuration.active_profile
+        || status.active_profile !== state.runtime.activeProfileName
       );
     }
 
@@ -916,7 +998,11 @@
 
     function keepLocalDraft() {
       const pending = state.connection.pendingRemoteSnapshot;
-      if (!pending) return;
+      if (
+        !pending
+        || pending.config.legacy_editor_supported === false
+        || pending.config.configuration === null
+      ) return;
       const preservedDraft = readDraftValues();
       const previousProfile = state.runtime.configuration.active_profile;
       const targetProfile = pending.config.configuration.active_profile;
@@ -1056,7 +1142,11 @@
 
     async function refreshPreview() {
       const preview = await request("/preview");
-      const normalized = normalizeRegions(preview.regions, preview.width);
+      const normalized = normalizeRegions(
+        preview.regions,
+        preview.width,
+        preview.height,
+      );
       const viewerRegions = placeRegionsForViewer(
         normalized.regions,
         preview.width,

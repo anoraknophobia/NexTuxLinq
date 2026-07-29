@@ -10,12 +10,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
-from nextuxlinq.defaults import default_configuration
+from nextuxlinq.defaults import (
+    default_configuration,
+    legacy_equivalent_configuration_v2,
+)
+from nextuxlinq.migration import (
+    SchemaKind,
+    detect_configuration_schema,
+    parse_or_migrate_configuration_v2,
+)
 from nextuxlinq.models import SCHEMA_VERSION, ConfigurationDocument
+from nextuxlinq.models_v2 import ConfigurationDocumentV2
 
 LEGACY_MIGRATION_WARNING = (
-    "Legacy NexLinq configuration loaded. Save to migrate it to NexTuxLinq; "
-    "the legacy file will be preserved."
+    "Schema-v1 configuration loaded in memory. An explicit save will write "
+    "schema v2 and preserve the original."
 )
 LEGACY_LOAD_WARNING = (
     "Could not load legacy NexLinq configuration safely; using defaults."
@@ -27,7 +36,7 @@ MAX_CONFIGURATION_BYTES = 1024 * 1024
 class ConfigLoadResult:
     """Configuration loaded from disk or a safe built-in fallback."""
 
-    configuration: ConfigurationDocument
+    configuration: ConfigurationDocumentV2
     warning: str | None = None
     persisted: bool = False
     migration_pending: bool = False
@@ -110,6 +119,7 @@ class ConfigStore:
                 None if legacy_path is None else Path(legacy_path)
             )
         self._migration_pending = False
+        self._schema_v1_backup: bytes | None = None
 
     def load(self) -> ConfigLoadResult:
         """Load without modifying missing or invalid configuration files."""
@@ -121,8 +131,12 @@ class ConfigStore:
     def _load_canonical_if_present(self) -> ConfigLoadResult | None:
         """Load the canonical path, returning None only when it is absent."""
         try:
-            with self.path.open("r", encoding="utf-8") as stream:
-                configuration = parse_configuration(json.load(stream))
+            raw_bytes = self.path.read_bytes()
+            if len(raw_bytes) > MAX_CONFIGURATION_BYTES:
+                raise ValueError("configuration is too large")
+            raw = json.loads(raw_bytes.decode("utf-8"))
+            detection = detect_configuration_schema(raw)
+            configuration = parse_or_migrate_configuration_v2(raw)
         except FileNotFoundError:
             return None
         except (
@@ -131,14 +145,25 @@ class ConfigStore:
             TypeError,
             ValueError,
             json.JSONDecodeError,
-        ) as error:
+        ):
             self._migration_pending = False
+            self._schema_v1_backup = None
             return ConfigLoadResult(
-                default_configuration(),
-                warning=f"Could not load configuration: {error}",
+                legacy_equivalent_configuration_v2(),
+                warning="Could not load configuration safely; using defaults.",
             )
-        self._migration_pending = False
-        return ConfigLoadResult(configuration, persisted=True)
+        migrated = detection.kind in {
+            SchemaKind.PRE_VERSIONED,
+            SchemaKind.VERSION_1,
+        }
+        self._migration_pending = migrated
+        self._schema_v1_backup = raw_bytes if migrated else None
+        return ConfigLoadResult(
+            configuration,
+            warning=LEGACY_MIGRATION_WARNING if migrated else None,
+            persisted=True,
+            migration_pending=migrated,
+        )
 
     @staticmethod
     def _validate_legacy_descriptor(
@@ -159,7 +184,7 @@ class ConfigStore:
         if stat.S_IMODE(details.st_mode) & 0o077:
             raise ValueError("legacy configuration object has unsafe permissions")
 
-    def _read_legacy_configuration(self) -> ConfigurationDocument:
+    def _read_legacy_configuration(self) -> ConfigurationDocumentV2:
         """Read one bounded, symlink-resistant legacy configuration."""
         if self.legacy_path is None:
             raise FileNotFoundError
@@ -200,7 +225,9 @@ class ConfigStore:
             raw = b"".join(chunks)
             if len(raw) > MAX_CONFIGURATION_BYTES:
                 raise ValueError("legacy configuration is too large")
-            return parse_configuration(json.loads(raw.decode("utf-8")))
+            return parse_or_migrate_configuration_v2(
+                json.loads(raw.decode("utf-8"))
+            )
         finally:
             if descriptor is not None:
                 try:
@@ -217,7 +244,8 @@ class ConfigStore:
         """Load the legacy path only when the canonical path is absent."""
         if self.legacy_path is None:
             self._migration_pending = False
-            return ConfigLoadResult(default_configuration())
+            self._schema_v1_backup = None
+            return ConfigLoadResult(legacy_equivalent_configuration_v2())
         try:
             configuration = self._read_legacy_configuration()
         except FileNotFoundError:
@@ -225,7 +253,8 @@ class ConfigStore:
             if canonical is not None:
                 return canonical
             self._migration_pending = False
-            return ConfigLoadResult(default_configuration())
+            self._schema_v1_backup = None
+            return ConfigLoadResult(legacy_equivalent_configuration_v2())
         except (
             OSError,
             OverflowError,
@@ -238,14 +267,16 @@ class ConfigStore:
             if canonical is not None:
                 return canonical
             self._migration_pending = False
+            self._schema_v1_backup = None
             return ConfigLoadResult(
-                default_configuration(),
+                legacy_equivalent_configuration_v2(),
                 warning=LEGACY_LOAD_WARNING,
             )
         canonical = self._load_canonical_if_present()
         if canonical is not None:
             return canonical
         self._migration_pending = True
+        self._schema_v1_backup = None
         return ConfigLoadResult(
             configuration,
             warning=LEGACY_MIGRATION_WARNING,
@@ -253,14 +284,44 @@ class ConfigStore:
             migration_pending=True,
         )
 
-    def save(self, configuration: ConfigurationDocument) -> None:
+    def _write_schema_v1_backup(self, directory: Path) -> Path | None:
+        payload = self._schema_v1_backup
+        if payload is None:
+            return None
+        descriptor, name = tempfile.mkstemp(
+            prefix=f".{self.path.name}.schema-v1.",
+            suffix=".bak",
+            dir=directory,
+        )
+        backup = Path(name)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = -1
+                stream.write(payload)
+                stream.flush()
+                os.fchmod(stream.fileno(), 0o600)
+                os.fsync(stream.fileno())
+        except BaseException:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                backup.unlink()
+            except OSError:
+                pass
+            raise
+        return backup
+
+    def save(self, configuration: ConfigurationDocumentV2) -> None:
         """Atomically persist a validated configuration document."""
-        if not isinstance(configuration, ConfigurationDocument):
-            raise TypeError("configuration must be a ConfigurationDocument.")
+        if type(configuration) is not ConfigurationDocumentV2:
+            raise TypeError(
+                "configuration must be a ConfigurationDocumentV2."
+            )
         directory = self.path.parent
         temporary_path: Path | None = None
         descriptor: int | None = None
         committed = False
+        failed = False
         try:
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             os.chmod(directory, 0o700)
@@ -278,21 +339,38 @@ class ConfigStore:
                 os.fchmod(stream.fileno(), 0o600)
                 os.fsync(stream.fileno())
             if self._migration_pending:
-                os.link(temporary_path, self.path)
-                committed = True
-                self._migration_pending = False
-                temporary_path.unlink()
-                temporary_path = None
+                if self._schema_v1_backup is not None:
+                    self._write_schema_v1_backup(directory)
+                    backup_directory_fd = os.open(
+                        directory,
+                        os.O_RDONLY | os.O_DIRECTORY,
+                    )
+                    try:
+                        os.fsync(backup_directory_fd)
+                    finally:
+                        os.close(backup_directory_fd)
+                    os.replace(temporary_path, self.path)
+                    committed = True
+                    temporary_path = None
+                else:
+                    os.link(temporary_path, self.path)
+                    committed = True
+                    temporary_path.unlink()
+                    temporary_path = None
             else:
                 os.replace(temporary_path, self.path)
                 committed = True
-                self._migration_pending = False
+                temporary_path = None
+            self._migration_pending = False
+            self._schema_v1_backup = None
             directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(directory_fd)
             finally:
                 os.close(directory_fd)
-        except Exception as error:
+        except Exception:
+            failed = True
+        if failed:
             if descriptor is not None:
                 try:
                     os.close(descriptor)
@@ -307,4 +385,4 @@ class ConfigStore:
             raise ConfigSaveError(
                 f"Configuration save failed {state} the commit point.",
                 committed=committed,
-            ) from error
+            )

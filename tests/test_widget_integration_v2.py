@@ -658,7 +658,7 @@ def test_full_migrated_profile_matches_complete_active_framebuffers(
         assert integrated.device_framebuffer == active.to_bytes()
 
 
-def test_active_runtime_modules_do_not_import_inactive_registry() -> None:
+def test_phase4_activates_registry_only_through_service() -> None:
     root = Path(__file__).parents[1] / "src" / "nextuxlinq"
     active_modules = (
         "rendering.py",
@@ -670,7 +670,6 @@ def test_active_runtime_modules_do_not_import_inactive_registry() -> None:
         "creator.py",
         "protocol.py",
         "transport.py",
-        "service.py",
         "service_manager.py",
     )
 
@@ -678,3 +677,7 @@ def test_active_runtime_modules_do_not_import_inactive_registry() -> None:
         source = (root / name).read_text(encoding="utf-8")
         assert "rendering_v2.registry" not in source
         assert "create_widget_registry" not in source
+
+    service_source = (root / "service.py").read_text(encoding="utf-8")
+    assert "rendering_v2.registry" in service_source
+    assert "create_widget_registry" in service_source

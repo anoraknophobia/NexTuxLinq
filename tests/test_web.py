@@ -10,7 +10,12 @@ import httpx
 import pytest
 
 from nextuxlinq.config_store import ConfigLoadResult, ConfigSaveError
-from nextuxlinq.defaults import default_configuration
+from nextuxlinq.defaults import (
+    default_configuration,
+    empty_profile_v2,
+    legacy_equivalent_configuration_v2,
+)
+from nextuxlinq.models_v2 import ConfigurationDocumentV2
 from nextuxlinq.service import NexTuxLinqService
 from nextuxlinq.service import RevisionConflictError
 from nextuxlinq.web import MAX_REQUEST_BODY, create_app
@@ -125,6 +130,233 @@ def test_status_and_config_are_strict_read_only_responses(api_client) -> None:
     assert config.status_code == 200
     assert config.json()["configuration"]["active_profile"] == "default"
     assert service.get_configuration() == before
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_canonical_configuration_and_preview_are_schema_v2(api_client) -> None:
+    client, _, store, worker = api_client
+
+    config = client.get("/api/v1/free-layout/config")
+    preview = client.get("/api/v1/preview")
+
+    assert config.status_code == 200
+    assert config.json()["configuration"]["schema_version"] == 2
+    assert config.json()["configuration"] == (
+        legacy_equivalent_configuration_v2().to_dict()
+    )
+    assert config.json()["legacy_editor_supported"] is True
+    assert preview.status_code == 200
+    assert preview.json()["update_policy"] == "continuous"
+    assert preview.json()["animated_content"] is True
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_canonical_validation_uses_real_compositor_without_side_effects(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    before = service.get_configuration()
+    candidate = legacy_equivalent_configuration_v2().to_dict()
+
+    response = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is True
+    assert response.json()["update_policy"] == "continuous"
+    assert len(base64.b64decode(response.json()["framebuffer_base64"])) == (
+        90 * 10 * 3
+    )
+    assert service.get_configuration() == before
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_canonical_validation_rejects_geometry_and_renderer_errors(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    overlap = legacy_equivalent_configuration_v2().to_dict()
+    overlap["profiles"]["default"]["regions"][1]["x"] = 20
+    invalid_geometry = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": overlap},
+    )
+
+    unsupported = legacy_equivalent_configuration_v2().to_dict()
+    unsupported["profiles"]["default"]["regions"][1]["widget"]["settings"][
+        "content"
+    ] = "SECRET \u2603"
+    invalid_renderer = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": unsupported},
+    )
+
+    assert invalid_geometry.status_code == 422
+    assert invalid_geometry.json()["code"] == "validation_failed"
+    assert invalid_renderer.status_code == 422
+    body = invalid_renderer.json()
+    assert body["code"] == "candidate_rendering_failed"
+    assert body["field_errors"][0]["category"] == "unsupported_glyph"
+    assert body["field_errors"][0]["region_id"] == "legacy-scrolling-text"
+    assert "SECRET" not in str(body)
+    assert "\u2603" not in str(body)
+    assert service.snapshot().active_configuration_revision == 1
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_canonical_validation_rejects_strict_region_and_widget_shapes(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    candidates: list[dict[str, object]] = []
+
+    duplicate = legacy_equivalent_configuration_v2().to_dict()
+    duplicate["profiles"]["default"]["regions"][1]["id"] = (
+        duplicate["profiles"]["default"]["regions"][0]["id"]
+    )
+    candidates.append(duplicate)
+
+    out_of_bounds = legacy_equivalent_configuration_v2().to_dict()
+    out_of_bounds["profiles"]["default"]["regions"][2]["x"] = 90
+    candidates.append(out_of_bounds)
+
+    invalid_size = legacy_equivalent_configuration_v2().to_dict()
+    invalid_size["profiles"]["default"]["regions"][0]["width"] = 0
+    candidates.append(invalid_size)
+
+    unknown_widget = legacy_equivalent_configuration_v2().to_dict()
+    unknown_widget["profiles"]["default"]["regions"][0]["widget"]["type"] = (
+        "arbitrary"
+    )
+    candidates.append(unknown_widget)
+
+    wrong_settings = legacy_equivalent_configuration_v2().to_dict()
+    wrong_settings["profiles"]["default"]["regions"][0]["widget"][
+        "settings"
+    ] = {}
+    candidates.append(wrong_settings)
+
+    for candidate in candidates:
+        response = client.post(
+            "/api/v1/free-layout/validate",
+            json={"configuration": candidate},
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == "validation_failed"
+
+    assert service.snapshot().active_configuration_revision == 1
+    assert store.saved == []
+    assert worker.frames == []
+
+
+@pytest.mark.parametrize(
+    ("change", "category", "field", "prohibited"),
+    [
+        (
+            {"time_zone": "Phase4/UnavailableSecret"},
+            "time_zone_unavailable",
+            "time_zone",
+            "Phase4/UnavailableSecret",
+        ),
+        (
+            {"font": "5x7"},
+            "content_too_wide",
+            "content",
+            "FontTextError",
+        ),
+    ],
+)
+def test_canonical_renderer_errors_are_sanitized_and_addressable(
+    api_client,
+    change: dict[str, object],
+    category: str,
+    field: str,
+    prohibited: str,
+) -> None:
+    client, service, store, worker = api_client
+    candidate = legacy_equivalent_configuration_v2().to_dict()
+    front = candidate["profiles"]["default"]["regions"][0]
+    if category == "content_too_wide":
+        front["width"] = 13
+    front["widget"]["settings"].update(change)
+
+    response = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "candidate_rendering_failed"
+    assert body["field_errors"][0]["category"] == category
+    assert body["field_errors"][0]["field"].endswith(f".{field}")
+    assert prohibited not in str(body)
+    assert service.snapshot().active_configuration_revision == 1
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_canonical_apply_and_save_preserve_revision_workflow(api_client) -> None:
+    client, service, store, worker = api_client
+    candidate = legacy_equivalent_configuration_v2().to_dict()
+    candidate["profiles"]["default"]["regions"][1]["widget"]["settings"][
+        "content"
+    ] = "PHASE FOUR"
+
+    applied = client.post(
+        "/api/v1/free-layout/apply",
+        json={"configuration": candidate, "expected_revision": 1},
+    )
+    saved = client.put(
+        "/api/v1/free-layout/config",
+        json={
+            "configuration": candidate,
+            "expected_active_revision": 2,
+            "expected_saved_revision": 1,
+            "apply": False,
+        },
+    )
+
+    assert applied.status_code == 200
+    assert applied.json()["active_revision"] == 2
+    assert applied.json()["dirty"] is True
+    assert saved.status_code == 200
+    assert saved.json()["active_revision"] == 2
+    assert saved.json()["saved_revision"] == 2
+    assert saved.json()["dirty"] is False
+    assert len(worker.frames) == 1
+    assert len(store.saved) == 1
+    assert service.configuration.to_dict() == candidate
+
+
+def test_legacy_editor_is_read_only_for_arbitrary_free_layout(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    free_layout = ConfigurationDocumentV2(
+        schema_version=2,
+        active_profile="default",
+        profiles={"default": empty_profile_v2()},
+    )
+    service._configuration = free_layout
+    service._saved_configuration = free_layout
+
+    config = client.get("/api/v1/config")
+    mutation = client.post("/api/v1/apply", json=apply_payload())
+
+    assert config.status_code == 200
+    assert config.json()["configuration"] is None
+    assert config.json()["legacy_editor_supported"] is False
+    assert config.json()["canonical_configuration"] == free_layout.to_dict()
+    assert mutation.status_code == 409
+    assert mutation.json()["code"] == "legacy_editor_unsupported"
+    assert service.configuration == free_layout
     assert store.saved == []
     assert worker.frames == []
 
@@ -396,7 +628,10 @@ def test_domain_validation_errors_are_422(api_client, changes, field) -> None:
     response = client.post("/api/v1/apply", json=apply_payload(**changes))
     assert response.status_code == 422
     assert response.json()["code"] == "validation_failed"
-    assert field.lower() in response.json()["message"].lower()
+    assert response.json()["message"] == (
+        "The request contains invalid configuration data."
+    )
+    assert str(changes) not in response.json()["message"]
     assert service.snapshot().active_configuration_revision == 1
 
 

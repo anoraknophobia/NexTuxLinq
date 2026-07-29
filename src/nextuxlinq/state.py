@@ -15,6 +15,7 @@ class DaemonSnapshot:
     device_path: str | None = None
     multiple_device_warning: str | None = None
     rendering_state: str = "idle"
+    update_policy: str = "static"
     active_configuration_revision: int = 0
     last_frame_generation_time: float | None = None
     last_successful_upload_time: float | None = None

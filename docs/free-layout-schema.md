@@ -1,8 +1,9 @@
-# Free-layout schema-v2 foundation
+# Free-layout schema v2
 
-This document describes the inactive schema-v2 foundation for future
-NexTuxLinq Matrix900 free-form layouts. The running daemon, HTTP API, renderer,
-GUI, and persistence path continue to use schema v1 during this phase.
+Schema v2 is the canonical NexTuxLinq backend configuration for Matrix900
+free-form layouts as of Phase 4. Schema-v1 input remains supported through
+deterministic in-memory migration. The current GUI remains legacy-shaped; the
+visual free-layout editor is still deferred.
 
 ## Canvas and geometry
 
@@ -23,7 +24,7 @@ rectangle are intentional gaps and retain the canvas background.
 
 Schema v2 permits at most 32 regions in one profile and 128 regions across one
 configuration document. These limits bound validation, API, and persistence
-costs and may be revisited before schema v2 is activated.
+costs.
 
 ## Stable region identity
 
@@ -49,11 +50,9 @@ matching `settings` object. Initial types are:
 - `date`
 
 Unknown widget types, settings for the wrong discriminator, missing required
-settings, and unknown settings fields are rejected. Rendering is intentionally
-inactive. Phase 3D integrates all five implemented renderers in one canonical
-inactive registry, documented in
-[free-layout widget renderers](free-layout-widgets.md), without activating
-schema v2 in the running application.
+settings, and unknown settings fields are rejected. Phase 4 activates the
+Phase 3D registry and compositor in the service, as documented in
+[free-layout widget renderers](free-layout-widgets.md).
 
 The optional region `background_color` is common to all widgets. A null or
 omitted value means that the canvas background remains visible. Widget settings
@@ -86,17 +85,11 @@ schema 0 -> validated schema 1 -> deterministic schema 2
 Malformed data is never replaced with schema-v2 defaults by the strict parser.
 Schema versions newer than 2 have a distinct unsupported-version result.
 
-## Persistence and future cutover
+## Persistence cutover
 
-Schema v2 is not active. Loading a schema-v1 file does not rewrite it, create a
-backup, or mark the current runtime configuration dirty. Current explicit saves
-continue to serialize schema v1. The canonical and legacy configuration paths
-are unchanged, and legacy files are never deleted or modified by this
-foundation.
-
-Before the first future explicit schema-v2 save replaces a canonical schema-v1
-file, the persistence cutover must preserve the validated schema-v1 source as a
-rollback backup with these rules:
+Loading a schema-v1 file migrates it only in memory and does not rewrite it.
+The first explicit schema-v2 save that replaces a canonical schema-v1 file
+preserves the validated source as a rollback backup with these rules:
 
 - the backup is in the canonical configuration directory;
 - its unpredictable filename cannot overwrite an existing entry;
@@ -106,22 +99,24 @@ rollback backup with these rules:
   replacement;
 - failure to create a safe backup prevents the v2 commit.
 
-That backup workflow is not implemented or reachable in this phase. Automatic
-downgrade from schema v2 would lose free-layout information and is not planned.
+The save remains atomic: validation precedes the write, a pre-commit failure
+leaves the original intact, and schema v2 is serialized only after an explicit
+save. Automatic downgrade from schema v2 would lose free-layout information
+and is not performed.
 
 This design remains specific to the Phanteks Matrix900. It does not change HID
 transport, protocol reports, physical orientation, or framebuffer generation.
 
 The separate [free-layout compositor foundation](free-layout-compositor.md)
-implements inactive region-local drawing, all five canonical widgets,
+implements region-local drawing, all five canonical widgets,
 settings-dependent update-policy aggregation, and logical-to-Creator
 orientation. Complete byte comparisons prove that migrated schema-v1 logical
-and device framebuffers remain equivalent to the active renderer. It remains
-disconnected from the daemon, API, GUI, and persistence path.
+and device framebuffers remain equivalent to the compatibility renderer. The
+service now uses this compositor for preview and DeviceWorker candidates.
 
-The [free-layout font foundation](free-layout-fonts.md) adds inactive immutable
+The [free-layout font foundation](free-layout-fonts.md) adds immutable
 3×5, legacy-compatible 3×7, and legacy-compatible 5×7 bitmap fonts plus local
 measurement, alignment, clipping, and overflow primitives. All text-producing
-widgets use those primitives in inactive code. Runtime scheduling, the current
-web GUI, API exposure, persistence cutover, daemon activation, and physical
-upload remain deferred.
+widgets use those primitives in the canonical renderer. See
+[Phase 4 backend activation](phase4-backend.md) for persistence, API,
+scheduling, and compatibility behavior.

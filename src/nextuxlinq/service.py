@@ -1,4 +1,4 @@
-"""Framework-independent NexTuxLinq service orchestration."""
+"""Framework-independent canonical schema-v2 service orchestration."""
 
 from __future__ import annotations
 
@@ -11,11 +11,33 @@ from datetime import datetime
 from typing import Any
 
 from nextuxlinq.config_store import ConfigSaveError, ConfigStore
-from nextuxlinq.defaults import default_configuration
+from nextuxlinq.defaults import (
+    default_configuration,
+    legacy_equivalent_configuration_v2,
+)
 from nextuxlinq.device_worker import DeviceWorker, DeviceWorkerSnapshot
+from nextuxlinq.legacy_compat import (
+    LegacyEditorUnsupportedError,
+    apply_legacy_configuration,
+    apply_legacy_profile,
+    legacy_configuration_from_v2,
+)
+from nextuxlinq.migration import migrate_configuration_v1_to_v2
 from nextuxlinq.models import ConfigurationDocument, ProfileConfig
-from nextuxlinq.rendering import physical_preview_bytes, render_profile_at_elapsed
+from nextuxlinq.models_v2 import (
+    ConfigurationDocumentV2,
+    ProfileConfigV2,
+)
+from nextuxlinq.rendering_v2.compositor import (
+    Compositor,
+    CompositorError,
+    RenderResult,
+)
+from nextuxlinq.rendering_v2.registry import create_widget_registry
+from nextuxlinq.rendering_v2.update_policy import UpdatePolicy
+from nextuxlinq.scheduler import update_policy_delay
 from nextuxlinq.state import DaemonState, DaemonSnapshot
+from nextuxlinq.widget_models import WidgetType
 
 AsyncSleep = Callable[[float], Awaitable[None]]
 WallClock = Callable[[], datetime]
@@ -32,22 +54,51 @@ class ServiceUnavailableError(RuntimeError):
 
 
 class WorkerSubmissionError(RuntimeError):
-    """Raised when a candidate could not be submitted consistently."""
+    """A sanitized candidate submission failure."""
+
+
+class CandidateValidationError(ValueError):
+    """A sanitized complete-candidate rendering failure."""
+
+    def __init__(
+        self,
+        category: str,
+        *,
+        region_id: str | None = None,
+        widget_type: WidgetType | None = None,
+        field: str | None = None,
+    ) -> None:
+        self.category = category
+        self.region_id = region_id
+        self.widget_type = widget_type
+        self.field = field
+        super().__init__("The free-layout candidate could not be rendered.")
 
 
 @dataclass(frozen=True, slots=True)
 class ServiceConfigurationSnapshot:
-    configuration: ConfigurationDocument
-    built_in_default: ConfigurationDocument
+    configuration: ConfigurationDocumentV2
+    built_in_default: ConfigurationDocumentV2
     active_revision: int
     saved_revision: int | None
     dirty: bool
+    legacy_configuration: ConfigurationDocument | None
+    legacy_built_in_default: ConfigurationDocument
+    legacy_editor_supported: bool
 
 
 @dataclass(frozen=True, slots=True)
 class ApplyResult:
     profile_name: str
     profile: ProfileConfig
+    active_revision: int
+    dirty: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalApplyResult:
+    configuration: ConfigurationDocumentV2
+    render_result: RenderResult
     active_revision: int
     dirty: bool
 
@@ -62,11 +113,22 @@ class SaveResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CanonicalSaveResult:
+    configuration: ConfigurationDocumentV2
+    active_revision: int
+    saved_revision: int | None
+    dirty: bool
+    warning: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class PreviewSnapshot:
     framebuffer: bytes
+    device_framebuffer: bytes
     active_revision: int
     generated_at: float
-    profile: ProfileConfig
+    profile: ProfileConfigV2
+    render_result: RenderResult
 
 
 def _default_task_factory(
@@ -79,8 +141,22 @@ async def _open_mutation_gate(kind: str, revision: int) -> None:
     return None
 
 
+def _local_wall_clock() -> datetime:
+    return datetime.now().astimezone()
+
+
+def _canonical_configuration(
+    configuration: ConfigurationDocumentV2 | ConfigurationDocument,
+) -> ConfigurationDocumentV2:
+    if type(configuration) is ConfigurationDocumentV2:
+        return configuration
+    if type(configuration) is ConfigurationDocument:
+        return migrate_configuration_v1_to_v2(configuration)
+    raise TypeError("configuration must be a validated configuration.")
+
+
 class NexTuxLinqService:
-    """Load configuration, render frames, and feed the single device worker."""
+    """Render canonical profiles and feed the single existing device worker."""
 
     def __init__(
         self,
@@ -90,7 +166,7 @@ class NexTuxLinqService:
         state: DaemonState | None = None,
         frame_rate: float = 5.0,
         monotonic: Callable[[], float] = time.monotonic,
-        wall_clock: WallClock = datetime.now,
+        wall_clock: WallClock = _local_wall_clock,
         sleep: AsyncSleep = asyncio.sleep,
         worker_stop_timeout: float | None = 5.0,
         task_factory: TaskFactory = _default_task_factory,
@@ -101,21 +177,25 @@ class NexTuxLinqService:
         self.config_store = config_store
         self.device_worker = device_worker
         self.state = DaemonState() if state is None else state
-        self.frame_rate = frame_rate
+        self.frame_rate = float(frame_rate)
         self._monotonic = monotonic
         self._wall_clock = wall_clock
         self._sleep = sleep
         self._worker_stop_timeout = worker_stop_timeout
         self._task_factory = task_factory
         self._mutation_gate = mutation_gate
-        self._configuration: ConfigurationDocument | None = None
+        self._compositor = Compositor(create_widget_registry())
+        self._configuration: ConfigurationDocumentV2 | None = None
         self._render_task: asyncio.Task[None] | None = None
+        self._render_wakeup: asyncio.Event | None = None
         self._started_at = 0.0
         self._last_worker_uploads = 0
         self._worker_started = False
-        self._saved_configuration: ConfigurationDocument | None = None
+        self._saved_configuration: ConfigurationDocumentV2 | None = None
         self._saved_revision: int | None = None
         self._saved_revision_counter = 0
+        self._last_render_result: RenderResult | None = None
+        self._last_render_revision: int | None = None
         self._mutation_lock = asyncio.Lock()
         self._coordination_lock = threading.RLock()
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -123,9 +203,20 @@ class NexTuxLinqService:
         self._worker_exit_observed = threading.Event()
 
     @property
-    def configuration(self) -> ConfigurationDocument:
+    def configuration(self) -> ConfigurationDocumentV2:
         if self._configuration is None:
             raise RuntimeError("NexTuxLinqService has not been started.")
+        if type(self._configuration) is not ConfigurationDocumentV2:
+            self._configuration = _canonical_configuration(
+                self._configuration
+            )
+        if (
+            self._saved_configuration is not None
+            and type(self._saved_configuration) is not ConfigurationDocumentV2
+        ):
+            self._saved_configuration = _canonical_configuration(
+                self._saved_configuration
+            )
         return self._configuration
 
     def snapshot(self) -> DaemonSnapshot:
@@ -133,12 +224,10 @@ class NexTuxLinqService:
 
     @property
     def render_task(self) -> asyncio.Task[None] | None:
-        """Return the active render task for foreground-process monitoring."""
         return self._render_task
 
     @property
     def owns_resources(self) -> bool:
-        """Return whether startup acquired resources that require cleanup."""
         return self._worker_started or self._render_task is not None
 
     async def start(self) -> None:
@@ -148,34 +237,31 @@ class NexTuxLinqService:
         try:
             self._event_loop = asyncio.get_running_loop()
             self._worker_failure_event = asyncio.Event()
+            self._render_wakeup = asyncio.Event()
             self._worker_exit_observed.clear()
             loaded = self.config_store.load()
+            configuration = _canonical_configuration(loaded.configuration)
             with self._coordination_lock:
-                self._configuration = loaded.configuration
+                self._configuration = configuration
                 self._saved_configuration = (
-                    loaded.configuration if loaded.persisted else None
+                    configuration if loaded.persisted else None
                 )
                 self._saved_revision = 1 if loaded.persisted else None
                 self._saved_revision_counter = self._saved_revision or 0
                 self.state.update(
                     active_configuration_revision=1,
-                    configuration_warning=(
-                        loaded.warning
-                        if loaded.migration_pending
-                        else (
-                            "Configuration could not be loaded; built-in "
-                            "defaults are active."
-                            if loaded.warning
-                            else None
-                        )
-                    ),
+                    configuration_warning=loaded.warning,
                 )
-            self.device_worker.set_status_callback(self.handle_worker_snapshot)
+            self.device_worker.set_status_callback(
+                self.handle_worker_snapshot
+            )
             self.device_worker.start()
             self._worker_started = True
-            profile = self.configuration.active
-            if profile.brightness is not None:
-                self.device_worker.set_brightness(profile.brightness, revision=1)
+            if configuration.active.brightness is not None:
+                self.device_worker.set_brightness(
+                    configuration.active.brightness,
+                    revision=1,
+                )
             self._started_at = self._monotonic()
             render_coroutine = self._monitored_render_loop()
             try:
@@ -205,14 +291,11 @@ class NexTuxLinqService:
                 await self._cleanup_resources()
             except Exception:
                 pass
-            try:
-                self.state.update(
-                    lifecycle_state="failed",
-                    rendering_state="failed",
-                    last_display_error="NexTuxLinq service startup failed.",
-                )
-            except Exception:
-                pass
+            self.state.update(
+                lifecycle_state="failed",
+                rendering_state="failed",
+                last_display_error="NexTuxLinq service startup failed.",
+            )
             raise
 
     async def stop(self) -> None:
@@ -249,7 +332,6 @@ class NexTuxLinqService:
             self._worker_started = False
 
     async def wait_for_worker_failure(self) -> None:
-        """Wait until the owned worker exits unexpectedly."""
         event = self._worker_failure_event
         if event is None:
             raise RuntimeError("NexTuxLinqService has not been started.")
@@ -268,36 +350,134 @@ class NexTuxLinqService:
             )
             raise
 
+    async def _wait_for_update(self, delay: float | None) -> str:
+        wakeup = self._render_wakeup
+        if wakeup is None:
+            raise RuntimeError("The render scheduler is unavailable.")
+        if delay is None:
+            await wakeup.wait()
+            return "change"
+        sleep_task = asyncio.create_task(self._sleep(max(0.0, delay)))
+        wake_task = asyncio.create_task(wakeup.wait())
+        try:
+            done, pending = await asyncio.wait(
+                (sleep_task, wake_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            for task in pending:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            if wake_task in done:
+                await wake_task
+                return "change"
+            await sleep_task
+            return "periodic"
+        finally:
+            for task in (sleep_task, wake_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                sleep_task,
+                wake_task,
+                return_exceptions=True,
+            )
+
     async def _render_loop(self) -> None:
-        interval = 1.0 / self.frame_rate
-        next_frame = self._monotonic()
+        if self._render_wakeup is None:
+            self._render_wakeup = asyncio.Event()
+        reason = "initial"
         while True:
-            generated_at = self._monotonic()
-            elapsed = generated_at - self._started_at
-            profile, revision = self._capture_active_profile()
-            frame = render_profile_at_elapsed(
+            async with self._mutation_lock:
+                profile, revision = self._capture_active_profile()
+                existing = (
+                    reason == "change"
+                    and self._last_render_revision == revision
+                    and self._last_render_result is not None
+                )
+                if existing:
+                    result = self._last_render_result
+                    wall_clock = result.generation_time
+                else:
+                    result, generated_at = self._render_profile(profile)
+                    self.device_worker.submit_frame(
+                        result.device_framebuffer,
+                        revision=revision,
+                    )
+                    self._last_render_result = result
+                    self._last_render_revision = revision
+                    wall_clock = result.generation_time
+                    self.state.update(
+                        last_frame_generation_time=generated_at,
+                        update_policy=result.update_policy.value,
+                    )
+                wakeup = self._render_wakeup
+                if wakeup is None:
+                    raise RuntimeError("The render scheduler is unavailable.")
+                wakeup.clear()
+                delay = update_policy_delay(
+                    result.update_policy,
+                    wall_clock=wall_clock,
+                    monotonic_now=self._monotonic(),
+                    continuous_epoch=self._started_at,
+                    frame_rate=self.frame_rate,
+                    profile=profile,
+                )
+            reason = await self._wait_for_update(delay)
+
+    def _render_profile(
+        self,
+        profile: ProfileConfigV2,
+    ) -> tuple[RenderResult, float]:
+        generated_at = self._monotonic()
+        wall_clock = self._wall_clock()
+        failure: tuple[str, str | None, WidgetType | None, str | None] | None
+        try:
+            result = self._compositor.render(
                 profile,
-                self._wall_clock(),
-                elapsed,
+                generation_time=wall_clock,
+                animation_time=max(0.0, generated_at - self._started_at),
             )
-            self.device_worker.submit_frame(
-                frame.to_bytes(),
-                revision=revision,
+        except CompositorError as error:
+            failure = (
+                error.category.value,
+                error.region_id,
+                error.widget_type,
+                error.field,
             )
-            self.state.update(last_frame_generation_time=generated_at)
-            next_frame += interval
-            await self._sleep(max(0.0, next_frame - self._monotonic()))
+            result = None
+        else:
+            failure = None
+        if failure is not None:
+            category, region_id, widget_type, field = failure
+            raise CandidateValidationError(
+                category,
+                region_id=region_id,
+                widget_type=widget_type,
+                field=field,
+            )
+        assert result is not None
+        return result, generated_at
 
     def get_configuration(self) -> ServiceConfigurationSnapshot:
-        """Return immutable runtime and persistence configuration state."""
         with self._coordination_lock:
             configuration = self.configuration
+            try:
+                legacy = legacy_configuration_from_v2(configuration)
+            except LegacyEditorUnsupportedError:
+                legacy = None
             return ServiceConfigurationSnapshot(
                 configuration=configuration,
-                built_in_default=default_configuration(),
+                built_in_default=legacy_equivalent_configuration_v2(),
                 active_revision=self.snapshot().active_configuration_revision,
                 saved_revision=self._saved_revision,
                 dirty=self._saved_configuration != configuration,
+                legacy_configuration=legacy,
+                legacy_built_in_default=default_configuration(),
+                legacy_editor_supported=legacy is not None,
             )
 
     async def apply_profile(
@@ -307,38 +487,86 @@ class NexTuxLinqService:
         *,
         expected_revision: int | None = None,
     ) -> ApplyResult:
-        """Validate, candidate-render, and publish one runtime-only profile."""
+        candidate = apply_legacy_profile(
+            self.configuration,
+            profile_name,
+            profile,
+        )
+        result = await self.apply_configuration(
+            candidate,
+            expected_revision=expected_revision,
+        )
+        return ApplyResult(
+            profile_name=profile_name,
+            profile=profile,
+            active_revision=result.active_revision,
+            dirty=result.dirty,
+        )
+
+    async def apply_configuration(
+        self,
+        configuration: ConfigurationDocumentV2,
+        *,
+        expected_revision: int | None = None,
+    ) -> CanonicalApplyResult:
+        if type(configuration) is not ConfigurationDocumentV2:
+            raise TypeError(
+                "configuration must be a ConfigurationDocumentV2."
+            )
         async with self._mutation_lock:
             with self._coordination_lock:
                 self._require_running()
                 current_revision = self.snapshot().active_configuration_revision
                 self._check_revision(expected_revision, current_revision)
-                current = self.configuration
-            profiles = dict(current.profiles)
-            profiles[profile_name] = profile
-            candidate = ConfigurationDocument(
-                schema_version=current.schema_version,
-                active_profile=profile_name,
-                profiles=profiles,
-            )
-            frame = self._render_candidate(candidate.active)
+            rendered: dict[str, tuple[RenderResult, float]] = {}
+            for name, profile in configuration.profiles.items():
+                rendered[name] = self._render_profile(profile)
+            result, generated_at = rendered[
+                configuration.active_profile
+            ]
             new_revision = current_revision + 1
             await self._mutation_gate("apply", new_revision)
             with self._coordination_lock:
                 self._require_running()
                 self._submit_candidate(
-                    frame,
-                    profile.brightness,
+                    result.device_framebuffer,
+                    configuration.active.brightness,
                     revision=new_revision,
                 )
-                self._configuration = candidate
-                self.state.update(active_configuration_revision=new_revision)
-                dirty = self._saved_configuration != candidate
-        return ApplyResult(
-            profile_name=profile_name,
-            profile=profile,
+                self._configuration = configuration
+                self._last_render_result = result
+                self._last_render_revision = new_revision
+                self.state.update(
+                    active_configuration_revision=new_revision,
+                    last_frame_generation_time=generated_at,
+                    update_policy=result.update_policy.value,
+                )
+                dirty = self._saved_configuration != configuration
+                if self._render_wakeup is not None:
+                    self._render_wakeup.set()
+        return CanonicalApplyResult(
+            configuration=configuration,
+            render_result=result,
             active_revision=new_revision,
             dirty=dirty,
+        )
+
+    async def select_profile(
+        self,
+        profile_name: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> CanonicalApplyResult:
+        current = self.configuration
+        if profile_name not in current.profiles:
+            raise ValueError("profile_name must identify an existing profile.")
+        return await self.apply_configuration(
+            ConfigurationDocumentV2(
+                schema_version=current.schema_version,
+                active_profile=profile_name,
+                profiles=current.profiles,
+            ),
+            expected_revision=expected_revision,
         )
 
     def _submit_candidate(
@@ -348,6 +576,7 @@ class NexTuxLinqService:
         *,
         revision: int,
     ) -> None:
+        submission_failed = False
         frame_accepted = False
         try:
             self.device_worker.submit_frame(frame, revision=revision)
@@ -357,7 +586,9 @@ class NexTuxLinqService:
                     brightness,
                     revision=revision,
                 )
-        except Exception as error:
+        except Exception:
+            submission_failed = True
+        if submission_failed:
             if frame_accepted:
                 self.state.update(
                     lifecycle_state="failed",
@@ -371,7 +602,7 @@ class NexTuxLinqService:
                     self._worker_failure_event.set()
             raise WorkerSubmissionError(
                 "Matrix900 command submission failed."
-            ) from error
+            )
 
     async def save_configuration(
         self,
@@ -381,7 +612,36 @@ class NexTuxLinqService:
         expected_saved_revision: int | None = None,
         apply: bool = True,
     ) -> SaveResult:
-        """Atomically save a document and optionally publish it at runtime."""
+        candidate = apply_legacy_configuration(
+            self.configuration,
+            configuration,
+        )
+        result = await self.save_canonical_configuration(
+            candidate,
+            expected_active_revision=expected_active_revision,
+            expected_saved_revision=expected_saved_revision,
+            apply=apply,
+        )
+        return SaveResult(
+            configuration=configuration,
+            active_revision=result.active_revision,
+            saved_revision=result.saved_revision,
+            dirty=result.dirty,
+            warning=result.warning,
+        )
+
+    async def save_canonical_configuration(
+        self,
+        configuration: ConfigurationDocumentV2,
+        *,
+        expected_active_revision: int | None = None,
+        expected_saved_revision: int | None = None,
+        apply: bool = True,
+    ) -> CanonicalSaveResult:
+        if type(configuration) is not ConfigurationDocumentV2:
+            raise TypeError(
+                "configuration must be a ConfigurationDocumentV2."
+            )
         async with self._mutation_lock:
             with self._coordination_lock:
                 self._require_running()
@@ -396,21 +656,32 @@ class NexTuxLinqService:
                     expected_saved_revision,
                     current_saved_revision,
                 )
-            frame = self._render_candidate(configuration.active) if apply else None
-            warning: str | None = None
-            try:
-                self.config_store.save(configuration)
-            except ConfigSaveError as error:
-                if not error.committed:
-                    raise
-                warning = (
-                    "Configuration was saved, but directory durability "
-                    "could not be confirmed."
-                )
+            rendered: dict[str, tuple[RenderResult, float]] = {}
+            for name, profile in configuration.profiles.items():
+                result, generated_at = self._render_profile(profile)
+                rendered[name] = (result, generated_at)
             await self._mutation_gate(
                 "save-apply" if apply else "save",
                 current_revision + int(apply),
             )
+            warning: str | None = None
+            save_failed = False
+            committed = False
+            try:
+                self.config_store.save(configuration)
+            except ConfigSaveError as error:
+                committed = error.committed
+                save_failed = not committed
+            if save_failed:
+                raise ConfigSaveError(
+                    "Configuration save failed before the commit point.",
+                    committed=False,
+                )
+            if committed:
+                warning = (
+                    "Configuration was saved, but directory durability "
+                    "could not be confirmed."
+                )
             with self._coordination_lock:
                 self._saved_configuration = configuration
                 self._saved_revision_counter += 1
@@ -419,19 +690,29 @@ class NexTuxLinqService:
                 if apply:
                     self._require_running()
                     new_revision = current_revision + 1
-                    assert frame is not None
+                    result, generated_at = rendered[
+                        configuration.active_profile
+                    ]
                     self._submit_candidate(
-                        frame,
+                        result.device_framebuffer,
                         configuration.active.brightness,
                         revision=new_revision,
                     )
                     self._configuration = configuration
-                    self.state.update(active_configuration_revision=new_revision)
+                    self._last_render_result = result
+                    self._last_render_revision = new_revision
+                    self.state.update(
+                        active_configuration_revision=new_revision,
+                        last_frame_generation_time=generated_at,
+                        update_policy=result.update_policy.value,
+                    )
+                    if self._render_wakeup is not None:
+                        self._render_wakeup.set()
                 else:
                     new_revision = current_revision
                 saved_revision = self._saved_revision
                 dirty = self._saved_configuration != self.configuration
-        return SaveResult(
+        return CanonicalSaveResult(
             configuration=configuration,
             active_revision=new_revision,
             saved_revision=saved_revision,
@@ -439,31 +720,35 @@ class NexTuxLinqService:
             warning=warning,
         )
 
+    def validate_configuration(
+        self,
+        configuration: ConfigurationDocumentV2,
+    ) -> RenderResult:
+        if type(configuration) is not ConfigurationDocumentV2:
+            raise TypeError(
+                "configuration must be a ConfigurationDocumentV2."
+            )
+        rendered = {
+            name: self._render_profile(profile)[0]
+            for name, profile in configuration.profiles.items()
+        }
+        result = rendered[configuration.active_profile]
+        return result
+
     def get_preview(self) -> PreviewSnapshot:
-        """Render the current runtime profile using the physical renderer."""
         generated_at = self._monotonic()
         profile, revision = self._capture_active_profile()
-        frame = render_profile_at_elapsed(
-            profile,
-            self._wall_clock(),
-            max(0.0, generated_at - self._started_at),
-        )
+        result, _ = self._render_profile(profile)
         return PreviewSnapshot(
-            framebuffer=physical_preview_bytes(frame, profile),
+            framebuffer=result.logical_framebuffer,
+            device_framebuffer=result.device_framebuffer,
             active_revision=revision,
             generated_at=generated_at,
             profile=profile,
+            render_result=result,
         )
 
-    def _render_candidate(self, profile: ProfileConfig) -> bytes:
-        generated_at = self._monotonic()
-        return render_profile_at_elapsed(
-            profile,
-            self._wall_clock(),
-            max(0.0, generated_at - self._started_at),
-        ).to_bytes()
-
-    def _capture_active_profile(self) -> tuple[ProfileConfig, int]:
+    def _capture_active_profile(self) -> tuple[ProfileConfigV2, int]:
         with self._coordination_lock:
             return (
                 self.configuration.active,
@@ -484,7 +769,6 @@ class NexTuxLinqService:
             )
 
     def handle_worker_snapshot(self, snapshot: DeviceWorkerSnapshot) -> None:
-        """Copy sanitized device status into daemon state."""
         if not snapshot.running:
             self._worker_exit_observed.set()
         with self._coordination_lock:
