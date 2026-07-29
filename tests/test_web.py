@@ -699,8 +699,12 @@ def test_frontend_and_local_assets_are_self_contained(api_client) -> None:
     assert "https://" not in javascript.text
     assert "innerHTML" not in javascript.text
     assert "setInterval" not in javascript.text
-    assert "setTimeout(pollStatus" in javascript.text
-    assert "setTimeout(pollPreview" in javascript.text
+    assert "setTimeoutFunction(pollStatus" in javascript.text
+    assert "setTimeoutFunction(pollPreview" in javascript.text
+    assert 'id="configuration-state"' in page.text
+    assert 'id="multiple-device-warning"' in page.text
+    assert 'id="region-labels"' in page.text
+    assert "Reload applied settings" in page.text
     assert 'request("/config")' in javascript.text
-    assert "revertRuntimeConfiguration" in javascript.text
-    assert 'window.addEventListener("beforeunload"' in javascript.text
+    assert "reloadAppliedSettings" in javascript.text
+    assert 'windowObject.addEventListener("beforeunload"' in javascript.text

@@ -32,28 +32,68 @@ def test_templates_and_static_assets_are_package_resources() -> None:
 
 
 def test_frontend_uses_friendly_reconnecting_state() -> None:
-    _, javascript, _ = _frontend_source()
+    page, javascript, _ = _frontend_source()
 
-    assert 'const unavailableMessage = "Daemon unavailable. Reconnecting…";' in javascript
+    assert 'const UNAVAILABLE_MESSAGE = "Daemon unavailable. Reconnecting…";' in javascript
     assert "markDaemonUnavailable();" in javascript
-    assert "connectionMessage.textContent = unavailableMessage;" in javascript
+    assert "elements.connectionMessage.textContent = UNAVAILABLE_MESSAGE;" in javascript
     assert '"Failed to fetch"' not in javascript
-    assert "showMessage(error.message, \"error\");" not in javascript
+    assert 'id="connection-message"' in page
+    assert 'id="message"' in page
+    assert 'id="background-message"' in page
 
 
 def test_polling_retries_and_reconnection_restores_mutation_controls() -> None:
     _, javascript, _ = _frontend_source()
 
-    assert "finally {\n    if (polling) statusTimer = setTimeout(pollStatus, 2000);" in javascript
-    assert "finally {\n    if (polling) previewTimer = setTimeout(pollPreview, 1000);" in javascript
-    assert ".finally(() => {\n    pollStatus();\n    pollPreview();" in javascript
-    assert 'connectionMessage.textContent = "";' in javascript
-    assert "daemonReachable !== true || configuration === null" in javascript
-    assert 'document.querySelector("[data-action=\'apply\']")' in javascript
-    assert 'document.querySelector("[data-action=\'save\']")' in javascript
-    assert "button.disabled = daemonControlDisabled;" in javascript
-    assert 'showMessage(`${error.message}${suffix}`, "error", "action-error");' in javascript
-    assert 'if (messageOwner !== "action-error") {' in javascript
+    assert "statusTimer = setTimeoutFunction(pollStatus, 2000);" in javascript
+    assert "previewTimer = setTimeoutFunction(pollPreview, 1000);" in javascript
+    assert "void pollStatus();" in javascript
+    assert "void pollPreview();" in javascript
+    assert 'elements.connectionMessage.textContent = "";' in javascript
+    assert "state.connection.reachable !== true" in javascript
+    assert "elements.applyButton.disabled = mutationDisabled;" in javascript
+    assert "elements.saveButton.disabled = mutationDisabled;" in javascript
+    assert "reconciliationPromise" in javascript
+
+
+def test_frontend_state_and_accessibility_resources() -> None:
+    page, javascript, _ = _frontend_source()
+    normalized_page = " ".join(page.split())
+
+    for state_property in (
+        "acceptedFingerprint",
+        "pendingRemoteSnapshot",
+        "warnedRemoteFingerprint",
+        "actionError",
+        "backgroundError",
+        "fieldErrors",
+    ):
+        assert state_property in javascript
+    assert 'id="configuration-state"' in page
+    assert 'role="status" aria-live="polite"' in page
+    assert "Draft changes have not been applied." in javascript
+    assert "Applied settings differ from the saved configuration." in javascript
+    assert "Applied and saved settings are synchronized." in javascript
+    assert "Revert unsaved edits" not in page
+    assert page.count("Reload applied settings") == 2
+    assert 'min="0.5" max="20" step="any" inputmode="decimal"' in page
+    assert (
+        "Lowercase letters are converted to uppercase when applied."
+        in normalized_page
+    )
+
+
+def test_preview_regions_use_safe_dynamic_dom_rendering() -> None:
+    page, javascript, _ = _frontend_source()
+
+    assert '<ol id="region-labels" class="region-labels"' in page
+    assert 'aria-label="Physical display regions"></ol>' in page
+    assert "normalizeRegions(preview.regions, preview.width)" in javascript
+    assert "name.textContent = region.name;" in javascript
+    assert "replaceChildren(...children);" in javascript
+    assert "innerHTML" not in javascript
+    assert "front_clock_width" not in javascript
 
 
 def test_profile_form_layout_has_safe_responsive_sizing() -> None:

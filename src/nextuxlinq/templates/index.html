@@ -23,12 +23,20 @@
       <h2 id="status-heading">Device status</h2>
       <dl class="status-grid">
         <div><dt>Matrix900</dt><dd id="device-status">Checking</dd></div>
+        <div><dt>Model</dt><dd id="model-name">—</dd></div>
+        <div><dt>USB VID:PID</dt><dd id="vid-pid">—</dd></div>
         <div><dt>Device path</dt><dd id="device-path">—</dd></div>
         <div><dt>Active profile</dt><dd id="active-profile">—</dd></div>
+        <div><dt>Configuration revision</dt><dd id="configuration-revision">—</dd></div>
+        <div><dt>Saved revision</dt><dd id="status-saved-revision">—</dd></div>
+        <div><dt>Applied / saved</dt><dd id="status-dirty">—</dd></div>
         <div><dt>Rendering</dt><dd id="rendering-state">—</dd></div>
+        <div><dt>Frame rate</dt><dd id="frame-rate">—</dd></div>
         <div><dt>Last upload</dt><dd id="last-upload">—</dd></div>
-        <div><dt>Last error</dt><dd id="last-error">None</dd></div>
+        <div><dt>Display / configuration errors</dt><dd id="last-error">None</dd></div>
       </dl>
+      <p id="multiple-device-warning" class="message warning"
+         role="status" aria-live="polite"></p>
     </section>
 
     <section aria-labelledby="preview-heading">
@@ -44,36 +52,52 @@
           A 90 by 10 pixel preview of the Matrix900 display.
         </canvas>
       </div>
-      <ol class="region-labels" aria-label="Physical display regions">
-        <li style="--region-width:24">Front clock <strong>24 px</strong></li>
-        <li style="--region-width:4">Gap <strong>4 px</strong></li>
-        <li style="--region-width:31">Scrolling text <strong>31 px</strong></li>
-        <li style="--region-width:31">Rear clock <strong>31 px</strong></li>
-      </ol>
+      <ol id="region-labels" class="region-labels"
+          aria-label="Physical display regions"></ol>
     </section>
 
     <section aria-labelledby="settings-heading">
       <h2 id="settings-heading">Profile settings</h2>
+      <div id="configuration-state" class="configuration-state"
+           role="status" aria-live="polite">
+        <p id="configuration-state-summary">Loading configuration state.</p>
+        <p id="configuration-state-detail"></p>
+        <dl class="configuration-state-values">
+          <div><dt>Draft</dt><dd id="draft-state">—</dd></div>
+          <div><dt>Runtime</dt><dd id="runtime-state">—</dd></div>
+          <div><dt>Configuration revision</dt><dd id="state-active-revision">—</dd></div>
+          <div><dt>Saved revision</dt><dd id="state-saved-revision">—</dd></div>
+        </dl>
+      </div>
       <form id="profile-form">
         <div class="form-grid">
           <label class="profile-field">
             <span class="profile-field-label">Scrolling text</span>
             <input class="profile-control" id="scrolling-text"
-                   name="scrolling_text" maxlength="64" required>
+                   name="scrolling_text" maxlength="64" required
+                   aria-describedby="scrolling-text-help scrolling-text-error">
+            <span id="scrolling-text-help" class="field-help">
+              Up to 64 characters. Supported: A–Z, 0–9, spaces, and
+              . - _ : ! ? /. Lowercase letters are converted to uppercase
+              when applied.
+            </span>
+            <span id="scrolling-text-error" class="field-error"></span>
           </label>
           <label class="profile-field">
             <span class="profile-field-label">Text color</span>
             <span class="profile-control color-control">
               <input class="color-picker" id="text-color" name="text_color"
-                     type="color" required>
+                     type="color" required aria-describedby="text-color-error">
             </span>
+            <span id="text-color-error" class="field-error"></span>
           </label>
           <label class="profile-field">
             <span class="profile-field-label">Clock color</span>
             <span class="profile-control color-control">
               <input class="color-picker" id="clock-color" name="clock_color"
-                     type="color" required>
+                     type="color" required aria-describedby="clock-color-error">
             </span>
+            <span id="clock-color-error" class="field-error"></span>
           </label>
           <label class="profile-field">
             <span class="profile-field-label">
@@ -81,11 +105,14 @@
             </span>
             <input class="profile-control" id="scroll-speed"
                    name="scroll_speed" type="number"
-                   min="0.5" max="20" step="0.5" required>
+                   min="0.5" max="20" step="any" inputmode="decimal" required
+                   aria-describedby="scroll-speed-error">
+            <span id="scroll-speed-error" class="field-error"></span>
           </label>
           <label class="profile-field">
             <span class="profile-field-label">Brightness</span>
-            <select class="profile-control" id="brightness" name="brightness">
+            <select class="profile-control" id="brightness" name="brightness"
+                    aria-describedby="brightness-error">
               <option value="">Leave unchanged</option>
               <option value="10">10%</option><option value="20">20%</option>
               <option value="30">30%</option><option value="40">40%</option>
@@ -93,18 +120,33 @@
               <option value="70">70%</option><option value="80">80%</option>
               <option value="90">90%</option><option value="100">100%</option>
             </select>
+            <span id="brightness-error" class="field-error"></span>
           </label>
         </div>
         <div class="actions">
           <button type="submit" data-action="apply">Apply</button>
           <button type="button" data-action="save" class="primary">Save configuration</button>
           <button type="button" data-action="defaults">Restore built-in defaults</button>
-          <button type="button" data-action="revert">Revert unsaved edits</button>
+          <button type="button" data-action="reload-applied">Reload applied settings</button>
         </div>
       </form>
+      <div id="reconciliation-panel" class="reconciliation-panel" hidden
+           role="status" aria-live="polite">
+        <p id="reconciliation-message"></p>
+        <div class="actions">
+          <button type="button" data-action="keep-local-draft">
+            Keep local draft
+          </button>
+          <button type="button" data-action="reload-reconciliation">
+            Reload applied settings
+          </button>
+        </div>
+      </div>
       <p id="connection-message" class="message error connection-message"
          role="status" aria-live="polite"></p>
       <p id="message" class="message" role="status" aria-live="polite"></p>
+      <p id="background-message" class="message warning"
+         role="status" aria-live="polite"></p>
     </section>
   </main>
   <script src="/static/app.js" defer></script>

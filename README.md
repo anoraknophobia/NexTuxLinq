@@ -16,7 +16,9 @@ Compatibility with untested devices must not be assumed. Support for additional 
 
 ## Status
 
-This project is in an early reverse-engineering stage. Device control is not implemented yet.
+This project is in an early reverse-engineering stage. Matrix900 device
+control, a local daemon, and a loopback-only web GUI are implemented, while
+many protocol features remain capture-driven or intentionally limited.
 
 Currently identified hardware:
 
@@ -85,6 +87,14 @@ It starts automatically after login and serves the loopback-only GUI at
 NexTuxLinq display/telemetry helpers so `nextuxlinqd` is the sole project
 writer.
 
+The GUI distinguishes edits in the browser from settings applied to the
+running daemon and from the configuration saved on disk. **Apply** updates
+the running profile, while **Save configuration** validates and persists the
+complete configuration. **Reload applied settings** discards only browser
+draft edits; it does not restore the saved file. If the daemon reconnects
+after its configuration changed, the GUI preserves the draft and asks whether
+to keep it or reload the newly applied settings.
+
 Install and uninstall operations use a private, non-blocking manager lock.
 Replaced or uninstalled managed units are retained as private `.bak` files
 beside the user unit; systemd does not recognize these backups, and NexTuxLinq
@@ -110,6 +120,10 @@ nextuxlinqctl service uninstall
 See [`docs/systemd.md`](docs/systemd.md) for installation safety and migration
 details. This is a user-service integration, not a distro package or public
 installer.
+
+Frontend state tests use the built-in `node:test` runner and require Node.js
+20 or newer when running the development test suite. Node.js is not a runtime
+dependency of NexTuxLinq or its packaged GUI.
 
 ### Linux telemetry
 

@@ -37,6 +37,29 @@ owned regular file from a private legacy directory; symlinks, non-regular
 files, unsafe permissions, and oversized input are rejected without exposing
 filesystem details in the warning.
 
+The GUI tracks three related states explicitly:
+
+- a local draft contains browser edits that have not been applied;
+- an applied, unsaved runtime configuration differs from the persisted file;
+- a synchronized configuration is both applied and saved.
+
+The API `dirty` value is authoritative for the applied-versus-saved state.
+**Reload applied settings** fetches the current runtime configuration and
+discards only local browser edits. It never claims to restore the persisted
+configuration. Apply and Save share native form validation, followed by the
+authoritative server validation.
+
+After a daemon reconnect, the GUI compares revisions, the active profile,
+`dirty`, and a structural configuration fingerprint. An unchanged runtime
+keeps any local draft without interruption. If the runtime changed, the draft
+remains visible and mutations pause until the user explicitly keeps and
+rebases the local draft or reloads the applied settings. Background polling
+does not overwrite action, reconciliation, or field-validation errors.
+
+Frontend transition and minimal DOM tests use Node.js 20 or newer through
+Python's normal pytest suite. They use only built-in Node modules; Node.js is
+not needed to run the daemon or packaged web GUI.
+
 The versioned local API is available below `/api/v1`. It is intended for the
 packaged GUI and future local clients, not remote access.
 
