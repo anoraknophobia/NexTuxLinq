@@ -278,11 +278,65 @@
     return stableStringify(regions);
   }
 
+  function viewerX(logicalX, regionWidth, canvasWidth) {
+    return canvasWidth - logicalX - regionWidth;
+  }
+
+  function placeRegionsForViewer(regions, canvasWidth) {
+    return regions.map((region) => ({
+      ...region,
+      viewer_start_pixel: viewerX(
+        region.start_pixel,
+        region.width,
+        canvasWidth,
+      ),
+    })).sort(
+      (left, right) => left.viewer_start_pixel - right.viewer_start_pixel,
+    );
+  }
+
+  function copyFramebufferForViewer(
+    binary,
+    image,
+    canvasWidth,
+    canvasHeight,
+    regions,
+  ) {
+    for (const region of regions) {
+      for (let y = 0; y < canvasHeight; y += 1) {
+        for (let localX = 0; localX < region.width; localX += 1) {
+          const sourcePixel = (
+            (y * canvasWidth) + region.start_pixel + localX
+          ) * 3;
+          const targetPixel = (
+            (y * canvasWidth) + region.viewer_start_pixel + localX
+          ) * 4;
+          image.data[targetPixel] = binary.charCodeAt(sourcePixel);
+          image.data[targetPixel + 1] = binary.charCodeAt(sourcePixel + 1);
+          image.data[targetPixel + 2] = binary.charCodeAt(sourcePixel + 2);
+          image.data[targetPixel + 3] = 255;
+        }
+      }
+    }
+  }
+
   function renderRegions(documentObject, list, regions) {
     const children = regions.map((region) => {
       const item = documentObject.createElement("li");
       item.style.setProperty("--region-width", String(region.width));
+      item.style.setProperty(
+        "--region-viewer-start",
+        String(region.viewer_start_pixel + 1),
+      );
       item.setAttribute("data-region-type", region.type);
+      item.setAttribute(
+        "data-logical-start-pixel",
+        String(region.start_pixel),
+      );
+      item.setAttribute(
+        "data-viewer-start-pixel",
+        String(region.viewer_start_pixel),
+      );
       const name = documentObject.createElement("span");
       name.textContent = region.name;
       const width = documentObject.createElement("strong");
@@ -993,32 +1047,37 @@
       }
     }
 
-    function renderPreviewRegions(preview) {
-      const normalized = normalizeRegions(preview.regions, preview.width);
-      const fingerprint = regionFingerprint(normalized.regions);
+    function renderPreviewRegions(regions) {
+      const fingerprint = regionFingerprint(regions);
       if (fingerprint === renderedRegionFingerprint) return;
-      renderRegions(documentObject, elements.regionLabels, normalized.regions);
+      renderRegions(documentObject, elements.regionLabels, regions);
       renderedRegionFingerprint = fingerprint;
     }
 
     async function refreshPreview() {
       const preview = await request("/preview");
+      const normalized = normalizeRegions(preview.regions, preview.width);
+      const viewerRegions = placeRegionsForViewer(
+        normalized.regions,
+        preview.width,
+      );
       const binary = decodeBase64(preview.framebuffer_base64);
       const image = elements.context.createImageData(
         preview.width,
         preview.height,
       );
-      for (let source = 0, target = 0; source < binary.length; source += 3) {
-        image.data[target++] = binary.charCodeAt(source);
-        image.data[target++] = binary.charCodeAt(source + 1);
-        image.data[target++] = binary.charCodeAt(source + 2);
-        image.data[target++] = 255;
-      }
+      copyFramebufferForViewer(
+        binary,
+        image,
+        preview.width,
+        preview.height,
+        viewerRegions,
+      );
       elements.context.putImageData(image, 0, 0);
       elements.previewRevision.textContent = `Revision ${preview.active_revision}`;
       latestPreviewTimestamp = Number.isFinite(preview.generation_timestamp)
         ? preview.generation_timestamp : null;
-      renderPreviewRegions(preview);
+      renderPreviewRegions(viewerRegions);
       renderStatus();
       return preview;
     }
@@ -1075,8 +1134,16 @@
 
     async function initialize() {
       renderConfigurationState();
-      renderRegions(documentObject, elements.regionLabels, FALLBACK_REGIONS);
-      renderedRegionFingerprint = regionFingerprint(FALLBACK_REGIONS);
+      const fallbackViewerRegions = placeRegionsForViewer(
+        FALLBACK_REGIONS,
+        90,
+      );
+      renderRegions(
+        documentObject,
+        elements.regionLabels,
+        fallbackViewerRegions,
+      );
+      renderedRegionFingerprint = regionFingerprint(fallbackViewerRegions);
       updateControls();
       try {
         const remote = await fetchRemoteSnapshot();
@@ -1190,6 +1257,9 @@
     saveSuccessfulResponse,
     normalizeRegions,
     regionFingerprint,
+    viewerX,
+    placeRegionsForViewer,
+    copyFramebufferForViewer,
     renderRegions,
     formatLastUpload,
     mapStructuredFieldErrors,

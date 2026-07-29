@@ -76,9 +76,13 @@ canvas {
   display: block; width: 100%; min-width: 630px; height: auto;
   image-rendering: pixelated; background: #000; border: 1px solid #4e6678;
 }
-.region-labels { display: flex; padding: 0; margin: 0; list-style: none; min-width: 630px; }
+.region-labels {
+  display: grid; grid-template-columns: repeat(90, minmax(0, 1fr));
+  padding: 0; margin: 0; list-style: none; min-width: 630px;
+}
 .region-labels li {
-  flex: var(--region-width); padding: .45rem; border-left: 1px solid #527084;
+  grid-column: var(--region-viewer-start) / span var(--region-width);
+  padding: .45rem; border-left: 1px solid #527084;
   color: #b9c9d5; font-size: .75rem;
 }
 .region-labels strong { display: block; color: #fff; }

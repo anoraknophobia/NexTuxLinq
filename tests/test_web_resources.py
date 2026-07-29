@@ -148,15 +148,26 @@ def test_profile_state_is_one_compact_status_without_revision_cards() -> None:
 
 
 def test_preview_regions_use_safe_dynamic_dom_rendering() -> None:
-    page, javascript, _ = _frontend_source()
+    page, javascript, css = _frontend_source()
 
     assert '<ol id="region-labels" class="region-labels"' in page
-    assert 'aria-label="Physical display regions"></ol>' in page
+    assert 'aria-label="Viewer-perspective display regions"></ol>' in page
+    assert (
+        "Viewer perspective, matching how the installed Matrix900 is seen."
+        in page
+    )
     assert "normalizeRegions(preview.regions, preview.width)" in javascript
+    assert "placeRegionsForViewer(" in javascript
+    assert "copyFramebufferForViewer(" in javascript
     assert "name.textContent = region.name;" in javascript
     assert "replaceChildren(...children);" in javascript
     assert "innerHTML" not in javascript
     assert "front_clock_width" not in javascript
+    assert "grid-template-columns: repeat(90, minmax(0, 1fr));" in css
+    assert (
+        "grid-column: var(--region-viewer-start) / span var(--region-width);"
+        in css
+    )
 
 
 def test_profile_form_layout_has_safe_responsive_sizing() -> None:

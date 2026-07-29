@@ -31,6 +31,15 @@ class FakeElement {
         this.styleValues[name] = value;
       },
     };
+    this.context = {
+      image: null,
+      createImageData(width, height) {
+        return {data: new Uint8ClampedArray(width * height * 4)};
+      },
+      putImageData: (image) => {
+        this.context.image = image;
+      },
+    };
   }
 
   addEventListener(name, callback) {
@@ -68,12 +77,7 @@ class FakeElement {
   }
 
   getContext() {
-    return {
-      createImageData(width, height) {
-        return {data: new Uint8ClampedArray(width * height * 4)};
-      },
-      putImageData() {},
-    };
+    return this.context;
   }
 }
 
@@ -271,7 +275,7 @@ function deferred() {
   return {promise, resolve};
 }
 
-function controllerFixture(responses = []) {
+function controllerFixture(responses = [], overrides = {}) {
   const document = fakeDocument();
   const fetch = fetchQueue(responses);
   const timers = [];
@@ -283,9 +287,7 @@ function controllerFixture(responses = []) {
       return timers.length;
     },
     clearTimeout() {},
-    decodeBase64() {
-      return "\0".repeat(2700);
-    },
+    decodeBase64: overrides.decodeBase64 || (() => "\0".repeat(2700)),
     window: {addEventListener() {}},
   });
   controller.state.connection.reachable = true;
@@ -1009,7 +1011,30 @@ test("HTTP 409 enters reconciliation without retrying the mutation", async () =>
   assert.equal(fetch.calls.filter((call) => call.url.endsWith("/apply")).length, 1);
 });
 
-test("valid preview regions preserve API order and render names safely", () => {
+test("viewer placement reverses regions without changing logical coordinates", () => {
+  const original = frontend.FALLBACK_REGIONS.map((region) => ({...region}));
+  const viewerRegions = frontend.placeRegionsForViewer(original, 90);
+
+  assert.deepEqual(viewerRegions.map((region) => region.name), [
+    "Rear clock",
+    "Scrolling text",
+    "Gap",
+    "Front clock",
+  ]);
+  assert.deepEqual(viewerRegions.map((region) => region.viewer_start_pixel), [
+    0,
+    31,
+    62,
+    66,
+  ]);
+  assert.deepEqual(original, frontend.FALLBACK_REGIONS);
+  assert.deepEqual(
+    viewerRegions.map((region) => region.start_pixel),
+    [59, 28, 24, 0],
+  );
+});
+
+test("viewer region labels match transformed positions and render names safely", () => {
   const document = fakeDocument();
   const list = document.elements.get("#region-labels");
   const regions = [
@@ -1018,9 +1043,83 @@ test("valid preview regions preserve API order and render names safely", () => {
   ];
   const normalized = frontend.normalizeRegions(regions, 90);
   assert.equal(normalized.valid, true);
-  frontend.renderRegions(document, list, normalized.regions);
-  assert.equal(list.children[0].children[0].textContent, "<Front>");
-  assert.equal(list.children[0].styleValues["--region-width"], "24");
+  const viewerRegions = frontend.placeRegionsForViewer(normalized.regions, 90);
+  frontend.renderRegions(document, list, viewerRegions);
+  assert.equal(list.children[0].children[0].textContent, "Gap");
+  assert.equal(list.children[0].styleValues["--region-viewer-start"], "1");
+  assert.equal(list.children[1].children[0].textContent, "<Front>");
+  assert.equal(list.children[1].styleValues["--region-width"], "24");
+  assert.equal(list.children[1].styleValues["--region-viewer-start"], "67");
+  assert.equal(list.children[1].getAttribute("data-logical-start-pixel"), "0");
+  assert.equal(list.children[1].getAttribute("data-viewer-start-pixel"), "66");
+});
+
+test("viewer framebuffer moves whole regions without mirroring their pixels", () => {
+  const logicalRegions = [
+    {name: "Front", start_pixel: 0, width: 3, type: "clock"},
+    {name: "Rear", start_pixel: 3, width: 3, type: "clock"},
+  ];
+  const viewerRegions = frontend.placeRegionsForViewer(logicalRegions, 6);
+  const image = {data: new Uint8ClampedArray(6 * 4)};
+  const binary = String.fromCharCode(
+    10, 0, 0,
+    20, 0, 0,
+    30, 0, 0,
+    40, 0, 0,
+    50, 0, 0,
+    60, 0, 0,
+  );
+
+  frontend.copyFramebufferForViewer(binary, image, 6, 1, viewerRegions);
+
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 5].map((x) => image.data[x * 4]),
+    [40, 50, 60, 10, 20, 30],
+  );
+});
+
+test("preview refresh and reconnect preserve viewer perspective", async () => {
+  const preview = previewPayload();
+  const framebuffer = String.fromCharCode(
+    ...Array.from(
+      {length: 90},
+      (_value, x) => [x, 0, 0],
+    ).flat(),
+  ).repeat(10);
+  const {controller} = controllerFixture([
+    response(preview),
+    new Error("offline"),
+    response(preview),
+  ], {decodeBase64: () => framebuffer});
+
+  await controller.refreshPreview();
+  assert.deepEqual(
+    controller.elements.regionLabels.children.map(
+      (item) => item.children[0].textContent,
+    ),
+    ["Rear clock", "Scrolling text", "Gap", "Front clock"],
+  );
+  assert.deepEqual(
+    [0, 30, 31, 61, 62, 65, 66, 89].map(
+      (x) => controller.elements.context.image.data[x * 4],
+    ),
+    [59, 89, 28, 58, 24, 27, 0, 23],
+  );
+  await assert.rejects(controller.refreshPreview());
+  controller.state.ui.submitting = true;
+  await controller.refreshPreview();
+  assert.deepEqual(
+    controller.elements.regionLabels.children.map(
+      (item) => item.children[0].textContent,
+    ),
+    ["Rear clock", "Scrolling text", "Gap", "Front clock"],
+  );
+  assert.deepEqual(
+    [0, 30, 31, 61, 62, 65, 66, 89].map(
+      (x) => controller.elements.context.image.data[x * 4],
+    ),
+    [59, 89, 28, 58, 24, 27, 0, 23],
+  );
 });
 
 test("unchanged preview regions are not rebuilt", async () => {
