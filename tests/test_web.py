@@ -9,11 +9,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from nexlinq.config_store import ConfigLoadResult, ConfigSaveError
-from nexlinq.defaults import default_configuration
-from nexlinq.service import NexLinqService
-from nexlinq.service import RevisionConflictError
-from nexlinq.web import MAX_REQUEST_BODY, create_app
+from nextuxlinq.config_store import ConfigLoadResult, ConfigSaveError
+from nextuxlinq.defaults import default_configuration
+from nextuxlinq.service import NexTuxLinqService
+from nextuxlinq.service import RevisionConflictError
+from nextuxlinq.web import MAX_REQUEST_BODY, create_app
 
 
 class MemoryStore:
@@ -43,10 +43,10 @@ class FakeWorker:
         self.brightness.append((value, revision))
 
 
-def service_for_api(tmp_path: Path) -> tuple[NexLinqService, MemoryStore, FakeWorker]:
+def service_for_api(tmp_path: Path) -> tuple[NexTuxLinqService, MemoryStore, FakeWorker]:
     store = MemoryStore(tmp_path / "config.json")
     worker = FakeWorker()
-    service = NexLinqService(
+    service = NexTuxLinqService(
         config_store=store,  # type: ignore[arg-type]
         device_worker=worker,  # type: ignore[arg-type]
         monotonic=lambda: 10.0,
@@ -690,7 +690,8 @@ def test_frontend_and_local_assets_are_self_contained(api_client) -> None:
     page, css, javascript = asyncio.run(fetch_assets())
 
     assert page.status_code == css.status_code == javascript.status_code == 200
-    assert "NexLinq Matrix900 Controller" in page.text
+    assert "NexTuxLinq Matrix900 Controller" in page.text
+    assert 'name="application-name"' in page.text
     assert 'aria-live="polite"' in page.text
     assert "A 90 by 10 pixel preview" in page.text
     assert "https://" not in page.text

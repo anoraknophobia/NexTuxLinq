@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from nexlinq.layout import WidgetCategory, build_widget_report
-from nexlinq.protocol import HID_REPORT_SIZE, REPORT_ID
+from nextuxlinq.layout import WidgetCategory, build_widget_report
+from nextuxlinq.protocol import HID_REPORT_SIZE, REPORT_ID
 
 COMMAND_TEXT_DATA = 0x02
 FREE_TEXT_WIDGET_ID = 0x00

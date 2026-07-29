@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import IntEnum
 
-from nexlinq.layout import WidgetCategory, build_widget_report
+from nextuxlinq.layout import WidgetCategory, build_widget_report
 
 
 class TimeAndDateWidget(IntEnum):

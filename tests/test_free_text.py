@@ -2,7 +2,7 @@
 
 import unittest
 
-from nexlinq.free_text import (
+from nextuxlinq.free_text import (
     build_fullscreen_free_text_reports,
     build_fullscreen_free_text_widget_report,
     build_text_data_report,
@@ -12,7 +12,7 @@ from nexlinq.free_text import (
 class FreeTextReportTests(unittest.TestCase):
     """Verify reports observed in the Windows capture."""
 
-    def test_nexlinq_text_report_matches_capture(self) -> None:
+    def test_official_text_report_matches_capture(self) -> None:
         expected = bytes.fromhex(
             "01 02 00 00 00 08 00 4e 45 58 4c 49 4e 51 ff ff "
             "ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff "

@@ -6,9 +6,9 @@ from hashlib import sha256
 
 import pytest
 
-from nexlinq.defaults import default_profile
-from nexlinq.models import ProfileConfig
-from nexlinq.rendering import (
+from nextuxlinq.defaults import default_profile
+from nextuxlinq.models import ProfileConfig
+from nextuxlinq.rendering import (
     FONT_3X7,
     FONT_5X7,
     calculate_scroll_offset,

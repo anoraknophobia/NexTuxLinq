@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from nexlinq.creator import FRAME_SIZE
-from nexlinq.device import Matrix900Device
-from nexlinq.device_worker import (
+from nextuxlinq.creator import FRAME_SIZE
+from nextuxlinq.device import Matrix900Device
+from nextuxlinq.device_worker import (
     DeviceWorker,
     DeviceWorkerSnapshot,
     WorkerNotAcceptingError,
 )
-from nexlinq.protocol import build_brightness_report
-from nexlinq.writer_lock import WriterLock
+from nextuxlinq.protocol import build_brightness_report
+from nextuxlinq.writer_lock import WriterLock
 
 
 class FakeConnection:

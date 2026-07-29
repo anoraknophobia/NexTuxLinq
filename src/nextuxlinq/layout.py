@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import IntEnum
 
-from nexlinq.protocol import HID_REPORT_SIZE, REPORT_ID
+from nextuxlinq.protocol import HID_REPORT_SIZE, REPORT_ID
 
 COMMAND_WIDGET_CONFIGURATION = 0x03
 WIDGET_CONFIGURATION_MARKER = 0x22

@@ -1,4 +1,4 @@
-"""Framework-independent immutable NexLinq daemon state snapshots."""
+"""Framework-independent immutable NexTuxLinq daemon state snapshots."""
 
 from __future__ import annotations
 

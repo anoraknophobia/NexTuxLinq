@@ -1,4 +1,4 @@
-"""Foreground entry point for the NexLinq Matrix900 service core."""
+"""Foreground entry point for the NexTuxLinq Matrix900 service core."""
 
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ from typing import Protocol
 
 import uvicorn
 from fastapi import FastAPI
-from nexlinq.config_store import ConfigStore
-from nexlinq.device_worker import DeviceWorker
-from nexlinq.service import NexLinqService
-from nexlinq.web import create_app
-from nexlinq.writer_lock import WriterLock, WriterLockHeldError
+from nextuxlinq.config_store import ConfigStore
+from nextuxlinq.device_worker import DeviceWorker
+from nextuxlinq.service import NexTuxLinqService
+from nextuxlinq.web import create_app
+from nextuxlinq.writer_lock import WriterLock, WriterLockHeldError
 
-ServiceFactory = Callable[[], NexLinqService]
+ServiceFactory = Callable[[], NexTuxLinqService]
 
 
 class HttpServer(Protocol):
@@ -33,7 +33,7 @@ ServerFactory = Callable[[FastAPI, str, int], HttpServer]
 
 
 class LocalUvicornServer(uvicorn.Server):
-    """Uvicorn server that leaves signal ownership to nexlinqd."""
+    """Uvicorn server that leaves signal ownership to nextuxlinqd."""
 
     @contextmanager
     def capture_signals(self):
@@ -76,8 +76,8 @@ def validate_port(value: str | int) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="nexlinqd",
-        description="Run the local Phanteks Matrix900 NexLinq service core.",
+        prog="nextuxlinqd",
+        description="Run the local Phanteks Matrix900 NexTuxLinq service core.",
     )
     parser.add_argument(
         "--foreground",
@@ -100,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def wait_for_shutdown(
-    service: NexLinqService,
+    service: NexTuxLinqService,
     stop_requested: asyncio.Event,
 ) -> None:
     """Wait for a signal request or propagate an unexpected renderer failure."""
@@ -108,7 +108,7 @@ async def wait_for_shutdown(
     render_task = service.render_task
     if render_task is None:
         stop_task.cancel()
-        raise RuntimeError("NexLinq renderer did not start.")
+        raise RuntimeError("NexTuxLinq renderer did not start.")
     done, _ = await asyncio.wait(
         (stop_task, render_task),
         return_when=asyncio.FIRST_COMPLETED,
@@ -122,10 +122,10 @@ async def wait_for_shutdown(
         await render_task
 
 
-def _create_service() -> NexLinqService:
-    writer_lock = WriterLock.from_environment(owner="nexlinqd")
+def _create_service() -> NexTuxLinqService:
+    writer_lock = WriterLock.from_environment(owner="nextuxlinqd")
     worker = DeviceWorker(writer_lock=writer_lock)
-    return NexLinqService(config_store=ConfigStore(), device_worker=worker)
+    return NexTuxLinqService(config_store=ConfigStore(), device_worker=worker)
 
 
 def _create_http_server(app: FastAPI, host: str, port: int) -> HttpServer:
@@ -163,7 +163,7 @@ async def run_service(
     server_task: asyncio.Task[None] | None = None
     stop_task: asyncio.Task[bool] | None = None
     worker_failure_task: asyncio.Task[None] | None = None
-    logging.info("Starting NexLinq Matrix900 controller at http://%s:%d.", host, port)
+    logging.info("Starting NexTuxLinq Matrix900 controller at http://%s:%d.", host, port)
     exit_code = 0
     try:
         await service.start()
@@ -175,7 +175,7 @@ async def run_service(
         server = server_factory(app, host, port)
         server_task = asyncio.create_task(
             server.serve(),
-            name="nexlinq-http-server",
+            name="nextuxlinq-http-server",
         )
         stop_task = asyncio.create_task(stop_requested.wait())
         worker_failure_task = asyncio.create_task(
@@ -183,7 +183,7 @@ async def run_service(
         )
         render_task = service.render_task
         if render_task is None:
-            raise RuntimeError("NexLinq renderer did not start.")
+            raise RuntimeError("NexTuxLinq renderer did not start.")
         done, _ = await asyncio.wait(
             (stop_task, render_task, server_task, worker_failure_task),
             return_when=asyncio.FIRST_COMPLETED,
@@ -202,9 +202,9 @@ async def run_service(
         exit_code = 1
     except (Exception, SystemExit):
         if service.snapshot().rendering_state == "failed":
-            logging.error("NexLinq Matrix900 rendering failed.")
+            logging.error("NexTuxLinq Matrix900 rendering failed.")
         else:
-            logging.error("NexLinq Matrix900 service failed.")
+            logging.error("NexTuxLinq Matrix900 service failed.")
         exit_code = 1
     finally:
         if server is not None:
@@ -230,9 +230,9 @@ async def run_service(
             try:
                 await service.stop()
             except TimeoutError:
-                logging.error("NexLinq Matrix900 worker shutdown timed out.")
+                logging.error("NexTuxLinq Matrix900 worker shutdown timed out.")
                 exit_code = 1
-    logging.info("NexLinq Matrix900 service core stopped.")
+    logging.info("NexTuxLinq Matrix900 service core stopped.")
     return exit_code
 
 

@@ -2,7 +2,7 @@
 
 import unittest
 
-from nexlinq.clock import (
+from nextuxlinq.clock import (
     TimeAndDateWidget,
     build_fullscreen_date_report,
     build_fullscreen_digital_clock_report,

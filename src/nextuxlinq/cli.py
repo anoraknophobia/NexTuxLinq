@@ -1,4 +1,4 @@
-"""Command-line interface for nexlinq-linux."""
+"""Command-line interface for NexTuxLinq."""
 
 from __future__ import annotations
 
@@ -6,36 +6,36 @@ import argparse
 import sys
 import time
 
-from nexlinq.clock import (
+from nextuxlinq.clock import (
     TimeAndDateWidget,
     build_fullscreen_time_and_date_report,
 )
-from nexlinq.configuration import (
+from nextuxlinq.configuration import (
     send_configuration_report,
     send_report_sequence,
 )
-from nexlinq.controller import set_brightness
-from nexlinq.device import find_matrix900
-from nexlinq.free_text import build_fullscreen_free_text_reports
-from nexlinq.layout import (
+from nextuxlinq.controller import set_brightness
+from nextuxlinq.device import find_matrix900
+from nextuxlinq.free_text import build_fullscreen_free_text_reports
+from nextuxlinq.layout import (
     SystemDataSource,
     SystemDataWidget,
     build_system_data_report,
     build_system_data_variant_one_report,
 )
-from nexlinq.presets import (
+from nextuxlinq.presets import (
     build_layout_reports,
     build_two_slot_clock_system_reports,
 )
-from nexlinq.telemetry import collect_default_telemetry, send_telemetry
-from nexlinq.writer_lock import WriterLock, WriterLockHeldError
+from nextuxlinq.telemetry import collect_default_telemetry, send_telemetry
+from nextuxlinq.writer_lock import WriterLock, WriterLockHeldError
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
     parser = argparse.ArgumentParser(
-        prog="nexlinqctl",
-        description="Control a Phanteks Matrix900 display on Linux.",
+        prog="nextuxlinqctl",
+        description="Control a Phanteks Matrix900 display with NexTuxLinq.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -517,13 +517,13 @@ def configure_system_widget(profile_name: str) -> int:
     return 0
 
 def main() -> int:
-    """Run the nexlinqctl command-line interface."""
+    """Run the nextuxlinqctl command-line interface."""
     arguments = build_parser().parse_args()
 
     if arguments.command in (None, "detect"):
         return detect_devices()
     try:
-        with WriterLock.from_environment(owner=f"nexlinqctl {arguments.command}"):
+        with WriterLock.from_environment(owner=f"nextuxlinqctl {arguments.command}"):
             if arguments.command == "brightness":
                 return set_device_brightness(arguments.percentage)
             if arguments.command == "telemetry":

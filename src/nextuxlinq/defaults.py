@@ -1,6 +1,6 @@
 """Built-in Matrix900 dynamic display defaults."""
 
-from nexlinq.models import (
+from nextuxlinq.models import (
     SCHEMA_VERSION,
     ConfigurationDocument,
     LayoutConfig,

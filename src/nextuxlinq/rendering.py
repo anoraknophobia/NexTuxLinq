@@ -7,8 +7,8 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Mapping
 
-from nexlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH, FrameBuffer, RGB
-from nexlinq.models import ProfileConfig, color_to_rgb
+from nextuxlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH, FrameBuffer, RGB
+from nextuxlinq.models import ProfileConfig, color_to_rgb
 
 BACKGROUND: RGB = (0, 0, 0)
 MARQUEE_TRAILING_GAP = 6

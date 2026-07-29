@@ -2,8 +2,8 @@
 
 import unittest
 
-from nexlinq.layout import SystemDataSource
-from nexlinq.presets import (
+from nextuxlinq.layout import SystemDataSource
+from nextuxlinq.presets import (
     USER_LAYOUT_TO_INTERNAL_ID,
     build_layout_reports,
     build_two_slot_clock_system_reports,

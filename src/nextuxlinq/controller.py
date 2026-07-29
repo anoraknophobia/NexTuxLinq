@@ -6,8 +6,8 @@ import select
 from dataclasses import dataclass
 from pathlib import Path
 
-from nexlinq.protocol import build_brightness_report
-from nexlinq.transport import open_hidraw, read_report, write_report
+from nextuxlinq.protocol import build_brightness_report
+from nextuxlinq.transport import open_hidraw, read_report, write_report
 
 
 @dataclass(frozen=True)

@@ -1,8 +1,8 @@
 from datetime import datetime
 from hashlib import sha256
 
-from nexlinq.creator import FRAME_SIZE, MATRIX_WIDTH, FrameBuffer
-from nexlinq.default_display import (
+from nextuxlinq.creator import FRAME_SIZE, MATRIX_WIDTH, FrameBuffer
+from nextuxlinq.default_display import (
     CACHYOS_TURQUOISE,
     FRONT_CLOCK_WIDTH,
     GAP_WIDTH,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from nexlinq.clock import TimeAndDateWidget, build_time_and_date_report
-from nexlinq.layout import (
+from nextuxlinq.clock import TimeAndDateWidget, build_time_and_date_report
+from nextuxlinq.layout import (
     LAYOUT_SLOT_COUNTS,
     SystemDataSource,
     SystemDataWidget,

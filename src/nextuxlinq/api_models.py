@@ -1,4 +1,4 @@
-"""Strict Pydantic schemas for the local NexLinq HTTP API."""
+"""Strict Pydantic schemas for the local NexTuxLinq HTTP API."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
-from nexlinq.models import ConfigurationDocument, LayoutConfig, ProfileConfig
+from nextuxlinq.models import ConfigurationDocument, LayoutConfig, ProfileConfig
 
 
 class DomainValidationError(ValueError):

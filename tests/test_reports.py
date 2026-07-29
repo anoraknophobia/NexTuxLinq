@@ -2,7 +2,7 @@
 
 import unittest
 
-from nexlinq.protocol import build_brightness_report
+from nextuxlinq.protocol import build_brightness_report
 
 
 class BrightnessReportTests(unittest.TestCase):

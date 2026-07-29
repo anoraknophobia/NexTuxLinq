@@ -9,12 +9,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from nexlinq.configuration import ReportConnection
-from nexlinq.creator import FRAME_SIZE, build_creator_upload_reports
-from nexlinq.device import Matrix900Device, find_matrix900
-from nexlinq.protocol import build_brightness_report
-from nexlinq.transport import HidrawConnection
-from nexlinq.writer_lock import WriterLock
+from nextuxlinq.configuration import ReportConnection
+from nextuxlinq.creator import FRAME_SIZE, build_creator_upload_reports
+from nextuxlinq.device import Matrix900Device, find_matrix900
+from nextuxlinq.protocol import build_brightness_report
+from nextuxlinq.transport import HidrawConnection
+from nextuxlinq.writer_lock import WriterLock
 
 RECONNECT_DELAYS = (1.0, 2.0, 5.0, 10.0)
 LOGGER = logging.getLogger(__name__)
@@ -137,7 +137,7 @@ class DeviceWorker:
             self._lifecycle = "starting"
             self._thread = self._thread_factory(
                 target=self._run,
-                name="nexlinq-device-worker",
+                name="nextuxlinq-device-worker",
                 daemon=False,
             )
             snapshot = self._replace_snapshot_locked(

@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from nexlinq.creator import MATRIX_WIDTH, RGB
-from nexlinq.protocol import BRIGHTNESS_STEP_PERCENT
+from nextuxlinq.creator import MATRIX_WIDTH, RGB
+from nextuxlinq.protocol import BRIGHTNESS_STEP_PERCENT
 
 SCHEMA_VERSION = 1
 MAX_PROFILES = 32

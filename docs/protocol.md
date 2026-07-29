@@ -173,10 +173,10 @@ they are validated through controlled one-setting-at-a-time captures.
 
 | Widget | ID | Linux command |
 |--------|---:|---------------|
-| Digital clock | `0x01` | `nexlinqctl time-widget digital` |
-| Graphical clock | `0x02` | `nexlinqctl time-widget graphical` |
-| Date | `0x03` | `nexlinqctl time-widget date` |
-| Week number | `0x04` | `nexlinqctl time-widget week` |
+| Digital clock | `0x01` | `nextuxlinqctl time-widget digital` |
+| Graphical clock | `0x02` | `nextuxlinqctl time-widget graphical` |
+| Date | `0x03` | `nextuxlinqctl time-widget date` |
+| Week number | `0x04` | `nextuxlinqctl time-widget week` |
 
 The complete option bytes are reproduced from the sequential Windows capture.
 Their individual meanings remain intentionally undocumented until controlled

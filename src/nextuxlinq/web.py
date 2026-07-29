@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from nexlinq.api_models import (
+from nextuxlinq.api_models import (
     ApplyRequest,
     ApplyResponse,
     ConfigResponse,
@@ -32,10 +32,10 @@ from nexlinq.api_models import (
     SaveResponse,
     StatusResponse,
 )
-from nexlinq.config_store import ConfigSaveError
-from nexlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH
-from nexlinq.service import (
-    NexLinqService,
+from nextuxlinq.config_store import ConfigSaveError
+from nextuxlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH
+from nextuxlinq.service import (
+    NexTuxLinqService,
     RevisionConflictError,
     ServiceUnavailableError,
 )
@@ -139,7 +139,7 @@ def _parse_origin(origin: str, expected_port: int) -> str:
 
 
 def create_app(
-    service: NexLinqService,
+    service: NexTuxLinqService,
     *,
     allowed_hosts: set[str] | None = None,
     configured_port: int = 8765,
@@ -151,7 +151,7 @@ def create_app(
         else {host.lower() for host in allowed_hosts}
     )
     app = FastAPI(
-        title="NexLinq Matrix900 Controller",
+        title="NexTuxLinq Matrix900 Controller",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -242,7 +242,7 @@ def create_app(
                 request,
                 503,
                 "service_unavailable",
-                "The NexLinq service is stopping or unavailable.",
+                "The NexTuxLinq service is stopping or unavailable.",
             )
         except DomainValidationError as error:
             return _error(

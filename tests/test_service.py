@@ -1,4 +1,4 @@
-"""Hardware-independent tests for NexLinq service orchestration."""
+"""Hardware-independent tests for NexTuxLinq service orchestration."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from nexlinq.config_store import ConfigLoadResult
-from nexlinq.defaults import default_configuration, default_profile
-from nexlinq.device_worker import DeviceWorker, DeviceWorkerSnapshot
-from nexlinq.models import ConfigurationDocument, ProfileConfig
-from nexlinq.rendering import render_profile_at_elapsed
-from nexlinq.service import NexLinqService, WorkerSubmissionError
-from nexlinq.state import DaemonState
-from nexlinq.writer_lock import WriterLock
+from nextuxlinq.config_store import LEGACY_MIGRATION_WARNING, ConfigLoadResult
+from nextuxlinq.defaults import default_configuration, default_profile
+from nextuxlinq.device_worker import DeviceWorker, DeviceWorkerSnapshot
+from nextuxlinq.models import ConfigurationDocument, ProfileConfig
+from nextuxlinq.rendering import render_profile_at_elapsed
+from nextuxlinq.service import NexTuxLinqService, WorkerSubmissionError
+from nextuxlinq.state import DaemonState
+from nextuxlinq.writer_lock import WriterLock
 
 
 class FakeStore:
@@ -73,6 +73,49 @@ def configuration_with(**changes: object) -> ConfigurationDocument:
     return ConfigurationDocument(1, "default", {"default": profile})
 
 
+def test_legacy_migration_warning_is_surfaced_until_successful_save() -> None:
+    async def scenario() -> None:
+        worker = FakeWorker()
+        rendered = asyncio.Event()
+
+        class MigrationStore(FakeStore):
+            def load(self) -> ConfigLoadResult:
+                return ConfigLoadResult(
+                    self.configuration,
+                    warning=LEGACY_MIGRATION_WARNING,
+                    persisted=True,
+                    migration_pending=True,
+                )
+
+        async def sleep(delay: float) -> None:
+            rendered.set()
+            await asyncio.Future()
+
+        configuration = default_configuration()
+        store = MigrationStore(configuration)
+        service = NexTuxLinqService(
+            config_store=store,  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            sleep=sleep,
+        )
+        await service.start()
+        await asyncio.wait_for(rendered.wait(), 1)
+
+        assert service.snapshot().configuration_warning == (
+            LEGACY_MIGRATION_WARNING
+        )
+
+        await service.save_configuration(
+            configuration,
+            expected_active_revision=1,
+            expected_saved_revision=1,
+        )
+        assert service.snapshot().configuration_warning is None
+        await service.stop()
+
+    asyncio.run(scenario())
+
+
 def test_service_uses_profile_speed_and_preserves_rendered_output() -> None:
     async def scenario() -> None:
         worker = FakeWorker()
@@ -87,7 +130,7 @@ def test_service_uses_profile_speed_and_preserves_rendered_output() -> None:
             scroll_speed=3.0,
         )
         now = datetime(2026, 7, 27, 20, 36)
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(configuration),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             monotonic=Monotonic(),
@@ -116,7 +159,7 @@ def test_service_applies_selected_brightness_but_not_null() -> None:
             block.set()
             await asyncio.Future()
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(configuration),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             monotonic=Monotonic(),
@@ -134,7 +177,7 @@ def test_service_applies_selected_brightness_but_not_null() -> None:
 def test_worker_upload_status_updates_immutable_service_state() -> None:
     worker = FakeWorker()
     monotonic = Monotonic()
-    service = NexLinqService(
+    service = NexTuxLinqService(
         config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
         device_worker=worker,  # type: ignore[arg-type]
         monotonic=monotonic,
@@ -162,7 +205,7 @@ def test_render_failure_updates_service_state() -> None:
         async def fail_sleep(delay: float) -> None:
             raise RuntimeError("private renderer detail")
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             monotonic=Monotonic(),
@@ -195,7 +238,7 @@ def test_worker_stop_timeout_marks_service_failed() -> None:
             rendered.set()
             await asyncio.Future()
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             sleep=sleep,
@@ -240,7 +283,7 @@ def test_startup_failure_after_worker_start_stops_worker_and_can_retry(
     async def scenario() -> None:
         lock_path = tmp_path / "matrix900.lock"
         worker = BrightnessFailureWorker(WriterLock(lock_path))
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(configuration_with(brightness=50)),  # type: ignore[arg-type]
             device_worker=worker,
         )
@@ -268,7 +311,7 @@ def test_render_task_creation_failure_unwinds_started_worker() -> None:
         def fail_task_creation(coroutine):
             raise RuntimeError("private task creation failure")
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             task_factory=fail_task_creation,
@@ -280,7 +323,7 @@ def test_render_task_creation_failure_unwinds_started_worker() -> None:
         assert worker.stopped
         assert not service.owns_resources
         assert service.snapshot().last_display_error == (
-            "NexLinq service startup failed."
+            "NexTuxLinq service startup failed."
         )
 
     asyncio.run(scenario())
@@ -305,7 +348,7 @@ def test_late_startup_failure_cancels_render_task_and_stops_worker() -> None:
             tasks.append(task)
             return task
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             state=LateFailureState(),
@@ -333,7 +376,7 @@ def test_unexpected_worker_exit_signals_service_failure() -> None:
             block.set()
             await asyncio.Future()
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             monotonic=Monotonic(),
@@ -384,7 +427,7 @@ def test_worker_exit_during_startup_rolls_back(
                 worker.callback(DeviceWorkerSnapshot(running=False))
             return asyncio.create_task(coroutine)
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(configuration_with(brightness=50)),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             task_factory=create_task,
@@ -395,7 +438,7 @@ def test_worker_exit_during_startup_rolls_back(
         assert not service.owns_resources
         assert service.snapshot().lifecycle_state == "failed"
         assert service.snapshot().last_display_error == (
-            "NexLinq service startup failed."
+            "NexTuxLinq service startup failed."
         )
 
     asyncio.run(scenario())
@@ -433,7 +476,7 @@ def test_worker_exit_between_verification_and_running_publication_rolls_back() -
         async def sleep(delay: float) -> None:
             await asyncio.Future()
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             state=PublicationBarrierState(),
@@ -466,7 +509,7 @@ def test_worker_exit_immediately_after_running_revokes_service_state() -> None:
         worker = FakeWorker()
         state = ExitAfterRunningState()
         state.worker = worker
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             state=state,
@@ -493,7 +536,7 @@ def test_concurrent_applies_preserve_publication_and_command_order() -> None:
                 entered.set()
                 await release.wait()
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             mutation_gate=gate,
@@ -552,7 +595,7 @@ def test_apply_then_save_apply_preserves_command_order() -> None:
                 entered.set()
                 await release.wait()
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=store,  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
             mutation_gate=gate,
@@ -605,7 +648,7 @@ def test_submission_rejection_rolls_back_runtime_publication() -> None:
 
     async def scenario() -> None:
         worker = RejectingWorker()
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
         )
@@ -634,7 +677,7 @@ def test_partial_submission_failure_marks_service_failed_without_publication() -
 
     async def scenario() -> None:
         worker = BrightnessRejectingWorker()
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
             device_worker=worker,  # type: ignore[arg-type]
         )
@@ -665,7 +708,7 @@ def test_partial_submission_failure_marks_service_failed_without_publication() -
 
 
 def test_atomic_configuration_and_preview_capture_wait_for_publication() -> None:
-    service = NexLinqService(
+    service = NexTuxLinqService(
         config_store=FakeStore(default_configuration()),  # type: ignore[arg-type]
         device_worker=FakeWorker(),  # type: ignore[arg-type]
         monotonic=lambda: 10.0,
@@ -717,7 +760,7 @@ def test_render_loop_submits_one_atomic_profile_revision_pair() -> None:
     candidate = configuration_with(scrolling_text="ATOMIC")
     now = datetime(2026, 7, 27, 20, 36)
 
-    class CoordinatedService(NexLinqService):
+    class CoordinatedService(NexTuxLinqService):
         def _capture_active_profile(self):
             capture_attempted.set()
             return super()._capture_active_profile()

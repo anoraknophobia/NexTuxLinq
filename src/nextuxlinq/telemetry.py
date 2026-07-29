@@ -11,9 +11,9 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from nexlinq.controller import CommandResult
-from nexlinq.protocol import build_telemetry_report
-from nexlinq.transport import open_hidraw, read_report, write_report
+from nextuxlinq.controller import CommandResult
+from nextuxlinq.protocol import build_telemetry_report
+from nextuxlinq.transport import open_hidraw, read_report, write_report
 
 HWMON_ROOT = Path("/sys/class/hwmon")
 OPENLINKHUB_DEVICES_URL = "http://127.0.0.1:27003/api/devices/"

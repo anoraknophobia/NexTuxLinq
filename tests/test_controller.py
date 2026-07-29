@@ -5,8 +5,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from nexlinq.controller import set_brightness
-from nexlinq.protocol import build_brightness_report
+from nextuxlinq.controller import set_brightness
+from nextuxlinq.protocol import build_brightness_report
 
 
 class BrightnessControlTests(unittest.TestCase):
@@ -24,14 +24,14 @@ class BrightnessControlTests(unittest.TestCase):
         write_mock = Mock()
 
         with (
-            patch("nexlinq.controller.open_hidraw", fake_open_hidraw),
-            patch("nexlinq.controller.write_report", write_mock),
+            patch("nextuxlinq.controller.open_hidraw", fake_open_hidraw),
+            patch("nextuxlinq.controller.write_report", write_mock),
             patch(
-                "nexlinq.controller.select.select",
+                "nextuxlinq.controller.select.select",
                 return_value=([file_descriptor], [], []),
             ),
             patch(
-                "nexlinq.controller.read_report",
+                "nextuxlinq.controller.read_report",
                 return_value=expected_report,
             ),
         ):
@@ -47,9 +47,9 @@ class BrightnessControlTests(unittest.TestCase):
             yield 42
 
         with (
-            patch("nexlinq.controller.open_hidraw", fake_open_hidraw),
-            patch("nexlinq.controller.write_report"),
-            patch("nexlinq.controller.select.select", return_value=([], [], [])),
+            patch("nextuxlinq.controller.open_hidraw", fake_open_hidraw),
+            patch("nextuxlinq.controller.write_report"),
+            patch("nextuxlinq.controller.select.select", return_value=([], [], [])),
         ):
             result = set_brightness(Path("/dev/hidraw-test"), 50)
 

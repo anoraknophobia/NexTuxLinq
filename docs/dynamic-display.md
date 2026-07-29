@@ -7,7 +7,7 @@ The default display is rendered as a complete 90x10 RGB888 Creator frame. Its ph
 - 31 pixels: turquoise `CACHYOS` marquee
 - 31 pixels: 24-hour clock
 
-The Matrix900 Creator regions are arranged in reverse order relative to the physical case, but the pixel order inside each region must remain left-to-right. `nexlinq.default_display` handles this mapping so text and clocks are not mirrored.
+The Matrix900 Creator regions are arranged in reverse order relative to the physical case, but the pixel order inside each region must remain left-to-right. `nextuxlinq.default_display` handles this mapping so text and clocks are not mirrored.
 
 The renderer also accepts a validated display profile. Configuration fields
 cover scrolling text, text and clock colors, scroll speed, optional brightness,
@@ -18,8 +18,12 @@ means that rendering does not request a brightness change.
 Configuration is stored as versioned JSON at:
 
 ```text
-${XDG_CONFIG_HOME:-~/.config}/nexlinq/config.json
+${XDG_CONFIG_HOME:-~/.config}/nextuxlinq/config.json
 ```
+
+If only the pre-rename `~/.config/nexlinq/config.json` exists, it is loaded
+without modification and remains in place. A later explicit save writes the
+new canonical path; an existing canonical file always takes precedence.
 
 Missing or invalid files fall back to the built-in display without overwriting
 the file. Saves use a temporary file and atomic replacement. The current
@@ -29,17 +33,17 @@ loading saved profiles into a long-running daemon is outside this phase.
 Run one frame manually:
 
 ```console
-python -m nexlinq.default_display --once
+python -m nextuxlinq.default_display --once
 ```
 
 Run the animated display manually at the default five frames per second:
 
 ```console
-python -m nexlinq.default_display
+python -m nextuxlinq.default_display
 ```
 
-The user service is installed from `systemd/nexlinq-display.service`. It must not run concurrently with another process that writes HID reports to the Matrix900.
+The user service is installed from `systemd/nextuxlinq-display.service`. It must not run concurrently with another process that writes HID reports to the Matrix900.
 
 The standalone command now participates in the same advisory writer lock as
-`nexlinqd` and direct `nexlinqctl` mutations. See
+`nextuxlinqd` and direct `nextuxlinqctl` mutations. See
 [`daemon-core.md`](daemon-core.md) for the current single-writer architecture.

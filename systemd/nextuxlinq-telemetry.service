@@ -1,10 +1,11 @@
 [Unit]
 Description=Phanteks Matrix900 telemetry updater
 After=default.target
+Conflicts=nextuxlinq-display.service nexlinq-display.service nexlinq-telemetry.service
 
 [Service]
 Type=simple
-ExecStart=%h/nexlinq-linux/.venv/bin/nexlinqctl telemetry --watch
+ExecStart=%h/nexlinq-linux/.venv/bin/nextuxlinqctl telemetry --watch
 Restart=on-failure
 RestartSec=3
 StandardOutput=null

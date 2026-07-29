@@ -1,4 +1,4 @@
-# nexlinq-linux
+# NexTuxLinq
 
 Open-source Linux control software for the Phanteks Matrix900 display.
 
@@ -50,7 +50,9 @@ MIT
 
 ## Trademark notice
 
-Phanteks and NexLinq are trademarks of their respective owners. This project is an independent community project and is not affiliated with or endorsed by Phanteks.
+Phanteks and NexLinq are trademarks of their respective owners. NexTuxLinq is
+an independent community project and is not affiliated with or endorsed by
+Phanteks.
 
 ## Current Linux control support
 
@@ -60,11 +62,14 @@ The Linux implementation can currently:
 - Set brightness from 10% through 100% in ten-percent steps.
 - Read and display the Matrix900 response report.
 
+The tracked Matrix900 permission rule is `udev/70-nextuxlinq.rules`. This
+repository rename does not install or modify rules on the running system.
+
 Examples:
 
 ```console
-nexlinqctl detect
-nexlinqctl brightness 50
+nextuxlinqctl detect
+nextuxlinqctl brightness 50
 ```
 
 ### Linux telemetry
@@ -72,13 +77,13 @@ nexlinqctl brightness 50
 Send one hardware telemetry update:
 
 ```console
-nexlinqctl telemetry
+nextuxlinqctl telemetry
 ```
 
 Continuously update the display once per second:
 
 ```console
-nexlinqctl telemetry --watch
+nextuxlinqctl telemetry --watch
 ```
 
 The initial Linux sensor mapping uses:
@@ -94,9 +99,9 @@ This mapping is currently hardware-specific and will become configurable.
 Configure the verified fullscreen System Data variant:
 
 ```console
-nexlinqctl system-data cpu
-nexlinqctl system-data gpu
-nexlinqctl system-data fan
+nextuxlinqctl system-data cpu
+nextuxlinqctl system-data gpu
+nextuxlinqctl system-data fan
 ```
 
 This command currently uses user-facing layout 12, internal layout ID `0x01`.
@@ -107,7 +112,7 @@ The CPU, GPU, and FAN source identifiers are verified from Windows captures.
 Display ASCII text using the captured fullscreen Time and Date widget:
 
 ```console
-nexlinqctl text "NEXLINQ"
+nextuxlinqctl text "NEXTUXLINQ"
 ```
 
 The current encoder supports up to 49 ASCII bytes.
@@ -118,7 +123,7 @@ Unicode encoding and the exact maximum firmware length are not yet verified.
 Display the captured fullscreen digital-clock configuration:
 
 ```console
-nexlinqctl clock
+nextuxlinqctl clock
 ```
 
 The background telemetry service supplies the current Unix timestamp.
@@ -130,13 +135,13 @@ are currently preserved as an exact captured profile.
 Display the verified captured profiles:
 
 ```console
-nexlinqctl time-widget digital
-nexlinqctl time-widget graphical
-nexlinqctl time-widget date
-nexlinqctl time-widget week
+nextuxlinqctl time-widget digital
+nextuxlinqctl time-widget graphical
+nextuxlinqctl time-widget date
+nextuxlinqctl time-widget week
 ```
 
-`nexlinqctl clock` remains available as an alias for the digital clock.
+`nextuxlinqctl clock` remains available as an alias for the digital clock.
 The captured digital profile displays local time using the 24-hour format.
 
 ### Two-slot clock and System Data layout
@@ -144,9 +149,9 @@ The captured digital profile displays local time using the 24-hour format.
 Display a digital clock beside a live System Data widget:
 
 ```console
-nexlinqctl layout-clock-system cpu
-nexlinqctl layout-clock-system gpu
-nexlinqctl layout-clock-system fan
+nextuxlinqctl layout-clock-system cpu
+nextuxlinqctl layout-clock-system gpu
+nextuxlinqctl layout-clock-system fan
 ```
 
 This preset uses user-facing layout 1, internal layout ID `0x02`.
@@ -157,9 +162,9 @@ Configure a user-facing NexLinq layout by supplying exactly one widget for
 every slot, in visual slot order:
 
 ```console
-nexlinqctl layout 1 digital system-gpu
-nexlinqctl layout 2 digital system-cpu system-gpu
-nexlinqctl layout 3 digital date system-cpu system-gpu
+nextuxlinqctl layout 1 digital system-gpu
+nextuxlinqctl layout 2 digital system-cpu system-gpu
+nextuxlinqctl layout 3 digital date system-cpu system-gpu
 ```
 
 Currently supported slot widgets:
@@ -180,15 +185,15 @@ Not every possible widget and layout combination has been validated on hardware.
 Display the captured System Data widgets:
 
 ```console
-nexlinqctl system-widget variant1-cpu
-nexlinqctl system-widget variant1-gpu
-nexlinqctl system-widget variant1-fan
-nexlinqctl system-widget variant2
-nexlinqctl system-widget variant3
-nexlinqctl system-widget overview
-nexlinqctl system-widget aio-pump
-nexlinqctl system-widget graph-cpu
-nexlinqctl system-widget graph-gpu
+nextuxlinqctl system-widget variant1-cpu
+nextuxlinqctl system-widget variant1-gpu
+nextuxlinqctl system-widget variant1-fan
+nextuxlinqctl system-widget variant2
+nextuxlinqctl system-widget variant3
+nextuxlinqctl system-widget overview
+nextuxlinqctl system-widget aio-pump
+nextuxlinqctl system-widget graph-cpu
+nextuxlinqctl system-widget graph-gpu
 ```
 
 The fixed profiles reproduce exact Windows capture reports.
@@ -200,8 +205,8 @@ Source selection has only been verified for System Data variant one.
 Display an animated graph for one selected temperature source:
 
 ```console
-nexlinqctl system-widget graph-cpu
-nexlinqctl system-widget graph-gpu
+nextuxlinqctl system-widget graph-cpu
+nextuxlinqctl system-widget graph-gpu
 ```
 
 The same widgets can be used in generic layouts as `system-graph-cpu` and
@@ -214,10 +219,10 @@ for this widget.
 Display one live CPU or GPU value using the verified bar profiles:
 
 ```console
-nexlinqctl system-widget bar-cpu
-nexlinqctl system-widget bar-gpu
-nexlinqctl system-widget background-bar-cpu
-nexlinqctl system-widget background-bar-gpu
+nextuxlinqctl system-widget bar-cpu
+nextuxlinqctl system-widget bar-gpu
+nextuxlinqctl system-widget background-bar-cpu
+nextuxlinqctl system-widget background-bar-gpu
 ```
 
 The equivalent generic-layout names are:
@@ -236,8 +241,8 @@ FAN source selection is not yet verified for these widgets.
 The following fullscreen FAN profiles are hardware-verified:
 
 ```console
-nexlinqctl system-widget variant1-fan
-nexlinqctl system-widget background-bar-fan
+nextuxlinqctl system-widget variant1-fan
+nextuxlinqctl system-widget background-bar-fan
 ```
 
 The generic-layout name for the second profile is
@@ -252,8 +257,8 @@ combinations.
 The telemetry command supports two explicit RPM sources:
 
 ```console
-nexlinqctl telemetry --rpm-source fan
-nexlinqctl telemetry --rpm-source pump
+nextuxlinqctl telemetry --rpm-source fan
+nextuxlinqctl telemetry --rpm-source pump
 ```
 
 - `fan` reads all active non-AIO fans from OpenLinkHub and sends their rounded

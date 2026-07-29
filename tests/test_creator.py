@@ -1,4 +1,4 @@
-from nexlinq.creator import (
+from nextuxlinq.creator import (
     CREATOR_DATA_BYTES_PER_REPORT,
     FRAME_SIZE,
     HID_REPORT_SIZE,

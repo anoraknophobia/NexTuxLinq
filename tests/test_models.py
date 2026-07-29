@@ -5,8 +5,8 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from nexlinq.defaults import default_configuration, default_profile
-from nexlinq.models import (
+from nextuxlinq.defaults import default_configuration, default_profile
+from nextuxlinq.models import (
     SUPPORTED_TEXT_CHARACTERS,
     ConfigurationDocument,
     LayoutConfig,
@@ -36,7 +36,7 @@ def test_built_in_default_preserves_current_display() -> None:
 
 
 def test_text_is_normalized_to_uppercase() -> None:
-    assert normalize_display_text("nexlinq 900!") == "NEXLINQ 900!"
+    assert normalize_display_text("nextuxlinq 900!") == "NEXTUXLINQ 900!"
 
 
 def test_supported_font_scope_is_explicit() -> None:

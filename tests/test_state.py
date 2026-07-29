@@ -4,7 +4,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from nexlinq.state import DaemonState
+from nextuxlinq.state import DaemonState
 
 
 def test_snapshots_are_immutable_and_updates_replace_them() -> None:

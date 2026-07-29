@@ -6,21 +6,21 @@ import time
 from datetime import datetime
 from typing import Sequence
 
-from nexlinq.configuration import send_report_sequence
-from nexlinq.creator import (
+from nextuxlinq.configuration import send_report_sequence
+from nextuxlinq.creator import (
     MATRIX_WIDTH,
     FrameBuffer,
     build_creator_upload_reports,
 )
-from nexlinq.defaults import (
+from nextuxlinq.defaults import (
     DEFAULT_CLOCK_COLOR,
     DEFAULT_TEXT,
     DEFAULT_TEXT_COLOR,
     default_profile,
 )
-from nexlinq.device import find_matrix900
-from nexlinq.models import color_to_rgb
-from nexlinq.rendering import (
+from nextuxlinq.device import find_matrix900
+from nextuxlinq.models import color_to_rgb
+from nextuxlinq.rendering import (
     FONT_3X7,
     FONT_5X7,
     MARQUEE_TRAILING_GAP,
@@ -29,7 +29,7 @@ from nexlinq.rendering import (
     set_region_pixel,
     text_width,
 )
-from nexlinq.writer_lock import WriterLock, WriterLockHeldError
+from nextuxlinq.writer_lock import WriterLock, WriterLockHeldError
 
 _DEFAULT_LAYOUT = default_profile().layout
 FRONT_CLOCK_WIDTH = _DEFAULT_LAYOUT.front_clock_width
@@ -102,7 +102,7 @@ def _run_with_lock_held(*, once: bool = False, fps: float = DEFAULT_FPS) -> None
 
 def run(*, once: bool = False, fps: float = DEFAULT_FPS) -> None:
     """Run the legacy direct display while holding the project writer lock."""
-    with WriterLock.from_environment(owner="nexlinq.default_display"):
+    with WriterLock.from_environment(owner="nextuxlinq.default_display"):
         _run_with_lock_held(once=once, fps=fps)
 
 

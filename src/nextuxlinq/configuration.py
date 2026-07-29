@@ -7,10 +7,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
-from nexlinq.controller import CommandResult
-from nexlinq.layout import COMMAND_WIDGET_CONFIGURATION
-from nexlinq.protocol import HID_REPORT_SIZE, REPORT_ID
-from nexlinq.transport import open_hidraw, read_report, write_report
+from nextuxlinq.controller import CommandResult
+from nextuxlinq.layout import COMMAND_WIDGET_CONFIGURATION
+from nextuxlinq.protocol import HID_REPORT_SIZE, REPORT_ID
+from nextuxlinq.transport import open_hidraw, read_report, write_report
 
 
 class ReportConnection(Protocol):

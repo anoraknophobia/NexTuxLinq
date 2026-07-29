@@ -1,11 +1,12 @@
 [Unit]
 Description=Phanteks Matrix900 dynamic default display
 After=default.target
+Conflicts=nextuxlinq-telemetry.service nexlinq-display.service nexlinq-telemetry.service
 
 [Service]
 Type=simple
 WorkingDirectory=%h/nexlinq-linux
-ExecStart=%h/nexlinq-linux/.venv/bin/python -m nexlinq.default_display
+ExecStart=%h/nexlinq-linux/.venv/bin/python -m nextuxlinq.default_display
 Restart=on-failure
 RestartSec=3
 StandardOutput=journal

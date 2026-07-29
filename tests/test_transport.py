@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from nexlinq.transport import HidrawConnection, write_report
+from nextuxlinq.transport import HidrawConnection, write_report
 
 
 class WriteReportTests(unittest.TestCase):
@@ -49,15 +49,15 @@ class HidrawConnectionTests(unittest.TestCase):
     def test_reuses_one_descriptor_until_closed(self) -> None:
         report = bytes(range(64))
         with (
-            patch("nexlinq.transport.os.open", return_value=42) as open_mock,
-            patch("nexlinq.transport.os.close") as close_mock,
-            patch("nexlinq.transport.write_report") as write_mock,
+            patch("nextuxlinq.transport.os.open", return_value=42) as open_mock,
+            patch("nextuxlinq.transport.os.close") as close_mock,
+            patch("nextuxlinq.transport.write_report") as write_mock,
             patch(
-                "nexlinq.transport.select.select",
+                "nextuxlinq.transport.select.select",
                 return_value=([42], [], []),
             ),
             patch(
-                "nexlinq.transport.read_report",
+                "nextuxlinq.transport.read_report",
                 return_value=report,
             ),
         ):

@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from nexlinq.protocol import build_telemetry_report
-from nexlinq.telemetry import (
+from nextuxlinq.protocol import build_telemetry_report
+from nextuxlinq.telemetry import (
     case_fan_rpm_from_openlinkhub_payload,
     collect_default_telemetry,
     extract_openlinkhub_case_fan_rpms,

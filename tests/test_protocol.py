@@ -2,7 +2,7 @@
 
 import unittest
 
-from nexlinq.protocol import encode_brightness
+from nextuxlinq.protocol import encode_brightness
 
 
 class BrightnessEncodingTests(unittest.TestCase):

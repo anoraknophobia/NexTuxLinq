@@ -1,4 +1,4 @@
-"""Framework-independent NexLinq service orchestration."""
+"""Framework-independent NexTuxLinq service orchestration."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from nexlinq.config_store import ConfigSaveError, ConfigStore
-from nexlinq.defaults import default_configuration
-from nexlinq.device_worker import DeviceWorker, DeviceWorkerSnapshot
-from nexlinq.models import ConfigurationDocument, ProfileConfig
-from nexlinq.rendering import physical_preview_bytes, render_profile_at_elapsed
-from nexlinq.state import DaemonState, DaemonSnapshot
+from nextuxlinq.config_store import ConfigSaveError, ConfigStore
+from nextuxlinq.defaults import default_configuration
+from nextuxlinq.device_worker import DeviceWorker, DeviceWorkerSnapshot
+from nextuxlinq.models import ConfigurationDocument, ProfileConfig
+from nextuxlinq.rendering import physical_preview_bytes, render_profile_at_elapsed
+from nextuxlinq.state import DaemonState, DaemonSnapshot
 
 AsyncSleep = Callable[[float], Awaitable[None]]
 WallClock = Callable[[], datetime]
@@ -72,14 +72,14 @@ class PreviewSnapshot:
 def _default_task_factory(
     coroutine: Coroutine[Any, Any, None],
 ) -> asyncio.Task[None]:
-    return asyncio.create_task(coroutine, name="nexlinq-render-loop")
+    return asyncio.create_task(coroutine, name="nextuxlinq-render-loop")
 
 
 async def _open_mutation_gate(kind: str, revision: int) -> None:
     return None
 
 
-class NexLinqService:
+class NexTuxLinqService:
     """Load configuration, render frames, and feed the single device worker."""
 
     def __init__(
@@ -125,7 +125,7 @@ class NexLinqService:
     @property
     def configuration(self) -> ConfigurationDocument:
         if self._configuration is None:
-            raise RuntimeError("NexLinqService has not been started.")
+            raise RuntimeError("NexTuxLinqService has not been started.")
         return self._configuration
 
     def snapshot(self) -> DaemonSnapshot:
@@ -143,7 +143,7 @@ class NexLinqService:
 
     async def start(self) -> None:
         if self.owns_resources:
-            raise RuntimeError("NexLinqService is already started.")
+            raise RuntimeError("NexTuxLinqService is already started.")
         self.state.update(lifecycle_state="starting", rendering_state="idle")
         try:
             self._event_loop = asyncio.get_running_loop()
@@ -160,10 +160,14 @@ class NexLinqService:
                 self.state.update(
                     active_configuration_revision=1,
                     configuration_warning=(
-                        "Configuration could not be loaded; built-in defaults "
-                        "are active."
-                        if loaded.warning
-                        else None
+                        loaded.warning
+                        if loaded.migration_pending
+                        else (
+                            "Configuration could not be loaded; built-in "
+                            "defaults are active."
+                            if loaded.warning
+                            else None
+                        )
                     ),
                 )
             self.device_worker.set_status_callback(self.handle_worker_snapshot)
@@ -205,7 +209,7 @@ class NexLinqService:
                 self.state.update(
                     lifecycle_state="failed",
                     rendering_state="failed",
-                    last_display_error="NexLinq service startup failed.",
+                    last_display_error="NexTuxLinq service startup failed.",
                 )
             except Exception:
                 pass
@@ -248,7 +252,7 @@ class NexLinqService:
         """Wait until the owned worker exits unexpectedly."""
         event = self._worker_failure_event
         if event is None:
-            raise RuntimeError("NexLinqService has not been started.")
+            raise RuntimeError("NexTuxLinqService has not been started.")
         await event.wait()
 
     async def _monitored_render_loop(self) -> None:
@@ -476,7 +480,7 @@ class NexLinqService:
     def _require_running(self) -> None:
         if self.snapshot().lifecycle_state != "running":
             raise ServiceUnavailableError(
-                "The NexLinq service is not accepting configuration changes."
+                "The NexTuxLinq service is not accepting configuration changes."
             )
 
     def handle_worker_snapshot(self, snapshot: DeviceWorkerSnapshot) -> None:

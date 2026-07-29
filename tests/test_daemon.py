@@ -1,4 +1,4 @@
-"""Tests for the initial foreground nexlinqd entry point."""
+"""Tests for the initial foreground nextuxlinqd entry point."""
 
 import asyncio
 from pathlib import Path
@@ -6,19 +6,19 @@ from unittest.mock import patch
 
 import pytest
 
-from nexlinq.config_store import ConfigLoadResult
-from nexlinq.daemon import (
+from nextuxlinq.config_store import ConfigLoadResult
+from nextuxlinq.daemon import (
     build_parser,
     run_service,
     validate_host,
     validate_port,
     wait_for_shutdown,
 )
-from nexlinq.defaults import default_configuration
-from nexlinq.device_worker import DeviceWorker
-from nexlinq.service import NexLinqService
-from nexlinq.state import DaemonSnapshot
-from nexlinq.writer_lock import WriterLock
+from nextuxlinq.defaults import default_configuration
+from nextuxlinq.device_worker import DeviceWorker
+from nextuxlinq.service import NexTuxLinqService
+from nextuxlinq.state import DaemonSnapshot
+from nextuxlinq.writer_lock import WriterLock
 
 
 def test_daemon_parser_supports_foreground_mode_only() -> None:
@@ -111,7 +111,7 @@ def test_run_service_renderer_failure_cleans_up_and_returns_nonzero(
         async def fail_render_sleep(delay: float) -> None:
             raise RuntimeError("/private/renderer/detail")
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=Store(),  # type: ignore[arg-type]
             device_worker=worker,
             sleep=fail_render_sleep,
@@ -139,7 +139,7 @@ def test_run_service_renderer_failure_cleans_up_and_returns_nonzero(
     replacement.acquire()
     replacement.release()
     messages = [record.getMessage() for record in caplog.records]
-    assert "NexLinq Matrix900 rendering failed." in messages
+    assert "NexTuxLinq Matrix900 rendering failed." in messages
     assert all("/private/renderer/detail" not in message for message in messages)
 
 
@@ -164,7 +164,7 @@ def test_http_startup_failure_stops_service_and_releases_lock(
         async def block(delay: float) -> None:
             await asyncio.Future()
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=Store(),  # type: ignore[arg-type]
             device_worker=worker,
             sleep=block,
@@ -190,7 +190,7 @@ def test_http_startup_failure_stops_service_and_releases_lock(
     replacement.acquire()
     replacement.release()
     messages = [record.getMessage() for record in caplog.records]
-    assert "NexLinq Matrix900 service failed." in messages
+    assert "NexTuxLinq Matrix900 service failed." in messages
     assert all("/private/bind/detail" not in message for message in messages)
 
 
@@ -214,7 +214,7 @@ def test_normal_http_shutdown_stops_service_and_releases_lock(
         async def block(delay: float) -> None:
             await asyncio.Future()
 
-        service = NexLinqService(
+        service = NexTuxLinqService(
             config_store=Store(),  # type: ignore[arg-type]
             device_worker=worker,
             sleep=block,

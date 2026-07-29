@@ -2,7 +2,7 @@
 
 import unittest
 
-from nexlinq.layout import (
+from nextuxlinq.layout import (
     SystemDataSource,
     SystemDataWidget,
     build_system_data_report,

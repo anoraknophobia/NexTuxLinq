@@ -1,13 +1,13 @@
 # Matrix900 service core
 
-`nexlinqd` is the foreground local controller for the Phanteks Matrix900. It
+`nextuxlinqd` is the foreground local controller for the Phanteks Matrix900. It
 owns discovery, rendering, brightness updates, reconnects, all
 daemon-originated HID writes, and the local web application.
 
 Run it from a development checkout:
 
 ```console
-python -m nexlinq.daemon --foreground --host 127.0.0.1 --port 8765
+python -m nextuxlinq.daemon --foreground --host 127.0.0.1 --port 8765
 ```
 
 Open <http://127.0.0.1:8765> after the process starts. The process does not
@@ -24,8 +24,18 @@ configuration** atomically writes the complete configuration and applies it.
 Configuration is stored at:
 
 ```text
-${XDG_CONFIG_HOME:-~/.config}/nexlinq/config.json
+${XDG_CONFIG_HOME:-~/.config}/nextuxlinq/config.json
 ```
+
+When the canonical file is absent, NexTuxLinq can load the pre-rename file at
+`${XDG_CONFIG_HOME:-~/.config}/nexlinq/config.json`. The GUI surfaces a fixed
+migration warning. The next successful **Save configuration** writes the
+canonical file with the existing atomic-save and permission guarantees. The
+legacy file is never deleted automatically, and it is never preferred over an
+existing canonical file. Migration reads accept only a bounded, privately
+owned regular file from a private legacy directory; symlinks, non-regular
+files, unsafe permissions, and oversized input are rejected without exposing
+filesystem details in the warning.
 
 The versioned local API is available below `/api/v1`. It is intended for the
 packaged GUI and future local clients, not remote access.
@@ -40,16 +50,28 @@ running profile. Every committed save advances the saved revision.
 
 ## Single-writer coordination
 
-NexLinq writers use an advisory lock at:
+NexTuxLinq writers use an advisory lock at:
 
 ```text
-${XDG_RUNTIME_DIR}/nexlinq/matrix900.lock
+${XDG_RUNTIME_DIR}/nextuxlinq/matrix900.lock
 ```
 
+As temporary rename-migration compatibility, every NexTuxLinq writer also
+acquires the pre-rename lock at
+`${XDG_RUNTIME_DIR}/nexlinq/matrix900.lock`. Locks are always acquired in the
+fixed order **legacy first, canonical second** and released in reverse order.
+Failure to acquire either lock refuses the write and rolls back the other
+lock. Existing legacy lock files are not rewritten or deleted.
+
 If `XDG_RUNTIME_DIR` is missing or relative, a private directory named for the
-current user ID under the system temporary directory is used. Direct
-`nexlinqctl` mutations and the legacy dynamic display acquire the same lock and
-refuse to run while `nexlinqd` owns it.
+current user ID under the system temporary directory is used for each
+namespace. Direct `nextuxlinqctl` mutations and the dynamic display acquire the
+same dual locks and refuse to run while `nextuxlinqd` owns them.
+
+Before starting NexTuxLinq, stop and disable any installed
+`nexlinq-display.service` and `nexlinq-telemetry.service`. The dual locks guard
+the transition, but disabling the obsolete services avoids repeated restart
+failures and is required migration hygiene.
 
 This lock coordinates software from this project. It is not a kernel-level
 exclusive claim on hidraw and cannot prevent unrelated third-party software
@@ -66,3 +88,6 @@ bounded latest-wins slot. When both classes are pending, the worker alternates
 them so repeated brightness changes cannot indefinitely starve a frame.
 
 Only the Phanteks Matrix900 with USB VID:PID `2e3c:6500` is supported.
+
+The future daemon systemd unit name is reserved as `nextuxlinqd.service`.
+Daemon systemd integration is not included in this phase.

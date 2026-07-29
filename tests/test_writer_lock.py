@@ -1,4 +1,4 @@
-"""Tests for advisory NexLinq single-writer coordination."""
+"""Tests for advisory NexTuxLinq single-writer coordination."""
 
 import os
 import subprocess
@@ -10,10 +10,11 @@ from unittest.mock import patch
 
 import pytest
 
-from nexlinq.writer_lock import (
+from nextuxlinq.writer_lock import (
     WriterLock,
     WriterLockHeldError,
     WriterLockError,
+    resolve_legacy_runtime_directory,
     resolve_runtime_directory,
 )
 
@@ -43,7 +44,27 @@ def test_missing_runtime_directory_uses_private_fallback(tmp_path: Path) -> None
         user_id=1234,
     )
 
-    assert directory == tmp_path / "nexlinq-runtime-1234" / "nexlinq"
+    assert directory == tmp_path / "nextuxlinq-runtime-1234" / "nextuxlinq"
+    assert directory.stat().st_mode & 0o777 == 0o700
+
+
+def test_absolute_runtime_directory_uses_nextuxlinq_namespace(
+    tmp_path: Path,
+) -> None:
+    directory = resolve_runtime_directory({"XDG_RUNTIME_DIR": str(tmp_path)})
+
+    assert directory == tmp_path / "nextuxlinq"
+    assert directory.stat().st_mode & 0o777 == 0o700
+
+
+def test_legacy_runtime_directory_uses_migration_namespace(
+    tmp_path: Path,
+) -> None:
+    directory = resolve_legacy_runtime_directory(
+        {"XDG_RUNTIME_DIR": str(tmp_path)}
+    )
+
+    assert directory == tmp_path / "nexlinq"
     assert directory.stat().st_mode & 0o777 == 0o700
 
 
@@ -54,8 +75,156 @@ def test_relative_runtime_directory_uses_fallback(tmp_path: Path) -> None:
         user_id=7,
     )
     assert lock.path == (
+        tmp_path / "nextuxlinq-runtime-7" / "nextuxlinq" / "matrix900.lock"
+    )
+    assert lock.legacy_path == (
         tmp_path / "nexlinq-runtime-7" / "nexlinq" / "matrix900.lock"
     )
+
+
+def _environment_lock(tmp_path: Path, *, owner: str = "test") -> WriterLock:
+    return WriterLock.from_environment(
+        {"XDG_RUNTIME_DIR": str(tmp_path)},
+        owner=owner,
+    )
+
+
+def test_dual_lock_acquires_legacy_then_canonical_when_neither_is_held(
+    tmp_path: Path,
+) -> None:
+    lock = _environment_lock(tmp_path)
+    order: list[Path] = []
+    original = lock._acquire_path
+
+    def recording_acquire(
+        path: Path,
+        *,
+        namespace_label: str,
+        write_owner: bool,
+    ) -> int:
+        order.append(path)
+        return original(
+            path,
+            namespace_label=namespace_label,
+            write_owner=write_owner,
+        )
+
+    with patch.object(lock, "_acquire_path", recording_acquire):
+        lock.acquire()
+        assert lock.acquired
+        lock.release()
+
+    assert order == [lock.legacy_path, lock.path]
+
+
+@pytest.mark.parametrize("held_namespace", ["legacy", "canonical"])
+def test_dual_lock_refuses_when_either_namespace_is_held(
+    tmp_path: Path,
+    held_namespace: str,
+) -> None:
+    lock = _environment_lock(tmp_path)
+    held_path = lock.legacy_path if held_namespace == "legacy" else lock.path
+    assert held_path is not None
+    holder = WriterLock(held_path)
+    holder.acquire()
+    try:
+        with pytest.raises(WriterLockHeldError, match=held_namespace):
+            lock.acquire()
+    finally:
+        holder.release()
+
+    assert not lock.acquired
+
+
+def test_dual_lock_refuses_when_both_namespaces_are_held(
+    tmp_path: Path,
+) -> None:
+    lock = _environment_lock(tmp_path)
+    assert lock.legacy_path is not None
+    legacy_holder = WriterLock(lock.legacy_path)
+    canonical_holder = WriterLock(lock.path)
+    legacy_holder.acquire()
+    canonical_holder.acquire()
+    try:
+        with pytest.raises(WriterLockHeldError, match="legacy"):
+            lock.acquire()
+    finally:
+        canonical_holder.release()
+        legacy_holder.release()
+
+
+def test_second_lock_failure_rolls_back_legacy_lock(tmp_path: Path) -> None:
+    lock = _environment_lock(tmp_path)
+    assert lock.legacy_path is not None
+    canonical_holder = WriterLock(lock.path)
+    canonical_holder.acquire()
+    try:
+        with pytest.raises(WriterLockHeldError, match="canonical"):
+            lock.acquire()
+        legacy_probe = WriterLock(lock.legacy_path)
+        legacy_probe.acquire()
+        legacy_probe.release()
+    finally:
+        canonical_holder.release()
+
+    assert not lock.acquired
+
+
+def test_dual_lock_release_makes_both_namespaces_available(
+    tmp_path: Path,
+) -> None:
+    lock = _environment_lock(tmp_path)
+    assert lock.legacy_path is not None
+    lock.acquire()
+    lock.release()
+
+    legacy_probe = WriterLock(lock.legacy_path)
+    canonical_probe = WriterLock(lock.path)
+    legacy_probe.acquire()
+    canonical_probe.acquire()
+    canonical_probe.release()
+    legacy_probe.release()
+
+
+def test_dual_lock_does_not_rewrite_existing_legacy_lock_file(
+    tmp_path: Path,
+) -> None:
+    lock = _environment_lock(tmp_path)
+    assert lock.legacy_path is not None
+    original = b"legacy owner data\n"
+    lock.legacy_path.write_bytes(original)
+    lock.legacy_path.chmod(0o600)
+
+    lock.acquire()
+    lock.release()
+
+    assert lock.legacy_path.read_bytes() == original
+
+
+def test_dual_lock_excludes_another_process(tmp_path: Path) -> None:
+    environment = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    first = WriterLock.from_environment(environment)
+    first.acquire()
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from nextuxlinq.writer_lock import "
+                    "WriterLock, WriterLockHeldError; "
+                    f"environment={{'XDG_RUNTIME_DIR': {str(tmp_path)!r}}}; "
+                    "lock=WriterLock.from_environment(environment); "
+                    "\ntry: lock.acquire()"
+                    "\nexcept WriterLockHeldError: raise SystemExit(23)"
+                ),
+            ],
+            check=False,
+        )
+    finally:
+        first.release()
+
+    assert result.returncode == 23
 
 
 def test_writer_lock_excludes_another_process(tmp_path: Path) -> None:
@@ -69,7 +238,7 @@ def test_writer_lock_excludes_another_process(tmp_path: Path) -> None:
                 "-c",
                 (
                     "from pathlib import Path; "
-                    "from nexlinq.writer_lock import WriterLock, WriterLockHeldError; "
+                    "from nextuxlinq.writer_lock import WriterLock, WriterLockHeldError; "
                     f"lock=WriterLock(Path({str(path)!r})); "
                     "\ntry: lock.acquire()"
                     "\nexcept WriterLockHeldError: raise SystemExit(23)"
@@ -86,14 +255,14 @@ def test_writer_lock_excludes_another_process(tmp_path: Path) -> None:
 def test_fallback_rejects_symlinked_component(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.mkdir()
-    (tmp_path / "nexlinq-runtime-1").symlink_to(target, target_is_directory=True)
+    (tmp_path / "nextuxlinq-runtime-1").symlink_to(target, target_is_directory=True)
 
-    with pytest.raises(WriterLockError, match="Unsafe NexLinq runtime path"):
+    with pytest.raises(WriterLockError, match="Unsafe NexTuxLinq runtime path"):
         resolve_runtime_directory({}, fallback_root=tmp_path, user_id=1)
 
 
 def test_fallback_rejects_wrong_owner_without_chmod(tmp_path: Path) -> None:
-    runtime = tmp_path / "nexlinq-runtime-1"
+    runtime = tmp_path / "nextuxlinq-runtime-1"
     runtime.mkdir()
     original_lstat = Path.lstat
 
@@ -114,8 +283,8 @@ def test_fallback_rejects_wrong_owner_without_chmod(tmp_path: Path) -> None:
 
 
 def test_existing_fallback_permissions_are_restricted(tmp_path: Path) -> None:
-    runtime = tmp_path / "nexlinq-runtime-1"
-    directory = runtime / "nexlinq"
+    runtime = tmp_path / "nextuxlinq-runtime-1"
+    directory = runtime / "nextuxlinq"
     directory.mkdir(parents=True)
     runtime.chmod(0o777)
     directory.chmod(0o777)

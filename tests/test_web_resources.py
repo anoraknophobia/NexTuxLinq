@@ -1,5 +1,8 @@
 """Tests for packaged local web resources."""
 
+import configparser
+from email.parser import BytesParser
+from email.policy import default
 from importlib.resources import files
 import subprocess
 import sys
@@ -8,7 +11,7 @@ from pathlib import Path
 
 
 def _frontend_source() -> tuple[str, str, str]:
-    package = files("nexlinq")
+    package = files("nextuxlinq")
     return (
         package.joinpath("templates", "index.html").read_text(encoding="utf-8"),
         package.joinpath("static", "app.js").read_text(encoding="utf-8"),
@@ -17,7 +20,7 @@ def _frontend_source() -> tuple[str, str, str]:
 
 
 def test_templates_and_static_assets_are_package_resources() -> None:
-    package = files("nexlinq")
+    package = files("nextuxlinq")
     resources = (
         package.joinpath("templates", "index.html"),
         package.joinpath("static", "app.css"),
@@ -116,12 +119,45 @@ def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:
     wheels = list(wheel_directory.glob("*.whl"))
     assert len(wheels) == 1
     expected = {
-        "nexlinq/templates/index.html",
-        "nexlinq/static/app.css",
-        "nexlinq/static/app.js",
+        "nextuxlinq/templates/index.html",
+        "nextuxlinq/static/app.css",
+        "nextuxlinq/static/app.js",
     }
     with zipfile.ZipFile(wheels[0]) as archive:
-        assert expected <= set(archive.namelist())
+        names = set(archive.namelist())
+        obsolete_name = "nex" + "linq"
+        assert expected <= names
+        assert not any(name.startswith(f"{obsolete_name}/") for name in names)
+        import_roots = {
+            name.partition("/")[0]
+            for name in names
+            if name.endswith(".py") and ".dist-info/" not in name
+        }
+        assert import_roots == {"nextuxlinq"}
+
+        metadata_names = [
+            name for name in names if name.endswith(".dist-info/METADATA")
+        ]
+        assert len(metadata_names) == 1
+        metadata = BytesParser(policy=default).parsebytes(
+            archive.read(metadata_names[0])
+        )
+        assert metadata["Name"] == "nextuxlinq"
+
+        entry_point_names = [
+            name for name in names if name.endswith(".dist-info/entry_points.txt")
+        ]
+        assert len(entry_point_names) == 1
+        entry_points = configparser.ConfigParser()
+        entry_points.read_string(
+            archive.read(entry_point_names[0]).decode("utf-8")
+        )
+        assert dict(entry_points["console_scripts"]) == {
+            "nextuxlinqctl": "nextuxlinq.cli:main",
+            "nextuxlinqd": "nextuxlinq.daemon:main",
+        }
+        assert f"{obsolete_name}ctl" not in entry_points["console_scripts"]
+        assert f"{obsolete_name}d" not in entry_points["console_scripts"]
 
     subprocess.run(
         [
@@ -143,7 +179,9 @@ def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:
     check = (
         "import sys; from importlib.resources import files; "
         f"sys.path.insert(0, {str(target_directory)!r}); "
-        "root=files('nexlinq'); "
+        "import importlib.util; "
+        "assert importlib.util.find_spec('nex' + 'linq') is None; "
+        "root=files('nextuxlinq'); "
         "assert root.joinpath('templates','index.html').read_bytes(); "
         "assert root.joinpath('static','app.css').read_bytes(); "
         "assert root.joinpath('static','app.js').read_bytes()"
