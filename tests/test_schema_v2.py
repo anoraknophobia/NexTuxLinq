@@ -149,7 +149,7 @@ def scrolling_text_settings_dict(**changes: object) -> dict[str, object]:
 
 def date_settings_dict(**changes: object) -> dict[str, object]:
     values = {
-        "format": "iso",
+        "format": "day_month_full_year",
         "time_zone": "local",
         "color": "#FFFFFF",
         "horizontal_alignment": "center",
@@ -540,7 +540,7 @@ def test_every_initial_widget_has_a_strict_typed_model() -> None:
         WidgetConfig(
             WidgetType.DATE,
             DateSettings(
-                DateFormat.ISO,
+                DateFormat.DAY_MONTH_FULL_YEAR,
                 "local",
                 "#FFFFFF",
                 HorizontalAlignment.CENTER,
@@ -809,10 +809,10 @@ def test_date_enum_and_color_fields_are_strict(
 
 def test_date_valid_enum_boundaries_and_color_canonicalization() -> None:
     for date_format in (
-        "iso",
-        "day_month_year",
-        "month_day_year",
-        "day_month_short",
+        "day_month_full_year",
+        "day_month_short_year",
+        "day_month",
+        "weekday_day_month",
     ):
         settings = DateSettings.from_dict(
             date_settings_dict(

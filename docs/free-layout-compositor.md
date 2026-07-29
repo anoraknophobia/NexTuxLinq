@@ -28,10 +28,10 @@ When it has no background color, the canvas background remains visible.
 Canvas pixels need no region at all, so uncovered pixels are also valid gaps.
 
 The compositor does not stretch widget content to fill a region. A clock in a
-90-pixel-wide region receives the complete 90-pixel local surface, but its
-future clock renderer will choose its intrinsic pixel size and apply its own
-alignment settings. Font choice, fitting, alignment, and animation behavior
-belong to widget renderers rather than the region compositor.
+90-pixel-wide region receives the complete 90-pixel local surface. The
+inactive Phase 3B clock renderer chooses its intrinsic pixel size and applies
+its own alignment settings. Font choice, fitting, alignment, and animation
+behavior belong to widget renderers rather than the region compositor.
 
 ## Logical canvas and local surfaces
 
@@ -99,9 +99,11 @@ type. Partial frames are not returned.
 ## Deferred activation
 
 This compositor is imported only by its hardware-independent tests. It is not
-connected to the active renderer or exposed through the API or GUI. Clock,
-text, date, editor dropdowns, configuration persistence cutover, and daemon
-activation remain future phases. The separate
+connected to the active renderer or exposed through the API or GUI. The
+inactive [Clock and Date widget renderers](free-layout-widgets.md) remain
+outside the production registry. Static Text, Scrolling Text, editor
+dropdowns, configuration persistence cutover, and daemon activation remain
+future phases. The separate
 [free-layout font foundation](free-layout-fonts.md) now provides inactive
-immutable bitmap fonts and local text primitives, but no widget renderer uses
-them yet. No physical hardware test is required for either foundation.
+immutable bitmap fonts and local text primitives. No physical hardware test is
+required for these foundations.

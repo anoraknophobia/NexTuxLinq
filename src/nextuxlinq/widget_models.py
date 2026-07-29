@@ -133,10 +133,10 @@ class ScrollDirection(StrEnum):
 
 
 class DateFormat(StrEnum):
-    ISO = "iso"
-    DAY_MONTH_YEAR = "day_month_year"
-    MONTH_DAY_YEAR = "month_day_year"
-    DAY_MONTH_SHORT = "day_month_short"
+    DAY_MONTH_FULL_YEAR = "day_month_full_year"
+    DAY_MONTH_SHORT_YEAR = "day_month_short_year"
+    DAY_MONTH = "day_month"
+    WEEKDAY_DAY_MONTH = "weekday_day_month"
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,13 +406,13 @@ class ScrollingTextSettings:
 
 @dataclass(frozen=True, slots=True)
 class DateSettings:
-    format: DateFormat
-    time_zone: str
-    color: str
-    horizontal_alignment: HorizontalAlignment
-    vertical_alignment: VerticalAlignment
-    font: FontChoice
-    overflow: TextOverflow
+    format: DateFormat = DateFormat.DAY_MONTH_FULL_YEAR
+    time_zone: str = "local"
+    color: str = "#FFFFFF"
+    horizontal_alignment: HorizontalAlignment = HorizontalAlignment.CENTER
+    vertical_alignment: VerticalAlignment = VerticalAlignment.CENTER
+    font: FontChoice = FontChoice.AUTO
+    overflow: TextOverflow = TextOverflow.ERROR
 
     def __post_init__(self) -> None:
         object.__setattr__(

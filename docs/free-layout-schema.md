@@ -50,7 +50,9 @@ matching `settings` object. Initial types are:
 
 Unknown widget types, settings for the wrong discriminator, missing required
 settings, and unknown settings fields are rejected. Rendering is intentionally
-not implemented in this phase.
+inactive. Phase 3B provides directly testable Clock and German Date renderers,
+documented in [free-layout Clock and Date widgets](free-layout-widgets.md),
+without adding them to the production widget registry.
 
 The optional region `background_color` is common to all widgets. A null or
 omitted value means that the canvas background remains visible. Widget settings
@@ -116,5 +118,6 @@ GUI, and persistence path.
 
 The [free-layout font foundation](free-layout-fonts.md) adds inactive immutable
 3×5, legacy-compatible 3×7, and legacy-compatible 5×7 bitmap fonts plus local
-measurement, alignment, clipping, and overflow primitives. Widget renderers and
-runtime activation remain deferred.
+measurement, alignment, clipping, and overflow primitives. Clock and Date now
+use those primitives in inactive code; Static Text, Scrolling Text, registry
+integration, and runtime activation remain deferred.

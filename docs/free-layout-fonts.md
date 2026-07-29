@@ -63,9 +63,11 @@ Unset glyph pixels preserve the surface's existing background. The text layer
 does not fill backgrounds, scale glyphs, rotate content, apply device
 orientation, or implement animation.
 
-## Deferred work
+## Widget use and deferred work
 
-Clock, Date, Static Text, and Scrolling Text renderers remain unimplemented.
-Widget-registry integration, update scheduling, API and GUI exposure,
-persistence cutover, daemon activation, and physical Matrix900 output are
-future phases. The active schema-v1 framebuffer behavior remains unchanged.
+The inactive [Clock and Date widget renderers](free-layout-widgets.md) now use
+this font foundation without scaling. Static Text and Scrolling Text renderers
+remain unimplemented. Widget-registry integration, update scheduling, API and
+GUI exposure, persistence cutover, daemon activation, and physical Matrix900
+output are future phases. The active schema-v1 framebuffer behavior remains
+unchanged.

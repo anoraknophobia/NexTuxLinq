@@ -79,7 +79,7 @@ def scrolling_text_settings() -> ScrollingTextSettings:
 
 def date_settings() -> DateSettings:
     return DateSettings(
-        format="iso",  # type: ignore[arg-type]
+        format="day_month_full_year",  # type: ignore[arg-type]
         time_zone="local",
         color="#FFFFFF",
         horizontal_alignment="center",  # type: ignore[arg-type]
