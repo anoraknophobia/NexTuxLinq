@@ -108,3 +108,8 @@ downgrade from schema v2 would lose free-layout information and is not planned.
 
 This design remains specific to the Phanteks Matrix900. It does not change HID
 transport, protocol reports, physical orientation, or framebuffer generation.
+
+The separate [free-layout compositor foundation](free-layout-compositor.md)
+implements inactive region-local drawing, blank-widget composition, and
+logical-to-Creator orientation. It remains disconnected from the daemon, API,
+GUI, and persistence path.

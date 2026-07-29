@@ -6,6 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Mapping, TypeAlias
 
 from nextuxlinq.models import MAX_SCROLL_SPEED, MAX_TEXT_LENGTH, MIN_SCROLL_SPEED
@@ -483,13 +484,18 @@ WidgetSettings: TypeAlias = (
     | DateSettings
 )
 
-_SETTINGS_TYPES = {
-    WidgetType.BLANK: BlankSettings,
-    WidgetType.CLOCK: ClockSettings,
-    WidgetType.STATIC_TEXT: StaticTextSettings,
-    WidgetType.SCROLLING_TEXT: ScrollingTextSettings,
-    WidgetType.DATE: DateSettings,
-}
+CANONICAL_WIDGET_SETTINGS_MODELS: Mapping[
+    WidgetType, type[WidgetSettings]
+] = MappingProxyType(
+    {
+        WidgetType.BLANK: BlankSettings,
+        WidgetType.CLOCK: ClockSettings,
+        WidgetType.STATIC_TEXT: StaticTextSettings,
+        WidgetType.SCROLLING_TEXT: ScrollingTextSettings,
+        WidgetType.DATE: DateSettings,
+    }
+)
+"""Immutable discriminator-to-settings-model mapping used by schema v2."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -502,7 +508,7 @@ class WidgetConfig:
     def __post_init__(self) -> None:
         widget_type = _enum(WidgetType, self.type, "widget type")
         object.__setattr__(self, "type", widget_type)
-        expected = _SETTINGS_TYPES[widget_type]
+        expected = CANONICAL_WIDGET_SETTINGS_MODELS[widget_type]
         if not isinstance(self.settings, expected):
             raise TypeError(
                 f"{widget_type.value} widget settings must be "
@@ -514,7 +520,7 @@ class WidgetConfig:
         values = _mapping(raw, "widget")
         _fields(values, {"type", "settings"}, "widget")
         widget_type = _enum(WidgetType, values["type"], "widget type")
-        settings_type = _SETTINGS_TYPES[widget_type]
+        settings_type = CANONICAL_WIDGET_SETTINGS_MODELS[widget_type]
         settings = settings_type.from_dict(values["settings"])
         return cls(type=widget_type, settings=settings)
 
