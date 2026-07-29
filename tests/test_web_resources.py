@@ -4,6 +4,7 @@ import configparser
 from email.parser import BytesParser
 from email.policy import default
 from importlib.resources import files
+import re
 import subprocess
 import sys
 import zipfile
@@ -72,9 +73,9 @@ def test_frontend_state_and_accessibility_resources() -> None:
         assert state_property in javascript
     assert 'id="configuration-state"' in page
     assert 'role="status" aria-live="polite"' in page
-    assert "Draft changes have not been applied." in javascript
-    assert "Applied settings differ from the saved configuration." in javascript
-    assert "Applied and saved settings are synchronized." in javascript
+    assert "Draft changes not applied" in javascript
+    assert "Applied changes not saved" in javascript
+    assert 'primary: "Saved"' in javascript
     assert "Revert unsaved edits" not in page
     assert page.count("Reload applied settings") == 2
     assert 'min="0.5" max="20" step="any" inputmode="decimal"' in page
@@ -82,6 +83,68 @@ def test_frontend_state_and_accessibility_resources() -> None:
         "Lowercase letters are converted to uppercase when applied."
         in normalized_page
     )
+
+
+def test_status_information_uses_compact_main_and_technical_sections() -> None:
+    page, _, _ = _frontend_source()
+    status_section = page.split(
+        '<section aria-labelledby="status-heading">', 1
+    )[1].split("</section>", 1)[0]
+    main_grid = status_section.split('<dl class="status-grid">', 1)[1].split(
+        "</dl>", 1
+    )[0]
+    assert set(re.findall(r'id="([^"]+)"', main_grid)) == {
+        "device-status",
+        "active-profile",
+        "last-upload",
+        "last-error",
+    }
+    for technical_id in (
+        "model-name",
+        "vid-pid",
+        "device-path",
+        "rendering-state",
+        "frame-rate",
+        "configuration-revision",
+        "status-saved-revision",
+    ):
+        assert f'id="{technical_id}"' not in main_grid
+
+    details = status_section.split(
+        '<details class="technical-details">', 1
+    )[1].split("</details>", 1)[0]
+    assert "<summary>Technical details</summary>" in details
+    for technical_id in (
+        "model-name",
+        "vid-pid",
+        "device-path",
+        "rendering-state",
+        "frame-rate",
+        "configuration-revision",
+        "status-saved-revision",
+    ):
+        assert f'id="{technical_id}"' in details
+    assert "status-dirty" not in status_section
+
+
+def test_profile_state_is_one_compact_status_without_revision_cards() -> None:
+    page, _, css = _frontend_source()
+    settings = page.split(
+        '<section aria-labelledby="settings-heading">', 1
+    )[1].split("</section>", 1)[0]
+
+    assert 'class="profile-state-label"' in settings
+    assert 'id="configuration-state-summary"' in settings
+    assert 'id="configuration-state-detail" class="visually-hidden"' in settings
+    for obsolete_id in (
+        "draft-state",
+        "runtime-state",
+        "state-active-revision",
+        "state-saved-revision",
+    ):
+        assert f'id="{obsolete_id}"' not in settings
+    assert "configuration-state-values" not in settings
+    assert ".visually-hidden {" in css
 
 
 def test_preview_regions_use_safe_dynamic_dom_rendering() -> None:
@@ -124,12 +187,16 @@ def test_profile_form_layout_has_safe_responsive_sizing() -> None:
     assert ".color-picker::-webkit-color-swatch {" in css
     assert ".color-picker::-moz-color-swatch {" in css
     assert "repeat(auto-fit, minmax(min(100%, 190px), 1fr))" in css
-    assert ".status-grid > *, .form-grid > * { min-width: 0; }" in css
+    assert (
+        ".status-grid > *, .technical-grid > *, .form-grid > * "
+        "{ min-width: 0; }"
+    ) in css
     assert "* { box-sizing: border-box; }" in css
     assert ".actions { display: flex; flex-wrap: wrap;" in css
     assert ".actions > button { min-width: 0; max-width: 100%; white-space: normal; }" in css
     assert "@media (max-width: 480px)" in css
-    assert ".status-grid, .form-grid { grid-template-columns: minmax(0, 1fr); }" in css
+    assert ".status-grid, .technical-grid, .form-grid {" in css
+    assert "grid-template-columns: minmax(0, 1fr);" in css
     assert "repeat(5," not in css
 
 

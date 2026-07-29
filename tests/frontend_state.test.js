@@ -109,10 +109,6 @@ function fakeDocument() {
     "#configuration-state",
     "#configuration-state-summary",
     "#configuration-state-detail",
-    "#draft-state",
-    "#runtime-state",
-    "#state-active-revision",
-    "#state-saved-revision",
     "#region-labels",
     "#preview",
     "#daemon-state",
@@ -123,7 +119,6 @@ function fakeDocument() {
     "#active-profile",
     "#configuration-revision",
     "#status-saved-revision",
-    "#status-dirty",
     "#rendering-state",
     "#frame-rate",
     "#last-upload",
@@ -341,19 +336,22 @@ test("configuration presentation uses API dirty and supports combined state", ()
   state.runtime.savedRevision = 7;
   state.runtime.dirty = true;
   let presentation = frontend.deriveConfigurationState(state);
-  assert.equal(
-    presentation.primary,
-    "Applied settings differ from the saved configuration.",
-  );
+  assert.equal(presentation.primary, "Applied changes not saved");
   state.draft.dirty = true;
   presentation = frontend.deriveConfigurationState(state);
-  assert.equal(presentation.primary, "Draft changes have not been applied.");
-  assert.match(presentation.secondary, /currently applied settings also differ/);
-  state.draft.dirty = false;
+  assert.equal(
+    presentation.primary,
+    "Draft changes not applied; applied settings are also not saved.",
+  );
   state.runtime.dirty = false;
   assert.equal(
     frontend.deriveConfigurationState(state).primary,
-    "Applied and saved settings are synchronized.",
+    "Draft changes not applied",
+  );
+  state.draft.dirty = false;
+  assert.equal(
+    frontend.deriveConfigurationState(state).primary,
+    "Saved",
   );
 });
 
@@ -378,6 +376,10 @@ test("Apply success updates runtime while preserving saved revision", async () =
   assert.equal(controller.state.runtime.dirty, true);
   assert.equal(controller.controls.scrolling_text.value, "LOWERCASE");
   assert.equal(controller.state.draft.dirty, false);
+  assert.equal(
+    controller.elements.configurationSummary.textContent,
+    "Applied changes not saved",
+  );
 });
 
 test("Apply failure preserves draft values and revisions", async () => {
@@ -447,6 +449,7 @@ test("Save success accepts complete normalized configuration", async () => {
   assert.equal(controller.state.runtime.dirty, false);
   assert.equal(controller.state.draft.dirty, false);
   assert.equal(controller.controls.scrolling_text.value, "SAVED");
+  assert.equal(controller.elements.configurationSummary.textContent, "Saved");
   const candidate = JSON.parse(fetch.calls[0].options.body).configuration;
   assert.deepEqual(candidate.profiles.default.layout, profile().layout);
   assert.equal(candidate.profiles.secondary.scrolling_text, "SECONDARY");
@@ -1128,7 +1131,10 @@ test("status exposes existing Matrix900 and configuration information", () => {
   }));
   assert.equal(controller.elements.modelName.textContent, "Phanteks Matrix900");
   assert.equal(controller.elements.vidPid.textContent, "2e3c:6500");
-  assert.equal(controller.elements.deviceStatus.textContent, "Detected");
+  assert.equal(
+    controller.elements.deviceStatus.textContent,
+    "Phanteks Matrix900 connected",
+  );
   assert.equal(controller.elements.frameRate.textContent, "4 FPS");
   assert.match(controller.elements.lastError.textContent, /Display unavailable/);
   assert.match(

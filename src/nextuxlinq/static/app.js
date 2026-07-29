@@ -148,38 +148,32 @@
   function deriveConfigurationState(state) {
     if (state.runtime.configuration === null) {
       return {
-        primary: "Loading configuration state.",
-        secondary: "",
-        draft: "—",
-        runtime: "—",
+        primary: "Loading settings…",
+        detail: "The applied and saved profile state is loading.",
         className: "",
       };
     }
     if (state.draft.dirty) {
       return {
-        primary: "Draft changes have not been applied.",
-        secondary: state.runtime.dirty
-          ? "The currently applied settings also differ from the saved configuration."
-          : "",
-        draft: "Modified",
-        runtime: state.runtime.dirty ? "Unsaved" : "Saved",
+        primary: state.runtime.dirty
+          ? "Draft changes not applied; applied settings are also not saved."
+          : "Draft changes not applied",
+        detail: state.runtime.dirty
+          ? "Local draft changes are not applied, and the currently applied settings differ from the saved configuration."
+          : "Local draft changes have not been applied to the runtime profile.",
         className: "state-draft",
       };
     }
     if (state.runtime.dirty) {
       return {
-        primary: "Applied settings differ from the saved configuration.",
-        secondary: "",
-        draft: "Applied",
-        runtime: "Unsaved",
+        primary: "Applied changes not saved",
+        detail: "The applied runtime profile differs from the saved configuration.",
         className: "state-unsaved",
       };
     }
     return {
-      primary: "Applied and saved settings are synchronized.",
-      secondary: "",
-      draft: "Applied",
-      runtime: "Saved",
+      primary: "Saved",
+      detail: "The applied runtime profile and saved configuration are synchronized.",
       className: "state-synchronized",
     };
   }
@@ -372,10 +366,6 @@
       configurationDetail: documentObject.querySelector(
         "#configuration-state-detail"
       ),
-      draftState: documentObject.querySelector("#draft-state"),
-      runtimeState: documentObject.querySelector("#runtime-state"),
-      stateActiveRevision: documentObject.querySelector("#state-active-revision"),
-      stateSavedRevision: documentObject.querySelector("#state-saved-revision"),
       regionLabels: documentObject.querySelector("#region-labels"),
       canvas: documentObject.querySelector("#preview"),
       daemonState: documentObject.querySelector("#daemon-state"),
@@ -388,7 +378,6 @@
         "#configuration-revision"
       ),
       statusSavedRevision: documentObject.querySelector("#status-saved-revision"),
-      statusDirty: documentObject.querySelector("#status-dirty"),
       renderingState: documentObject.querySelector("#rendering-state"),
       frameRate: documentObject.querySelector("#frame-rate"),
       lastUpload: documentObject.querySelector("#last-upload"),
@@ -476,15 +465,7 @@
     function renderConfigurationState() {
       const presentation = deriveConfigurationState(state);
       elements.configurationSummary.textContent = presentation.primary;
-      elements.configurationDetail.textContent = presentation.secondary;
-      elements.draftState.textContent = presentation.draft;
-      elements.runtimeState.textContent = presentation.runtime;
-      elements.stateActiveRevision.textContent =
-        state.runtime.activeRevision === null
-          ? "—" : String(state.runtime.activeRevision);
-      elements.stateSavedRevision.textContent =
-        state.runtime.savedRevision === null
-          ? "Not saved yet" : String(state.runtime.savedRevision);
+      elements.configurationDetail.textContent = presentation.detail;
       elements.configurationState.className = (
         `configuration-state ${presentation.className}`
       ).trim();
@@ -494,7 +475,8 @@
       if (!status) return;
       elements.daemonState.textContent = status.daemon_state;
       elements.deviceStatus.textContent = status.device_available
-        ? "Detected" : "Unavailable";
+        ? `${status.model_name || "Matrix900"} connected`
+        : "Matrix900 unavailable";
       elements.modelName.textContent = status.model_name || "Not detected";
       elements.vidPid.textContent = `${status.usb_vid}:${status.usb_pid}`;
       elements.devicePath.textContent = status.device_path || "—";
@@ -510,9 +492,6 @@
       elements.statusSavedRevision.textContent =
         displayedSavedRevision === null
           ? "Not saved yet" : String(displayedSavedRevision);
-      const displayedDirty = state.runtime.configuration
-        ? state.runtime.dirty : status.dirty;
-      elements.statusDirty.textContent = displayedDirty ? "Unsaved" : "Saved";
       elements.renderingState.textContent = status.rendering_state;
       const frameRate = Number(status.frame_rate);
       elements.frameRate.textContent = Number.isFinite(frameRate)

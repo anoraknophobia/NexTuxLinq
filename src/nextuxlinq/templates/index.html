@@ -22,21 +22,25 @@
     <section aria-labelledby="status-heading">
       <h2 id="status-heading">Device status</h2>
       <dl class="status-grid">
-        <div><dt>Matrix900</dt><dd id="device-status">Checking</dd></div>
-        <div><dt>Model</dt><dd id="model-name">—</dd></div>
-        <div><dt>USB VID:PID</dt><dd id="vid-pid">—</dd></div>
-        <div><dt>Device path</dt><dd id="device-path">—</dd></div>
+        <div><dt>Device</dt><dd id="device-status">Checking for Matrix900</dd></div>
         <div><dt>Active profile</dt><dd id="active-profile">—</dd></div>
-        <div><dt>Configuration revision</dt><dd id="configuration-revision">—</dd></div>
-        <div><dt>Saved revision</dt><dd id="status-saved-revision">—</dd></div>
-        <div><dt>Applied / saved</dt><dd id="status-dirty">—</dd></div>
-        <div><dt>Rendering</dt><dd id="rendering-state">—</dd></div>
-        <div><dt>Frame rate</dt><dd id="frame-rate">—</dd></div>
         <div><dt>Last upload</dt><dd id="last-upload">—</dd></div>
         <div><dt>Display / configuration errors</dt><dd id="last-error">None</dd></div>
       </dl>
       <p id="multiple-device-warning" class="message warning"
          role="status" aria-live="polite"></p>
+      <details class="technical-details">
+        <summary>Technical details</summary>
+        <dl class="technical-grid">
+          <div><dt>Model</dt><dd id="model-name">—</dd></div>
+          <div><dt>USB VID:PID</dt><dd id="vid-pid">—</dd></div>
+          <div><dt>Device path</dt><dd id="device-path">—</dd></div>
+          <div><dt>Rendering state</dt><dd id="rendering-state">—</dd></div>
+          <div><dt>Frame rate</dt><dd id="frame-rate">—</dd></div>
+          <div><dt>Configuration revision</dt><dd id="configuration-revision">—</dd></div>
+          <div><dt>Saved revision</dt><dd id="status-saved-revision">—</dd></div>
+        </dl>
+      </details>
     </section>
 
     <section aria-labelledby="preview-heading">
@@ -60,14 +64,9 @@
       <h2 id="settings-heading">Profile settings</h2>
       <div id="configuration-state" class="configuration-state"
            role="status" aria-live="polite">
-        <p id="configuration-state-summary">Loading configuration state.</p>
-        <p id="configuration-state-detail"></p>
-        <dl class="configuration-state-values">
-          <div><dt>Draft</dt><dd id="draft-state">—</dd></div>
-          <div><dt>Runtime</dt><dd id="runtime-state">—</dd></div>
-          <div><dt>Configuration revision</dt><dd id="state-active-revision">—</dd></div>
-          <div><dt>Saved revision</dt><dd id="state-saved-revision">—</dd></div>
-        </dl>
+        <span class="profile-state-label">Profile state</span>
+        <strong id="configuration-state-summary">Loading settings…</strong>
+        <span id="configuration-state-detail" class="visually-hidden"></span>
       </div>
       <form id="profile-form">
         <div class="form-grid">
