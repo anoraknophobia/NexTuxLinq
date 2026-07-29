@@ -100,6 +100,8 @@ type. Partial frames are not returned.
 
 This compositor is imported only by its hardware-independent tests. It is not
 connected to the active renderer or exposed through the API or GUI. Clock,
-text, date, compact fonts, editor dropdowns, configuration persistence
-cutover, and daemon activation remain future phases. No physical hardware
-test is required for this foundation.
+text, date, editor dropdowns, configuration persistence cutover, and daemon
+activation remain future phases. The separate
+[free-layout font foundation](free-layout-fonts.md) now provides inactive
+immutable bitmap fonts and local text primitives, but no widget renderer uses
+them yet. No physical hardware test is required for either foundation.

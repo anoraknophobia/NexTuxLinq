@@ -113,3 +113,8 @@ The separate [free-layout compositor foundation](free-layout-compositor.md)
 implements inactive region-local drawing, blank-widget composition, and
 logical-to-Creator orientation. It remains disconnected from the daemon, API,
 GUI, and persistence path.
+
+The [free-layout font foundation](free-layout-fonts.md) adds inactive immutable
+3×5, legacy-compatible 3×7, and legacy-compatible 5×7 bitmap fonts plus local
+measurement, alignment, clipping, and overflow primitives. Widget renderers and
+runtime activation remain deferred.
