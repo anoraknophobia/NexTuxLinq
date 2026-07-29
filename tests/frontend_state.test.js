@@ -2080,6 +2080,43 @@ test("already-v2 saved state does not enable migration save", async () => {
   );
 });
 
+test("normal region clicks toggle and different regions switch selection", async () => {
+  const fixture = freeEditorFixture({
+    profiles: {
+      default: freeProfile([
+        freeRegion(),
+        freeRegion({id: "region-2", name: "Region 2", x: 20}),
+      ]),
+    },
+  });
+  await fixture.editor.initialize();
+  const layer = fixture.elements.get("#fl-region-layer");
+  const clickRegion = (index, pointerId) => {
+    const overlay = layer.children[index];
+    overlay.dispatch("pointerdown", {
+      button: 0,
+      pointerId,
+      clientX: 50 + index * 200,
+      clientY: 20,
+    });
+    fixture.windowListeners.pointerup({pointerId});
+    overlay.dispatch("click", {detail: 1});
+  };
+
+  clickRegion(0, 1);
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+  assert.equal(fixture.elements.get("#fl-selected-region").hidden, false);
+
+  clickRegion(0, 2);
+  assert.equal(fixture.editor.state.selectedRegionId, null);
+  assert.equal(fixture.elements.get("#fl-selected-region").hidden, true);
+
+  clickRegion(0, 3);
+  clickRegion(1, 4);
+  assert.equal(fixture.editor.state.selectedRegionId, "region-2");
+  assert.equal(fixture.elements.get("#fl-selected-region").hidden, false);
+});
+
 test("region selection survives click release, inspector, drag, resize, and preview", async () => {
   const fixture = freeEditorFixture();
   await fixture.editor.initialize();
@@ -2140,6 +2177,17 @@ test("region selection survives click release, inspector, drag, resize, and prev
   fixture.editor.render();
   assert.equal(fixture.editor.state.selectedRegionId, "region-1");
   assert.equal(fixture.elements.get("#fl-selected-region").hidden, false);
+});
+
+test("keyboard activation toggles selected regions", async () => {
+  const fixture = freeEditorFixture();
+  await fixture.editor.initialize();
+  const layer = fixture.elements.get("#fl-region-layer");
+
+  layer.children[0].dispatch("keydown", {key: "Enter"});
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+  layer.children[0].dispatch("keydown", {key: " "});
+  assert.equal(fixture.editor.state.selectedRegionId, null);
 });
 
 test("selection clears only for unused canvas, deletion, or missing profile region", async () => {

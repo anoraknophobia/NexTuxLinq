@@ -405,6 +405,10 @@
     return eventTarget === canvasLayer ? null : selectedRegionId;
   }
 
+  function toggleRegionSelection(selectedRegionId, regionId) {
+    return selectedRegionId === regionId ? null : regionId;
+  }
+
   function setRegionWidget(region, widgetType, defaults) {
     if (!WIDGET_TYPES.includes(widgetType)) return clone(region);
     const result = clone(region);
@@ -753,13 +757,20 @@
         }
         overlay.addEventListener("click", (event) => {
           event.stopPropagation();
-          state.selectedRegionId = region.id;
+          if (event.detail !== 0) return;
+          state.selectedRegionId = toggleRegionSelection(
+            state.selectedRegionId,
+            region.id,
+          );
           render();
         });
         overlay.addEventListener("keydown", (event) => {
           if (!["Enter", " "].includes(event.key)) return;
           event.preventDefault();
-          state.selectedRegionId = region.id;
+          state.selectedRegionId = toggleRegionSelection(
+            state.selectedRegionId,
+            region.id,
+          );
           render();
         });
         overlay.addEventListener("pointerdown", (event) => {
@@ -1309,6 +1320,7 @@
       if (event.button !== undefined && event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
+      const wasSelected = state.selectedRegionId === region.id;
       state.selectedRegionId = region.id;
       const rect = elements.canvas.getBoundingClientRect();
       state.pointerOperation = {
@@ -1319,6 +1331,8 @@
         height: rect.height,
         original: clone(region),
         handle: resizeHandle,
+        wasSelected,
+        moved: false,
       };
       render();
     }
@@ -1333,19 +1347,28 @@
       const dy = Math.round(
         (event.clientY - operation.startY) / operation.height * CANVAS_HEIGHT
       );
+      if (dx !== 0 || dy !== 0) operation.moved = true;
       const geometry = operation.handle
         ? resizeGeometryInViewer(operation.original, operation.handle, dx, dy)
         : moveGeometryInViewer(operation.original, dx, dy);
       updateSelectedRegion((region) => Object.assign(region, geometry));
     }
 
-    function endPointerOperation() {
+    function endPointerOperation(event = {}) {
+      const operation = state.pointerOperation;
+      if (!operation || (event.pointerId !== undefined
+          && operation.pointerId !== event.pointerId)) return;
       state.pointerOperation = null;
+      if (!operation.moved && operation.wasSelected) {
+        state.selectedRegionId = null;
+        render();
+      }
     }
 
-    function cancelPointerOperation() {
+    function cancelPointerOperation(event = {}) {
       const operation = state.pointerOperation;
-      if (!operation) return;
+      if (!operation || (event.pointerId !== undefined
+          && operation.pointerId !== event.pointerId)) return;
       updateSelectedRegion((region) => Object.assign(region, operation.original));
       state.pointerOperation = null;
     }
@@ -1633,6 +1656,7 @@
     isTextEntryTarget,
     selectionForProfile,
     selectionForCanvasPointer,
+    toggleRegionSelection,
     setRegionWidget,
     geometryFromViewer,
     moveGeometryInViewer,
