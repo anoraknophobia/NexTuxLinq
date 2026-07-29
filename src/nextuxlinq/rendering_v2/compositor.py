@@ -28,6 +28,11 @@ from nextuxlinq.rendering_v2.surface import (
     SurfaceTypeError,
     SurfaceValidationError,
 )
+from nextuxlinq.rendering_v2.update_policy import (
+    UpdatePolicy,
+    aggregate_update_policies,
+    policy_has_animated_content,
+)
 from nextuxlinq.widget_models import WidgetType
 
 
@@ -42,6 +47,13 @@ class CompositorFailure(StrEnum):
     SETTINGS_MISMATCH = "settings_mismatch"
     INVALID_RENDERER_RETURN = "invalid_renderer_return"
     CONTROLLED_RENDERER_FAILURE = "controlled_renderer_failure"
+    UNKNOWN_FONT = "unknown_font"
+    UNSUPPORTED_GLYPH = "unsupported_glyph"
+    CONTENT_TOO_TALL = "content_too_tall"
+    CONTENT_TOO_WIDE = "content_too_wide"
+    TIME_ZONE_UNAVAILABLE = "time_zone_unavailable"
+    DATE_FORMAT_UNAVAILABLE = "date_format_unavailable"
+    RENDERER_INVARIANT = "renderer_invariant"
     UNEXPECTED_RENDERER_FAILURE = "unexpected_renderer_failure"
     INVALID_DRAWING = "invalid_drawing"
     INVALID_LOCAL_BUFFER = "invalid_local_buffer"
@@ -64,6 +76,25 @@ _FAILURE_MESSAGES = {
     CompositorFailure.CONTROLLED_RENDERER_FAILURE: (
         "The widget renderer reported a rendering failure."
     ),
+    CompositorFailure.UNKNOWN_FONT: "The requested font is unavailable.",
+    CompositorFailure.UNSUPPORTED_GLYPH: (
+        "The requested font lacks a required glyph."
+    ),
+    CompositorFailure.CONTENT_TOO_TALL: (
+        "The widget content is too tall."
+    ),
+    CompositorFailure.CONTENT_TOO_WIDE: (
+        "The widget content is too wide."
+    ),
+    CompositorFailure.TIME_ZONE_UNAVAILABLE: (
+        "The requested time zone is unavailable."
+    ),
+    CompositorFailure.DATE_FORMAT_UNAVAILABLE: (
+        "The requested date format is unavailable."
+    ),
+    CompositorFailure.RENDERER_INVARIANT: (
+        "The widget renderer received invalid state."
+    ),
     CompositorFailure.UNEXPECTED_RENDERER_FAILURE: (
         "The widget renderer failed unexpectedly."
     ),
@@ -85,16 +116,73 @@ class CompositorError(RuntimeError):
         *,
         region_id: str | None = None,
         widget_type: WidgetType | None = None,
+        field: str | None = None,
     ) -> None:
         self.category = category
         self.region_id = region_id
         self.widget_type = widget_type
+        self.field = field
         context = ""
         if region_id is not None and widget_type is not None:
             context = (
                 f" Region {region_id!r}, widget {widget_type.value!r}."
             )
+        if field is not None:
+            context += f" Field {field!r}."
         super().__init__(_FAILURE_MESSAGES[category] + context)
+
+
+_CONTROLLED_FAILURES = {
+    item.value: item
+    for item in (
+        CompositorFailure.UNKNOWN_FONT,
+        CompositorFailure.UNSUPPORTED_GLYPH,
+        CompositorFailure.CONTENT_TOO_TALL,
+        CompositorFailure.CONTENT_TOO_WIDE,
+        CompositorFailure.TIME_ZONE_UNAVAILABLE,
+        CompositorFailure.DATE_FORMAT_UNAVAILABLE,
+        CompositorFailure.RENDERER_INVARIANT,
+        CompositorFailure.UNEXPECTED_RENDERER_FAILURE,
+    )
+}
+_CONTROLLED_FIELDS = frozenset(
+    {
+        "animation_time",
+        "color",
+        "content",
+        "context",
+        "font",
+        "format",
+        "renderer",
+        "settings",
+        "surface",
+        "time_zone",
+    }
+)
+
+
+def _controlled_failure(
+    error: WidgetRenderError,
+) -> tuple[CompositorFailure, str | None]:
+    attributes = vars(error)
+    raw_category = attributes.get("category")
+    raw_field = attributes.get("field")
+    category = (
+        _CONTROLLED_FAILURES.get(raw_category)
+        if isinstance(raw_category, str)
+        else None
+    )
+    field = (
+        raw_field
+        if isinstance(raw_field, str) and raw_field in _CONTROLLED_FIELDS
+        else None
+    )
+    return (
+        CompositorFailure.CONTROLLED_RENDERER_FAILURE
+        if category is None
+        else category,
+        field,
+    )
 
 
 def _strict_integer(value: object, name: str) -> int:
@@ -194,6 +282,7 @@ class RenderResult:
     regions: tuple[PreviewRegionV2, ...]
     generation_time: datetime
     animation_time: float
+    update_policy: UpdatePolicy
     animated_content: bool
 
     def __post_init__(self) -> None:
@@ -234,8 +323,16 @@ class RenderResult:
             "animation_time",
             _validate_animation_time(self.animation_time),
         )
+        if not isinstance(self.update_policy, UpdatePolicy):
+            raise TypeError("update_policy must be an UpdatePolicy.")
         if not isinstance(self.animated_content, bool):
             raise TypeError("animated_content must be a boolean.")
+        if self.animated_content is not policy_has_animated_content(
+            self.update_policy
+        ):
+            raise ValueError(
+                "animated_content must match the update policy."
+            )
 
 
 def _copy_local_surface(
@@ -315,10 +412,18 @@ class Compositor:
             validated_animation = _validate_animation_time(
                 animation_time
             )
-        except (TypeError, ValueError) as error:
+        except (TypeError, ValueError):
+            invalid_context = True
+            validated_generation = generation_time
+            validated_animation = animation_time
+        else:
+            invalid_context = False
+        if invalid_context:
             raise CompositorError(
                 CompositorFailure.INVALID_CONTEXT
-            ) from error
+            )
+        assert isinstance(validated_generation, datetime)
+        assert isinstance(validated_animation, float)
 
         canvas_color = RgbColor.from_schema_color(
             profile.canvas.background_color
@@ -330,7 +435,7 @@ class Compositor:
             PreviewRegionV2.from_region(region)
             for region in profile.regions
         )
-        animated_content = False
+        update_policy = UpdatePolicy.STATIC
 
         for region in profile.regions:
             if not region.enabled:
@@ -338,27 +443,32 @@ class Compositor:
             widget_type = region.widget.type
             try:
                 definition = self._registry.resolve(widget_type)
-            except UnknownWidgetDefinitionError as error:
+            except UnknownWidgetDefinitionError:
+                definition_missing = True
+                definition = None
+            else:
+                definition_missing = False
+            if definition_missing:
                 raise CompositorError(
                     CompositorFailure.MISSING_WIDGET_DEFINITION,
                     region_id=region.id,
                     widget_type=widget_type,
-                ) from error
+                )
+            assert definition is not None
             if definition.renderer is None:
                 raise CompositorError(
                     CompositorFailure.MISSING_WIDGET_RENDERER,
                     region_id=region.id,
                     widget_type=widget_type,
                 )
-            if not isinstance(
-                region.widget.settings, definition.settings_model
-            ):
+            if type(region.widget.settings) is not definition.settings_model:
                 raise CompositorError(
                     CompositorFailure.SETTINGS_MISMATCH,
                     region_id=region.id,
                     widget_type=widget_type,
                 )
 
+            failure: tuple[CompositorFailure, str | None] | None = None
             try:
                 region_color = (
                     canvas_color
@@ -385,59 +495,58 @@ class Compositor:
                     context,
                 )
                 if returned is not None:
-                    raise CompositorError(
+                    failure = (
                         CompositorFailure.INVALID_RENDERER_RETURN,
-                        region_id=region.id,
-                        widget_type=widget_type,
+                        None,
                     )
-                local_payload = surface.to_bytes()
-                expected_length = (
-                    region.width
-                    * region.height
-                    * RGB_CHANNELS
-                )
-                if len(local_payload) != expected_length:
-                    raise SurfaceInvariantError(
-                        "Local surface export has an invalid byte length."
+                else:
+                    local_payload = surface.to_bytes()
+                    expected_length = (
+                        region.width
+                        * region.height
+                        * RGB_CHANNELS
                     )
-                _copy_local_surface(logical, region, local_payload)
+                    if len(local_payload) != expected_length:
+                        raise SurfaceInvariantError(
+                            "Local surface export has an invalid byte length."
+                        )
+                    region_policy = definition.resolve_update_policy(
+                        region.widget.settings
+                    )
+                    _copy_local_surface(logical, region, local_payload)
             except CompositorError:
-                raise
-            except RenderContextValidationError as error:
-                raise CompositorError(
-                    CompositorFailure.INVALID_CONTEXT,
-                    region_id=region.id,
-                    widget_type=widget_type,
-                ) from error
+                failure = (
+                    CompositorFailure.UNEXPECTED_RENDERER_FAILURE,
+                    None,
+                )
+            except RenderContextValidationError:
+                failure = (CompositorFailure.INVALID_CONTEXT, None)
             except WidgetRenderError as error:
-                raise CompositorError(
-                    CompositorFailure.CONTROLLED_RENDERER_FAILURE,
-                    region_id=region.id,
-                    widget_type=widget_type,
-                ) from error
-            except SurfaceInvariantError as error:
-                raise CompositorError(
-                    CompositorFailure.INVALID_LOCAL_BUFFER,
-                    region_id=region.id,
-                    widget_type=widget_type,
-                ) from error
+                failure = _controlled_failure(error)
+            except SurfaceInvariantError:
+                failure = (CompositorFailure.INVALID_LOCAL_BUFFER, None)
             except (
                 SurfaceTypeError,
                 SurfaceValidationError,
-            ) as error:
-                raise CompositorError(
-                    CompositorFailure.INVALID_DRAWING,
-                    region_id=region.id,
-                    widget_type=widget_type,
-                ) from error
-            except Exception as error:
-                raise CompositorError(
+            ):
+                failure = (CompositorFailure.INVALID_DRAWING, None)
+            except Exception:
+                failure = (
                     CompositorFailure.UNEXPECTED_RENDERER_FAILURE,
+                    None,
+                )
+
+            if failure is not None:
+                category, field = failure
+                raise CompositorError(
+                    category,
                     region_id=region.id,
                     widget_type=widget_type,
-                ) from error
-
-            animated_content = animated_content or definition.animated
+                    field=field,
+                )
+            update_policy = aggregate_update_policies(
+                (update_policy, region_policy)
+            )
 
         logical_framebuffer = logical.to_bytes()
         device_framebuffer = _logical_to_device(
@@ -452,5 +561,6 @@ class Compositor:
             regions=metadata,
             generation_time=validated_generation,
             animation_time=validated_animation,
-            animated_content=animated_content,
+            update_policy=update_policy,
+            animated_content=policy_has_animated_content(update_policy),
         )

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from nextuxlinq.rendering_v2 import registry as registry_module
 from nextuxlinq.models_v2 import CanvasConfig, ProfileConfigV2, RegionConfig
 from nextuxlinq.rendering_v2.compositor import (
     Compositor,
@@ -21,9 +22,16 @@ from nextuxlinq.rendering_v2.registry import (
     WidgetDefinition,
     WidgetRegistry,
     WidgetRenderError,
-    create_phase2_widget_registry,
+    create_widget_registry,
 )
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
+from nextuxlinq.rendering_v2.update_policy import (
+    UPDATE_POLICY_FREQUENCY,
+    UpdatePolicy,
+    UpdatePolicyResolver,
+    aggregate_update_policies,
+    policy_has_animated_content,
+)
 from nextuxlinq.widget_models import (
     BlankSettings,
     CANONICAL_WIDGET_SETTINGS_MODELS,
@@ -59,7 +67,7 @@ def static_text_settings() -> StaticTextSettings:
         vertical_alignment="center",  # type: ignore[arg-type]
         font="auto",  # type: ignore[arg-type]
         uppercase=True,
-        overflow="clip",  # type: ignore[arg-type]
+        overflow="error",  # type: ignore[arg-type]
     )
 
 
@@ -85,7 +93,7 @@ def date_settings() -> DateSettings:
         horizontal_alignment="center",  # type: ignore[arg-type]
         vertical_alignment="center",  # type: ignore[arg-type]
         font="auto",  # type: ignore[arg-type]
-        overflow="clip",  # type: ignore[arg-type]
+        overflow="error",  # type: ignore[arg-type]
     )
 
 
@@ -136,7 +144,9 @@ def blank_definition(**changes: object) -> WidgetDefinition:
         "settings_model": BlankSettings,
         "default_settings": BlankSettings(),
         "renderer": lambda surface, settings, context: None,
-        "animated": False,
+        "update_policy_resolver": UpdatePolicyResolver.fixed(
+            BlankSettings, UpdatePolicy.STATIC
+        ),
         "minimum_width": 1,
         "minimum_height": 1,
     }
@@ -144,23 +154,195 @@ def blank_definition(**changes: object) -> WidgetDefinition:
     return WidgetDefinition(**values)  # type: ignore[arg-type]
 
 
-def test_phase2_registry_contains_only_blank_definition() -> None:
-    registry = create_phase2_widget_registry()
+def test_registry_contains_five_canonical_definitions_in_stable_order() -> None:
+    registry = create_widget_registry()
 
-    assert len(registry.definitions) == 1
-    definition = registry.resolve(WidgetType.BLANK)
-    assert definition.widget_type is WidgetType.BLANK
-    assert definition.display_label == "Nothing / Gap"
-    assert definition.settings_model is BlankSettings
-    assert definition.default_settings == BlankSettings()
-    assert definition.animated is False
-    assert definition.minimum_width == 1
-    assert definition.minimum_height == 1
-    assert definition.renderer is not None
+    assert tuple(
+        definition.widget_type for definition in registry.definitions
+    ) == tuple(WidgetType)
+    assert len(registry.definitions) == 5
+    assert len(
+        {definition.widget_type for definition in registry.definitions}
+    ) == 5
+    for definition in registry.definitions:
+        assert definition.settings_model is (
+            CANONICAL_WIDGET_SETTINGS_MODELS[definition.widget_type]
+        )
+        assert type(definition.default_settings) is (
+            definition.settings_model
+        )
+        assert definition.renderer is not None
+
+
+def test_registry_factory_is_fresh_equivalent_and_definitions_are_frozen() -> None:
+    first = create_widget_registry()
+    second = create_widget_registry()
+
+    assert first is not second
+    assert first.definitions == second.definitions
+    assert all(
+        left is not right
+        for left, right in zip(first.definitions, second.definitions)
+    )
+    with pytest.raises(AttributeError):
+        first._definitions = {}  # type: ignore[attr-defined]
+    with pytest.raises((AttributeError, TypeError)):
+        first.definitions[0].display_label = "Changed"  # type: ignore[misc]
+
+
+def test_registry_module_has_no_eager_global_registry_instance() -> None:
+    assert not any(
+        isinstance(value, WidgetRegistry)
+        for value in vars(registry_module).values()
+    )
+
+
+def test_canonical_defaults_serialize_exactly() -> None:
+    registry = create_widget_registry()
+
+    assert registry.resolve(WidgetType.BLANK).default_settings.to_dict() == {}
+    assert registry.resolve(WidgetType.CLOCK).default_settings.to_dict() == {
+        "format": "24h",
+        "show_seconds": False,
+        "blink_separator": False,
+        "time_zone": "local",
+        "color": "#FFFFFF",
+        "horizontal_alignment": "center",
+        "vertical_alignment": "center",
+        "font": "auto",
+    }
+    assert registry.resolve(
+        WidgetType.STATIC_TEXT
+    ).default_settings.to_dict() == {
+        "content": "TEXT",
+        "color": "#FFFFFF",
+        "horizontal_alignment": "center",
+        "vertical_alignment": "center",
+        "font": "auto",
+        "uppercase": True,
+        "overflow": "error",
+    }
+    assert registry.resolve(
+        WidgetType.SCROLLING_TEXT
+    ).default_settings.to_dict() == {
+        "content": "TEXT",
+        "direction": "left",
+        "speed": 5.0,
+        "color": "#FFFFFF",
+        "initial_alignment": "end",
+        "vertical_alignment": "center",
+        "font": "auto",
+        "uppercase": True,
+        "trailing_gap": 6,
+    }
+    assert registry.resolve(WidgetType.DATE).default_settings.to_dict() == {
+        "format": "day_month_full_year",
+        "time_zone": "local",
+        "color": "#FFFFFF",
+        "horizontal_alignment": "center",
+        "vertical_alignment": "center",
+        "font": "auto",
+        "overflow": "error",
+    }
+    for definition in registry.definitions:
+        reparsed = definition.settings_model.from_dict(
+            definition.default_settings.to_dict()
+        )
+        assert type(reparsed) is definition.settings_model
+        assert reparsed == definition.default_settings
+
+
+def test_minimum_geometry_is_editor_guidance_only() -> None:
+    registry = create_widget_registry()
+
+    assert {
+        definition.widget_type: (
+            definition.minimum_width,
+            definition.minimum_height,
+        )
+        for definition in registry.definitions
+    } == {
+        WidgetType.BLANK: (1, 1),
+        WidgetType.CLOCK: (13, 5),
+        WidgetType.STATIC_TEXT: (1, 5),
+        WidgetType.SCROLLING_TEXT: (1, 5),
+        WidgetType.DATE: (19, 5),
+    }
+
+
+def test_settings_dependent_update_policies_and_exact_types() -> None:
+    registry = create_widget_registry()
+
+    assert registry.resolve(WidgetType.BLANK).resolve_update_policy(
+        BlankSettings()
+    ) is UpdatePolicy.STATIC
+    assert registry.resolve(WidgetType.STATIC_TEXT).resolve_update_policy(
+        static_text_settings()
+    ) is UpdatePolicy.STATIC
+    assert registry.resolve(
+        WidgetType.SCROLLING_TEXT
+    ).resolve_update_policy(
+        scrolling_text_settings()
+    ) is UpdatePolicy.CONTINUOUS
+    assert registry.resolve(WidgetType.DATE).resolve_update_policy(
+        date_settings()
+    ) is UpdatePolicy.DAY_BOUNDARY
+
+    clock = registry.resolve(WidgetType.CLOCK)
+    assert clock.resolve_update_policy(
+        clock_settings()
+    ) is UpdatePolicy.MINUTE_BOUNDARY
+    assert clock.resolve_update_policy(
+        ClockSettings(
+            **{
+                **clock_settings().to_dict(),
+                "show_seconds": True,
+            }
+        )
+    ) is UpdatePolicy.SECOND_BOUNDARY
+    assert clock.resolve_update_policy(
+        ClockSettings(
+            **{
+                **clock_settings().to_dict(),
+                "blink_separator": True,
+            }
+        )
+    ) is UpdatePolicy.HALF_SECOND
+    with pytest.raises(TypeError, match="exact canonical settings"):
+        clock.resolve_update_policy(static_text_settings())  # type: ignore[arg-type]
+
+
+def test_update_policy_frequency_order_is_explicit() -> None:
+    expected = (
+        UpdatePolicy.CONTINUOUS,
+        UpdatePolicy.HALF_SECOND,
+        UpdatePolicy.SECOND_BOUNDARY,
+        UpdatePolicy.MINUTE_BOUNDARY,
+        UpdatePolicy.DAY_BOUNDARY,
+        UpdatePolicy.STATIC,
+    )
+
+    assert tuple(
+        sorted(UpdatePolicy, key=UPDATE_POLICY_FREQUENCY.__getitem__)
+    ) == expected
+    assert aggregate_update_policies(reversed(expected)) is (
+        UpdatePolicy.CONTINUOUS
+    )
+    assert {
+        policy: policy_has_animated_content(policy)
+        for policy in UpdatePolicy
+    } == {
+        UpdatePolicy.STATIC: False,
+        UpdatePolicy.CONTINUOUS: True,
+        UpdatePolicy.HALF_SECOND: True,
+        UpdatePolicy.SECOND_BOUNDARY: True,
+        UpdatePolicy.MINUTE_BOUNDARY: False,
+        UpdatePolicy.DAY_BOUNDARY: False,
+    }
 
 
 def test_blank_renderer_draws_no_foreground_content() -> None:
-    registry = create_phase2_widget_registry()
+    registry = create_widget_registry()
     definition = registry.resolve(WidgetType.BLANK)
     assert definition.renderer is not None
     surface = RegionSurface(3, 2, RgbColor(10, 20, 30))
@@ -217,7 +399,9 @@ def test_every_widget_type_accepts_its_canonical_settings_model(
         settings_model=settings_model,
         default_settings=default_settings,
         renderer=lambda surface, settings, context: None,
-        animated=False,
+        update_policy_resolver=UpdatePolicyResolver.fixed(
+            settings_model, UpdatePolicy.STATIC
+        ),
     )
 
     assert definition.settings_model is settings_model
@@ -259,7 +443,9 @@ def test_every_widget_type_rejects_an_incompatible_settings_model(
             settings_model=wrong_model,
             default_settings=wrong_default,
             renderer=lambda surface, settings, context: None,
-            animated=False,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                wrong_model, UpdatePolicy.STATIC
+            ),
         )
 
     assert str(captured.value) == (
@@ -282,7 +468,9 @@ def test_incompatible_definition_fails_before_it_can_enter_registry() -> None:
                 settings_model=StaticTextSettings,
                 default_settings=static_text_settings(),
                 renderer=lambda surface, settings, context: None,
-                animated=False,
+                update_policy_resolver=UpdatePolicyResolver.fixed(
+                    StaticTextSettings, UpdatePolicy.STATIC
+                ),
             )
         )
 
@@ -313,7 +501,10 @@ def test_canonical_model_rejects_incorrect_default_settings(
             settings_model=CANONICAL_WIDGET_SETTINGS_MODELS[widget_type],
             default_settings=wrong_default,
             renderer=lambda surface, settings, context: None,
-            animated=False,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                CANONICAL_WIDGET_SETTINGS_MODELS[widget_type],
+                UpdatePolicy.STATIC,
+            ),
         )
 
     assert str(captured.value) == (
@@ -333,7 +524,9 @@ def test_settings_model_and_default_subclasses_are_rejected() -> None:
             settings_model=DerivedBlankSettings,
             default_settings=DerivedBlankSettings(),
             renderer=lambda surface, settings, context: None,
-            animated=False,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                BlankSettings, UpdatePolicy.STATIC
+            ),
         )
 
     with pytest.raises(TypeError, match="incompatible default settings"):
@@ -343,7 +536,9 @@ def test_settings_model_and_default_subclasses_are_rejected() -> None:
             settings_model=BlankSettings,
             default_settings=DerivedBlankSettings(),
             renderer=lambda surface, settings, context: None,
-            animated=False,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                BlankSettings, UpdatePolicy.STATIC
+            ),
         )
 
 
@@ -385,7 +580,9 @@ def test_known_definition_without_renderer_is_distinct() -> None:
         settings_model=ClockSettings,
         default_settings=clock_settings(),
         renderer=None,
-        animated=False,
+        update_policy_resolver=UpdatePolicyResolver.fixed(
+            ClockSettings, UpdatePolicy.MINUTE_BOUNDARY
+        ),
     )
     registry = WidgetRegistry((definition,))
 
@@ -430,7 +627,9 @@ def test_injected_renderer_runs_once_with_exact_geometry_and_times() -> None:
         settings_model=ClockSettings,
         default_settings=clock_settings(),
         renderer=renderer,
-        animated=True,
+        update_policy_resolver=UpdatePolicyResolver.fixed(
+            ClockSettings, UpdatePolicy.CONTINUOUS
+        ),
     )
     profile = profile_with_widget(
         WidgetConfig(
@@ -448,6 +647,7 @@ def test_injected_renderer_runs_once_with_exact_geometry_and_times() -> None:
     )
 
     assert calls == [(90, 10, NOW, 12.25, "target")]
+    assert result.update_policy is UpdatePolicy.CONTINUOUS
     assert result.animated_content is True
 
 
@@ -468,7 +668,9 @@ def test_compositor_defensively_rejects_corrupt_settings_instance() -> None:
         settings_model=ClockSettings,
         default_settings=clock_settings(),
         renderer=renderer,
-        animated=False,
+        update_policy_resolver=UpdatePolicyResolver.fixed(
+            ClockSettings, UpdatePolicy.MINUTE_BOUNDARY
+        ),
     )
     corrupted_widget = WidgetConfig(
         type=WidgetType.CLOCK,
@@ -495,7 +697,9 @@ def test_non_none_renderer_result_is_rejected() -> None:
         settings_model=ClockSettings,
         default_settings=clock_settings(),
         renderer=lambda surface, settings, context: "invalid",  # type: ignore[arg-type,return-value]
-        animated=False,
+        update_policy_resolver=UpdatePolicyResolver.fixed(
+            ClockSettings, UpdatePolicy.MINUTE_BOUNDARY
+        ),
     )
     profile = profile_with_widget(
         WidgetConfig(
@@ -537,7 +741,9 @@ def test_renderer_failures_are_sanitized(
         settings_model=ClockSettings,
         default_settings=clock_settings(),
         renderer=renderer,
-        animated=False,
+        update_policy_resolver=UpdatePolicyResolver.fixed(
+            ClockSettings, UpdatePolicy.MINUTE_BOUNDARY
+        ),
     )
     profile = profile_with_widget(
         WidgetConfig(
@@ -554,6 +760,15 @@ def test_renderer_failures_are_sanitized(
     assert captured.value.category is category
     assert captured.value.region_id == "target"
     assert captured.value.widget_type is WidgetType.CLOCK
+    assert captured.value.__context__ is None
+    assert captured.value.__cause__ is None
+    assert not any(
+        isinstance(value, BaseException)
+        for value in (
+            *vars(captured.value).values(),
+            *captured.value.args,
+        )
+    )
     assert private_detail not in str(captured.value)
     assert "/home/" not in str(captured.value)
     assert "0xDEADBEEF" not in str(captured.value)

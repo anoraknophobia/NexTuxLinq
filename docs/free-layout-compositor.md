@@ -1,7 +1,8 @@
 # Free-layout compositor foundation
 
-This document describes the implemented but inactive Phase 2 software
-compositor for future NexTuxLinq Matrix900 free-form layouts. The daemon,
+This document describes the implemented but inactive software compositor for
+future NexTuxLinq Matrix900 free-form layouts. Phase 3D connects all five
+inactive widget renderers and update-policy metadata. The daemon,
 HTTP API, GUI, persistence layer, DeviceWorker, and physical output continue
 to use the schema-v1 renderer.
 
@@ -83,27 +84,53 @@ exactly 2,700 bytes.
 ## Widget registry and failure behavior
 
 Widget definitions bind one stable schema widget type to its exact settings
-model, renderer, default settings, animation capability, safe display label,
-and optional minimum geometry.
-
-Phase 2's production registry contains only the `blank` renderer, labeled
-`Nothing / Gap`. Clock, static-text, scrolling-text, and date configurations
-remain valid schema-v2 values but do not yet have production renderers.
-Rendering an enabled unsupported widget fails the complete candidate frame;
-it never silently becomes blank. Disabled unsupported widgets remain in
-metadata without being resolved or invoked.
+model, renderer, default settings, immutable update-policy resolver, safe
+display label, and optional minimum editor guidance. The canonical inactive
+registry contains exactly `blank`, `clock`, `static_text`, `scrolling_text`,
+and `date`, in that order. Each factory call creates a fresh registry; package
+import creates no global registry.
 
 Renderer failures are categorized and sanitized with the region ID and widget
-type. Partial frames are not returned.
+type, plus a stable field when applicable. Raw exception objects, messages,
+tracebacks, content, timezone values, paths, and implementation details are
+not retained. Partial frames are not returned.
+
+## Aggregate update policy
+
+Only successfully rendered enabled regions contribute to the immutable
+`RenderResult.update_policy`. The explicit highest-to-lowest precedence is:
+
+1. `continuous`
+2. `half_second`
+3. `second_boundary`
+4. `minute_boundary`
+5. `day_boundary`
+6. `static`
+
+Empty layouts and layouts containing only disabled regions are `static`.
+`animated_content` remains as compatibility metadata: it is true for
+`continuous`, `half_second`, and `second_boundary`, and false for
+`minute_boundary`, `day_boundary`, and `static`. No runtime scheduler is
+implemented in this phase.
+
+Two separate five-pixel rows are supported. Each renderer receives only its
+own five-pixel local surface, automatic font selection can choose `3x5`, and
+neither row can draw into the other. No content is scaled or stretched.
+
+Integrated migration tests compare complete framebuffer bytes for default and
+customized schema-v1 profiles. The inactive logical framebuffer exactly
+matches the active physical-preview order, while the inactive device
+framebuffer exactly matches active Creator order across entry, scrolling,
+clipping, trailing-gap, intermediate, and cycle-reset phases.
 
 ## Deferred activation
 
 This compositor is imported only by its hardware-independent tests. It is not
 connected to the active renderer or exposed through the API or GUI. The
-inactive [Clock and Date widget renderers](free-layout-widgets.md) remain
-outside the production registry. Static Text, Scrolling Text, editor
-dropdowns, configuration persistence cutover, and daemon activation remain
-future phases. The separate
+inactive [widget renderers](free-layout-widgets.md) are integrated only in the
+inactive registry. Editor dropdowns, configuration persistence cutover,
+runtime scheduling, daemon activation, and physical upload remain future
+phases. The separate
 [free-layout font foundation](free-layout-fonts.md) now provides inactive
 immutable bitmap fonts and local text primitives. No physical hardware test is
 required for these foundations.

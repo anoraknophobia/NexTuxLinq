@@ -13,8 +13,7 @@ from nextuxlinq.rendering import render_profile_frame
 from nextuxlinq.rendering_v2.fonts import FontTextError
 from nextuxlinq.rendering_v2.registry import (
     RenderContext,
-    UnknownWidgetDefinitionError,
-    create_phase2_widget_registry,
+    create_widget_registry,
 )
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.widgets import scrolling_text as scrolling_module
@@ -572,15 +571,11 @@ def test_unexpected_failure_is_fully_sanitized(
     )
 
 
-def test_production_registry_remains_blank_only() -> None:
-    registry = create_phase2_widget_registry()
+def test_inactive_registry_integrates_all_canonical_widgets() -> None:
+    registry = create_widget_registry()
 
     assert tuple(
         definition.widget_type for definition in registry.definitions
-    ) == (WidgetType.BLANK,)
-    for widget_type in (
-        WidgetType.STATIC_TEXT,
-        WidgetType.SCROLLING_TEXT,
-    ):
-        with pytest.raises(UnknownWidgetDefinitionError):
-            registry.resolve(widget_type)
+    ) == tuple(WidgetType)
+    assert registry.resolve(WidgetType.STATIC_TEXT).renderer is not None
+    assert registry.resolve(WidgetType.SCROLLING_TEXT).renderer is not None

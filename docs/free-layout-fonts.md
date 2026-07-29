@@ -65,9 +65,14 @@ orientation, or implement animation.
 
 ## Widget use and deferred work
 
-The inactive [Clock and Date widget renderers](free-layout-widgets.md) now use
-this font foundation without scaling. Static Text and Scrolling Text renderers
-remain unimplemented. Widget-registry integration, update scheduling, API and
-GUI exposure, persistence cutover, daemon activation, and physical Matrix900
-output are future phases. The active schema-v1 framebuffer behavior remains
-unchanged.
+Clock, Static Text, Scrolling Text, and Date in the inactive
+[widget registry](free-layout-widgets.md) use this foundation without scaling
+or stretching. Blank does not use fonts. Two independent five-pixel rows can
+each select `3x5` while remaining clipped to their own regions. Full
+migration-equivalence tests confirm exact legacy 3×7 and 5×7 glyphs, spacing,
+alignment, colors, and scrolling framebuffers.
+
+Update scheduling, API and GUI exposure, persistence cutover, daemon
+activation, and physical Matrix900 output remain future phases. The current
+web GUI cannot configure free-layout widgets, and active schema-v1 framebuffer
+behavior remains unchanged.

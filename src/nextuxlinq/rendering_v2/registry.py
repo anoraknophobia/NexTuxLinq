@@ -1,4 +1,4 @@
-"""Widget rendering contracts and inactive Phase 2 registry construction."""
+"""Widget rendering contracts and inactive canonical registry construction."""
 
 from __future__ import annotations
 
@@ -12,9 +12,23 @@ from typing import Generic, Mapping, Protocol, TypeVar
 
 from nextuxlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH
 from nextuxlinq.rendering_v2.surface import RegionSurface
+from nextuxlinq.rendering_v2.update_policy import (
+    UpdatePolicy,
+    UpdatePolicyResolver,
+)
 from nextuxlinq.widget_models import (
     BlankSettings,
     CANONICAL_WIDGET_SETTINGS_MODELS,
+    ClockFormat,
+    ClockSettings,
+    DateSettings,
+    FontChoice,
+    HorizontalAlignment,
+    ScrollDirection,
+    ScrollingTextSettings,
+    StaticTextSettings,
+    TextOverflow,
+    VerticalAlignment,
     WidgetSettings,
     WidgetType,
 )
@@ -155,7 +169,7 @@ class WidgetDefinition(Generic[SettingsT]):
     settings_model: type[SettingsT]
     default_settings: SettingsT
     renderer: WidgetRenderer[SettingsT] | None
-    animated: bool
+    update_policy_resolver: UpdatePolicyResolver
     minimum_width: int | None = None
     minimum_height: int | None = None
 
@@ -188,8 +202,19 @@ class WidgetDefinition(Generic[SettingsT]):
             )
         if self.renderer is not None and not callable(self.renderer):
             raise TypeError("renderer must be callable or null.")
-        if not isinstance(self.animated, bool):
-            raise TypeError("animated must be a boolean.")
+        if not isinstance(
+            self.update_policy_resolver, UpdatePolicyResolver
+        ):
+            raise TypeError(
+                "update_policy_resolver must be an UpdatePolicyResolver."
+            )
+        if (
+            self.update_policy_resolver.settings_model
+            is not self.settings_model
+        ):
+            raise TypeError(
+                "update_policy_resolver has an incompatible settings model."
+            )
         self._validate_minimum(
             self.minimum_width, "minimum_width", MATRIX_WIDTH
         )
@@ -210,11 +235,25 @@ class WidgetDefinition(Generic[SettingsT]):
                 f"{name} must be between 1 and {maximum}."
             )
 
+    def resolve_update_policy(self, settings: SettingsT) -> UpdatePolicy:
+        """Resolve policy only for this definition's exact settings model."""
+        if type(settings) is not self.settings_model:
+            raise TypeError(
+                f"{self.widget_type.value} update policy requires exact "
+                "canonical settings."
+            )
+        return self.update_policy_resolver.resolve(settings)
+
 
 class WidgetRegistry:
     """An immutable mapping of widget types to renderer definitions."""
 
     __slots__ = ("_definitions",)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if hasattr(self, name):
+            raise AttributeError("WidgetRegistry is immutable.")
+        object.__setattr__(self, name, value)
 
     def __init__(
         self, definitions: Iterable[WidgetDefinition[WidgetSettings]]
@@ -261,25 +300,118 @@ def render_blank(
     context: RenderContext,
 ) -> None:
     """Render no foreground content into an initialized region."""
+    from nextuxlinq.rendering_v2.widgets.errors import WidgetRenderingError
+
     if not isinstance(surface, RegionSurface):
-        raise TypeError("surface must be a RegionSurface.")
-    if not isinstance(settings, BlankSettings):
-        raise TypeError("settings must be BlankSettings.")
-    if not isinstance(context, RenderContext):
-        raise TypeError("context must be a RenderContext.")
+        raise WidgetRenderingError("renderer_invariant", field="surface")
+    if type(settings) is not BlankSettings:
+        raise WidgetRenderingError("renderer_invariant", field="settings")
+    if type(context) is not RenderContext:
+        raise WidgetRenderingError("renderer_invariant", field="context")
+    if (
+        surface.width != context.region_width
+        or surface.height != context.region_height
+    ):
+        raise WidgetRenderingError("renderer_invariant", field="surface")
     return None
 
 
-def create_phase2_widget_registry() -> WidgetRegistry:
-    """Create a new isolated registry containing only Nothing / Gap."""
-    definition: WidgetDefinition[BlankSettings] = WidgetDefinition(
-        widget_type=WidgetType.BLANK,
-        display_label="Nothing / Gap",
-        settings_model=BlankSettings,
-        default_settings=BlankSettings(),
-        renderer=render_blank,
-        animated=False,
-        minimum_width=1,
-        minimum_height=1,
+def create_widget_registry() -> WidgetRegistry:
+    """Create a fresh deterministic registry of all inactive widgets."""
+    from nextuxlinq.rendering_v2.widgets.clock import render_clock
+    from nextuxlinq.rendering_v2.widgets.date import render_date
+    from nextuxlinq.rendering_v2.widgets.scrolling_text import (
+        render_scrolling_text,
     )
-    return WidgetRegistry((definition,))  # type: ignore[arg-type]
+    from nextuxlinq.rendering_v2.widgets.static_text import (
+        render_static_text,
+    )
+
+    definitions = (
+        WidgetDefinition(
+            widget_type=WidgetType.BLANK,
+            display_label="Nothing / Gap",
+            settings_model=BlankSettings,
+            default_settings=BlankSettings(),
+            renderer=render_blank,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                BlankSettings, UpdatePolicy.STATIC
+            ),
+            minimum_width=1,
+            minimum_height=1,
+        ),
+        WidgetDefinition(
+            widget_type=WidgetType.CLOCK,
+            display_label="Clock",
+            settings_model=ClockSettings,
+            default_settings=ClockSettings(
+                format=ClockFormat.HOUR_24,
+                show_seconds=False,
+                blink_separator=False,
+                time_zone="local",
+                color="#FFFFFF",
+                horizontal_alignment=HorizontalAlignment.CENTER,
+                vertical_alignment=VerticalAlignment.CENTER,
+                font=FontChoice.AUTO,
+            ),
+            renderer=render_clock,
+            update_policy_resolver=UpdatePolicyResolver.clock(),
+            minimum_width=13,
+            minimum_height=5,
+        ),
+        WidgetDefinition(
+            widget_type=WidgetType.STATIC_TEXT,
+            display_label="Static Text",
+            settings_model=StaticTextSettings,
+            default_settings=StaticTextSettings(
+                content="TEXT",
+                color="#FFFFFF",
+                horizontal_alignment=HorizontalAlignment.CENTER,
+                vertical_alignment=VerticalAlignment.CENTER,
+                font=FontChoice.AUTO,
+                uppercase=True,
+                overflow=TextOverflow.ERROR,
+            ),
+            renderer=render_static_text,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                StaticTextSettings, UpdatePolicy.STATIC
+            ),
+            minimum_width=1,
+            minimum_height=5,
+        ),
+        WidgetDefinition(
+            widget_type=WidgetType.SCROLLING_TEXT,
+            display_label="Scrolling Text",
+            settings_model=ScrollingTextSettings,
+            default_settings=ScrollingTextSettings(
+                content="TEXT",
+                direction=ScrollDirection.LEFT,
+                speed=5.0,
+                color="#FFFFFF",
+                initial_alignment=HorizontalAlignment.END,
+                vertical_alignment=VerticalAlignment.CENTER,
+                font=FontChoice.AUTO,
+                uppercase=True,
+                trailing_gap=6,
+            ),
+            renderer=render_scrolling_text,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                ScrollingTextSettings, UpdatePolicy.CONTINUOUS
+            ),
+            minimum_width=1,
+            minimum_height=5,
+        ),
+        WidgetDefinition(
+            widget_type=WidgetType.DATE,
+            display_label="Date",
+            settings_model=DateSettings,
+            default_settings=DateSettings(),
+            renderer=render_date,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                DateSettings, UpdatePolicy.DAY_BOUNDARY
+            ),
+            minimum_width=19,
+            minimum_height=5,
+        ),
+    )
+    return WidgetRegistry(definitions)  # type: ignore[arg-type]

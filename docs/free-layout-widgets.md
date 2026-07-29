@@ -2,15 +2,13 @@
 
 Phase 3B implements Clock and Date, and Phase 3C implements Static Text and
 Scrolling Text, for the inactive NexTuxLinq schema-v2 and rendering-v2
-foundation. These renderers are available for direct tests and explicitly
-constructed local test registries, but they are not registered in the
-production widget registry. The active daemon, API, GUI, persistence,
-schema-v1 renderer, DeviceWorker, Creator output, and physical Matrix900
-upload path remain unchanged.
+foundation. Phase 3D integrates all five widget types into one canonical
+inactive registry and compositor. The active daemon, API, GUI, persistence,
+schema-v1 renderer, DeviceWorker, Creator output, and physical Matrix900 upload
+path remain unchanged.
 
 The future editor will provide one widget dropdown per region. Production
-registry integration remains deferred to Phase 3D, and editor exposure remains
-later work.
+runtime activation and editor exposure remain later work.
 
 ## Clock
 
@@ -124,8 +122,36 @@ Text supports start, center, and end plus top, center, and bottom alignment;
 Scrolling Text uses its configured initial and vertical alignments. Unset glyph
 pixels preserve the region's existing background.
 
+## Inactive registry and update policies
+
+Each call to the canonical inactive registry factory returns a fresh immutable
+registry in stable order: Nothing / Gap, Clock, Static Text, Scrolling Text,
+and Date. Every definition binds exactly one canonical settings model, one
+renderer, validated defaults, broad minimum-size editor guidance, and an
+immutable settings-aware update-policy resolver. No registry instance is
+created during package import.
+
+Update policies describe future scheduling needs without scheduling work:
+
+- `continuous` for Scrolling Text;
+- `half_second` for a Clock with blinking separators;
+- `second_boundary` for a non-blinking Clock with seconds;
+- `minute_boundary` for a plain Clock;
+- `day_boundary` for Date;
+- `static` for Blank and Static Text.
+
+Aggregation uses the explicit precedence shown above, from highest to lowest
+frequency. Disabled regions do not participate and an empty layout is
+`static`. The compatibility `animated_content` flag is true only for
+`continuous`, `half_second`, and `second_boundary`.
+
+Two independent five-pixel rows can use automatic `3x5` fonts without vertical
+bleed. The compositor does not use editor minimum guidance to reject narrower
+valid scrolling, clipping, truncation, or blank regions.
+
 ## Deferred work
 
-Production registry integration remains deferred to Phase 3D. Schema-v2 and
-rendering-v2 activation, API and GUI editing, configuration persistence
-cutover, daemon scheduling, and physical upload also remain deferred.
+Schema-v2 and rendering-v2 runtime activation, update scheduling, API and GUI
+editing, configuration persistence cutover, daemon scheduling, and physical
+upload remain deferred. The current web GUI cannot configure free-layout
+regions or these widgets.

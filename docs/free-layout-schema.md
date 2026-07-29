@@ -50,9 +50,10 @@ matching `settings` object. Initial types are:
 
 Unknown widget types, settings for the wrong discriminator, missing required
 settings, and unknown settings fields are rejected. Rendering is intentionally
-inactive. Phase 3B provides directly testable Clock and German Date renderers,
-documented in [free-layout Clock and Date widgets](free-layout-widgets.md),
-without adding them to the production widget registry.
+inactive. Phase 3D integrates all five implemented renderers in one canonical
+inactive registry, documented in
+[free-layout widget renderers](free-layout-widgets.md), without activating
+schema v2 in the running application.
 
 The optional region `background_color` is common to all widgets. A null or
 omitted value means that the canvas background remains visible. Widget settings
@@ -112,12 +113,15 @@ This design remains specific to the Phanteks Matrix900. It does not change HID
 transport, protocol reports, physical orientation, or framebuffer generation.
 
 The separate [free-layout compositor foundation](free-layout-compositor.md)
-implements inactive region-local drawing, blank-widget composition, and
-logical-to-Creator orientation. It remains disconnected from the daemon, API,
-GUI, and persistence path.
+implements inactive region-local drawing, all five canonical widgets,
+settings-dependent update-policy aggregation, and logical-to-Creator
+orientation. Complete byte comparisons prove that migrated schema-v1 logical
+and device framebuffers remain equivalent to the active renderer. It remains
+disconnected from the daemon, API, GUI, and persistence path.
 
 The [free-layout font foundation](free-layout-fonts.md) adds inactive immutable
 3×5, legacy-compatible 3×7, and legacy-compatible 5×7 bitmap fonts plus local
-measurement, alignment, clipping, and overflow primitives. Clock and Date now
-use those primitives in inactive code; Static Text, Scrolling Text, registry
-integration, and runtime activation remain deferred.
+measurement, alignment, clipping, and overflow primitives. All text-producing
+widgets use those primitives in inactive code. Runtime scheduling, the current
+web GUI, API exposure, persistence cutover, daemon activation, and physical
+upload remain deferred.

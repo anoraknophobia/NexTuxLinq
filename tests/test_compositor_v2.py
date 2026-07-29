@@ -19,11 +19,15 @@ from nextuxlinq.rendering_v2.registry import (
     RenderContext,
     WidgetDefinition,
     WidgetRegistry,
-    create_phase2_widget_registry,
+    create_widget_registry,
 )
 from nextuxlinq.rendering_v2.surface import (
     RegionSurface,
     RgbColor,
+)
+from nextuxlinq.rendering_v2.update_policy import (
+    UpdatePolicy,
+    UpdatePolicyResolver,
 )
 from nextuxlinq.widget_models import (
     BlankSettings,
@@ -111,7 +115,7 @@ def render(
     animation_time: float = 2.5,
 ) -> RenderResult:
     return Compositor(
-        create_phase2_widget_registry() if registry is None else registry
+        create_widget_registry() if registry is None else registry
     ).render(
         candidate,
         generation_time=NOW,
@@ -127,7 +131,7 @@ def pixel(payload: bytes, x: int, y: int) -> bytes:
 def clock_definition(
     renderer,
     *,
-    animated: bool = False,
+    policy: UpdatePolicy = UpdatePolicy.MINUTE_BOUNDARY,
 ) -> WidgetDefinition:
     return WidgetDefinition(
         widget_type=WidgetType.CLOCK,
@@ -135,7 +139,9 @@ def clock_definition(
         settings_model=ClockSettings,
         default_settings=clock_settings(),
         renderer=renderer,
-        animated=animated,
+        update_policy_resolver=UpdatePolicyResolver.fixed(
+            ClockSettings, policy
+        ),
         minimum_width=1,
         minimum_height=1,
     )
@@ -144,13 +150,13 @@ def clock_definition(
 def registry_with_clock(
     renderer,
     *,
-    animated: bool = False,
+    policy: UpdatePolicy = UpdatePolicy.MINUTE_BOUNDARY,
     include_blank: bool = True,
 ) -> WidgetRegistry:
-    definitions = [clock_definition(renderer, animated=animated)]
+    definitions = [clock_definition(renderer, policy=policy)]
     if include_blank:
         definitions = [
-            *create_phase2_widget_registry().definitions,
+            create_widget_registry().resolve(WidgetType.BLANK),
             *definitions,
         ]
     return WidgetRegistry(definitions)
@@ -171,6 +177,7 @@ def test_empty_black_canvas_has_exact_immutable_outputs() -> None:
     assert result.regions == ()
     assert result.generation_time == NOW
     assert result.animation_time == 2.5
+    assert result.update_policy is UpdatePolicy.STATIC
     assert result.animated_content is False
 
 
@@ -258,6 +265,7 @@ def test_disabled_region_ignores_its_background_and_unsupported_widget() -> None
     assert result.device_framebuffer == result.logical_framebuffer
     assert result.regions[0].enabled is False
     assert result.regions[0].widget_type is WidgetType.CLOCK
+    assert result.update_policy is UpdatePolicy.STATIC
     assert result.animated_content is False
 
 
@@ -525,7 +533,14 @@ def test_enabled_unsupported_widget_fails_without_partial_result() -> None:
     )
 
     with pytest.raises(CompositorError) as captured:
-        render(candidate)
+        render(
+            candidate,
+            WidgetRegistry(
+                (
+                    create_widget_registry().resolve(WidgetType.BLANK),
+                )
+            ),
+        )
 
     assert captured.value.category is (
         CompositorFailure.MISSING_WIDGET_DEFINITION
@@ -814,7 +829,7 @@ def test_device_mapping_can_be_reconstructed_for_region_pixels() -> None:
 def test_animated_content_uses_only_enabled_rendered_definitions() -> None:
     registry = registry_with_clock(
         lambda surface, settings, context: None,
-        animated=True,
+        policy=UpdatePolicy.CONTINUOUS,
     )
     disabled = profile(
         (
@@ -842,8 +857,13 @@ def test_animated_content_uses_only_enabled_rendered_definitions() -> None:
         )
     )
 
-    assert render(disabled, registry).animated_content is False
-    assert render(enabled, registry).animated_content is True
+    disabled_result = render(disabled, registry)
+    enabled_result = render(enabled, registry)
+
+    assert disabled_result.update_policy is UpdatePolicy.STATIC
+    assert disabled_result.animated_content is False
+    assert enabled_result.update_policy is UpdatePolicy.CONTINUOUS
+    assert enabled_result.animated_content is True
 
 
 def test_invalid_generation_and_animation_inputs_are_sanitized() -> None:
@@ -857,7 +877,7 @@ def test_invalid_generation_and_animation_inputs_are_sanitized() -> None:
         (NOW, True),
     ):
         with pytest.raises(CompositorError) as captured:
-            Compositor(create_phase2_widget_registry()).render(
+            Compositor(create_widget_registry()).render(
                 candidate,
                 generation_time=generation_time,
                 animation_time=animation_time,
@@ -928,6 +948,7 @@ def test_render_result_copies_mutable_inputs_and_rejects_wrong_sizes() -> None:
         regions=list(rendered.regions),  # type: ignore[arg-type]
         generation_time=NOW,
         animation_time=0.0,
+        update_policy=UpdatePolicy.STATIC,
         animated_content=False,
     )
     logical[0] = 255
@@ -947,5 +968,6 @@ def test_render_result_copies_mutable_inputs_and_rejects_wrong_sizes() -> None:
             regions=(),
             generation_time=NOW,
             animation_time=0.0,
+            update_policy=UpdatePolicy.STATIC,
             animated_content=False,
         )
