@@ -606,6 +606,7 @@ def create_app(
             active_revision=snapshot.active_revision,
             saved_revision=snapshot.saved_revision,
             dirty=snapshot.dirty,
+            migration_pending=snapshot.migration_pending,
             legacy_editor_supported=snapshot.legacy_editor_supported,
         )
 
@@ -691,6 +692,7 @@ def create_app(
             active_revision=result.active_revision,
             saved_revision=result.saved_revision,
             dirty=result.dirty,
+            migration_pending=result.migration_pending,
             warning=result.warning,
         )
 

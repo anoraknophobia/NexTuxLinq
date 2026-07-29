@@ -10,7 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from nextuxlinq.config_store import LEGACY_MIGRATION_WARNING, ConfigLoadResult
+from nextuxlinq.config_store import (
+    LEGACY_MIGRATION_WARNING,
+    ConfigLoadResult,
+    ConfigSaveError,
+)
 from nextuxlinq.defaults import default_configuration, default_profile
 from nextuxlinq.device_worker import DeviceWorker, DeviceWorkerSnapshot
 from nextuxlinq.models import ConfigurationDocument, ProfileConfig
@@ -111,13 +115,78 @@ def test_legacy_migration_warning_is_surfaced_until_successful_save() -> None:
         assert service.snapshot().configuration_warning == (
             LEGACY_MIGRATION_WARNING
         )
+        snapshot = service.get_configuration()
+        assert snapshot.migration_pending is True
+        before_revision = snapshot.active_revision
+        before_frames = list(worker.frames)
 
-        await service.save_configuration(
-            configuration,
+        result = await service.save_canonical_configuration(
+            service.configuration,
             expected_active_revision=1,
             expected_saved_revision=1,
+            apply=False,
         )
         assert service.snapshot().configuration_warning is None
+        assert service.get_configuration().migration_pending is False
+        assert result.migration_pending is False
+        assert result.active_revision == before_revision
+        assert result.saved_revision == 2
+        assert result.dirty is False
+        assert store.saved[-1].schema_version == 2
+        assert worker.frames == before_frames
+        await service.stop()
+
+    asyncio.run(scenario())
+
+
+def test_failed_migration_save_preserves_applied_and_pending_state() -> None:
+    async def scenario() -> None:
+        worker = FakeWorker()
+        rendered = asyncio.Event()
+
+        class FailingMigrationStore(FakeStore):
+            def load(self) -> ConfigLoadResult:
+                return ConfigLoadResult(
+                    self.configuration,
+                    warning=LEGACY_MIGRATION_WARNING,
+                    persisted=True,
+                    migration_pending=True,
+                )
+
+            def save(self, configuration: ConfigurationDocumentV2) -> None:
+                raise ConfigSaveError("safe failure", committed=False)
+
+        async def sleep(delay: float) -> None:
+            rendered.set()
+            await asyncio.Future()
+
+        service = NexTuxLinqService(
+            config_store=FailingMigrationStore(default_configuration()),  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            sleep=sleep,
+        )
+        await service.start()
+        await asyncio.wait_for(rendered.wait(), 1)
+        before = service.get_configuration()
+        before_frames = list(worker.frames)
+
+        with pytest.raises(ConfigSaveError):
+            await service.save_canonical_configuration(
+                before.configuration,
+                expected_active_revision=before.active_revision,
+                expected_saved_revision=before.saved_revision,
+                apply=False,
+            )
+
+        after = service.get_configuration()
+        assert after.configuration == before.configuration
+        assert after.active_revision == before.active_revision
+        assert after.saved_revision == before.saved_revision
+        assert after.migration_pending is True
+        assert service.snapshot().configuration_warning == (
+            LEGACY_MIGRATION_WARNING
+        )
+        assert worker.frames == before_frames
         await service.stop()
 
     asyncio.run(scenario())

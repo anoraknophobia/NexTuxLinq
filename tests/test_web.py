@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 from pathlib import Path
 
 import httpx
 import pytest
 
-from nextuxlinq.config_store import ConfigLoadResult, ConfigSaveError
+from nextuxlinq.config_store import (
+    LEGACY_MIGRATION_WARNING,
+    ConfigLoadResult,
+    ConfigSaveError,
+    ConfigStore,
+)
 from nextuxlinq.defaults import (
     default_configuration,
     empty_profile_v2,
@@ -142,6 +148,7 @@ def test_canonical_configuration_and_preview_are_schema_v2(api_client) -> None:
 
     assert config.status_code == 200
     assert config.json()["configuration"]["schema_version"] == 2
+    assert config.json()["migration_pending"] is False
     assert config.json()["configuration"] == (
         legacy_equivalent_configuration_v2().to_dict()
     )
@@ -149,6 +156,128 @@ def test_canonical_configuration_and_preview_are_schema_v2(api_client) -> None:
     assert preview.status_code == 200
     assert preview.json()["update_policy"] == "continuous"
     assert preview.json()["animated_content"] is True
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_migration_pending_configuration_saves_without_apply(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    service._migration_pending = True
+    service.state.update(configuration_warning=LEGACY_MIGRATION_WARNING)
+    before = service.get_configuration()
+
+    config = client.get("/api/v1/free-layout/config")
+    saved = client.put(
+        "/api/v1/free-layout/config",
+        json={
+            "configuration": config.json()["configuration"],
+            "expected_active_revision": before.active_revision,
+            "expected_saved_revision": before.saved_revision,
+            "apply": False,
+        },
+    )
+
+    assert config.status_code == 200
+    assert config.json()["dirty"] is False
+    assert config.json()["migration_pending"] is True
+    assert saved.status_code == 200
+    assert saved.json()["configuration"]["schema_version"] == 2
+    assert saved.json()["active_revision"] == before.active_revision
+    assert saved.json()["saved_revision"] == 2
+    assert saved.json()["dirty"] is False
+    assert saved.json()["migration_pending"] is False
+    assert service.get_configuration().migration_pending is False
+    assert service.snapshot().configuration_warning is None
+    assert len(store.saved) == 1
+    assert worker.frames == []
+
+
+def test_api_migration_save_writes_schema_v2_and_backup_atomically(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "nextuxlinq" / "config.json"
+    path.parent.mkdir()
+    original = json.dumps(
+        default_configuration().to_dict(),
+        separators=(",", ":"),
+    ).encode("utf-8")
+    path.write_bytes(original)
+    store = ConfigStore(path)
+    loaded = store.load()
+    worker = FakeWorker()
+    service = NexTuxLinqService(
+        config_store=store,
+        device_worker=worker,  # type: ignore[arg-type]
+        monotonic=lambda: 10.0,
+    )
+    service._configuration = loaded.configuration
+    service._saved_configuration = loaded.configuration
+    service._saved_revision = 1
+    service._saved_revision_counter = 1
+    service._migration_pending = loaded.migration_pending
+    service._started_at = 0.0
+    service.state.update(
+        lifecycle_state="running",
+        rendering_state="rendering",
+        active_configuration_revision=1,
+        configuration_warning=loaded.warning,
+    )
+    client = LocalClient(create_app(service))
+    before = client.get("/api/v1/free-layout/config").json()
+
+    saved = client.put(
+        "/api/v1/free-layout/config",
+        json={
+            "configuration": before["configuration"],
+            "expected_active_revision": before["active_revision"],
+            "expected_saved_revision": before["saved_revision"],
+            "apply": False,
+        },
+    )
+
+    assert before["migration_pending"] is True
+    assert before["dirty"] is False
+    assert saved.status_code == 200
+    assert saved.json()["migration_pending"] is False
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted == loaded.configuration.to_dict()
+    assert persisted["schema_version"] == 2
+    backups = list(path.parent.glob(".config.json.schema-v1.*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    assert service.snapshot().configuration_warning is None
+    assert service.get_configuration().configuration == loaded.configuration
+    assert service.get_configuration().active_revision == 1
+    assert worker.frames == []
+
+
+def test_failed_migration_save_preserves_api_state(api_client) -> None:
+    client, service, store, worker = api_client
+    service._migration_pending = True
+    service.state.update(configuration_warning=LEGACY_MIGRATION_WARNING)
+    store.error = ConfigSaveError("test-only secret", committed=False)
+    before = service.get_configuration()
+
+    response = client.put(
+        "/api/v1/free-layout/config",
+        json={
+            "configuration": before.configuration.to_dict(),
+            "expected_active_revision": before.active_revision,
+            "expected_saved_revision": before.saved_revision,
+            "apply": False,
+        },
+    )
+
+    assert response.status_code == 500
+    assert "test-only secret" not in str(response.json())
+    after = service.get_configuration()
+    assert after.configuration == before.configuration
+    assert after.active_revision == before.active_revision
+    assert after.saved_revision == before.saved_revision
+    assert after.migration_pending is True
+    assert service.snapshot().configuration_warning == LEGACY_MIGRATION_WARNING
     assert store.saved == []
     assert worker.frames == []
 

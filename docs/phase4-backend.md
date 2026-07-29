@@ -19,6 +19,10 @@ overwritten. A pre-commit failure leaves the original configuration intact.
 The older pre-rename configuration path remains untouched when it is the
 migration source.
 
+The canonical API exposes this state as `migration_pending`. The visual editor
+enables Save for a valid already-applied migrated document even when `dirty`
+is false, so persistence cutover never requires a redundant Apply operation.
+
 Applied and saved state retain independent monotonic revisions. Stale writes
 return a conflict, validation precedes publication, and a failed candidate
 does not replace the last known-good applied configuration or frame.

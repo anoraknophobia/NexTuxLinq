@@ -84,6 +84,165 @@ function freeConfiguration(profileValue = freeProfile()) {
   };
 }
 
+function freeEditorFixture({
+  migrationPending = false,
+  saveStatus = 200,
+  profiles = null,
+} = {}) {
+  const ids = [
+    "#fl-profile",
+    "#fl-canvas-background",
+    "#fl-brightness",
+    "#fl-region-layer",
+    "#fl-editor-canvas",
+    "#fl-region-inspector",
+    "#fl-no-selection",
+    "#fl-selected-region",
+    "#fl-region-name",
+    "#fl-region-enabled",
+    "#fl-use-region-background",
+    "#fl-region-background",
+    "#fl-widget-type",
+    "#fl-x",
+    "#fl-y",
+    "#fl-width",
+    "#fl-height",
+    "#fl-widget-settings",
+    "#fl-editor-state",
+    "#fl-editor-message",
+    "#fl-validation-errors",
+    "#draft-preview",
+    "#fl-preview-state",
+    "#fl-apply",
+    "#fl-save",
+    "#fl-validate",
+    "#fl-reload",
+    "#fl-add-region",
+    "#fl-duplicate-region",
+    "#fl-delete-region",
+    "#fl-region-earlier",
+    "#fl-region-later",
+    "#fl-toggle-region",
+  ];
+  const elements = new Map(ids.map((id) => [id, new FakeElement()]));
+  for (const [id, field] of [
+    ["#fl-region-name", "name"],
+    ["#fl-region-enabled", "enabled"],
+    ["#fl-x", "x"],
+    ["#fl-y", "y"],
+    ["#fl-width", "width"],
+    ["#fl-height", "height"],
+  ]) {
+    elements.get(id).dataset.regionField = field;
+  }
+  elements.get("#fl-region-enabled").type = "checkbox";
+  elements.get("#fl-use-region-background").type = "checkbox";
+  const root = new FakeElement();
+  root.querySelector = (selector) => elements.get(selector) || null;
+  root.querySelectorAll = () => [];
+  const documentListeners = {};
+  const document = {
+    hidden: false,
+    querySelector(selector) {
+      return selector === "#free-layout-root" ? root : null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+    createElement(tagName) {
+      return new FakeElement(tagName);
+    },
+    addEventListener(name, callback) {
+      documentListeners[name] = callback;
+    },
+  };
+  const windowListeners = {};
+  const window = {
+    addEventListener(name, callback) {
+      windowListeners[name] = callback;
+    },
+    confirm() {
+      return true;
+    },
+  };
+  const documentValue = {
+    schema_version: 2,
+    active_profile: "default",
+    profiles: profiles || {
+      default: freeProfile([freeRegion()]),
+    },
+  };
+  let activeRevision = 1;
+  let savedRevision = 1;
+  let pending = migrationPending;
+  const calls = [];
+  const frame = Buffer.alloc(90 * 10 * 3).toString("base64");
+  const fetch = async (url, options = {}) => {
+    calls.push({url, options});
+    if (url.endsWith("/metadata")) return response(widgetMetadata);
+    if (url.endsWith("/validate")) {
+      return response({
+        valid: true,
+        update_policy: "static",
+        animated_content: false,
+        framebuffer_base64: frame,
+      });
+    }
+    if (url.endsWith("/config") && options.method === "PUT") {
+      if (saveStatus !== 200) {
+        return response({
+          code: "save_failed",
+          message: "The configuration could not be saved.",
+          field_errors: null,
+        }, {status: saveStatus});
+      }
+      savedRevision += 1;
+      pending = false;
+      return response({
+        configuration: documentValue,
+        active_revision: activeRevision,
+        saved_revision: savedRevision,
+        dirty: false,
+        migration_pending: false,
+        warning: null,
+      });
+    }
+    if (url.endsWith("/config")) {
+      return response({
+        configuration: documentValue,
+        built_in_default: documentValue,
+        active_revision: activeRevision,
+        saved_revision: savedRevision,
+        dirty: false,
+        migration_pending: pending,
+        legacy_editor_supported: true,
+      });
+    }
+    throw new Error(`Unexpected editor request: ${url}`);
+  };
+  let timerId = 0;
+  const editor = freeLayout.createEditor({
+    document,
+    window,
+    fetch,
+    setTimeout() {
+      timerId += 1;
+      return timerId;
+    },
+    clearTimeout() {},
+    decodeBase64(value) {
+      return Buffer.from(value, "base64").toString("binary");
+    },
+  });
+  return {
+    editor,
+    elements,
+    windowListeners,
+    documentListeners,
+    calls,
+  };
+}
+
 class FakeElement {
   constructor(tagName = "div") {
     this.tagName = tagName.toUpperCase();
@@ -103,6 +262,7 @@ class FakeElement {
     this.children = [];
     this.listeners = {};
     this.attributes = new Map();
+    this.dataset = {};
     this.focused = false;
     this.replaceCalls = 0;
     this.styleValues = {};
@@ -128,7 +288,14 @@ class FakeElement {
   }
 
   dispatch(name, event = {}) {
-    for (const callback of this.listeners[name] || []) callback(event);
+    const dispatched = {
+      target: this,
+      currentTarget: this,
+      preventDefault() {},
+      stopPropagation() {},
+      ...event,
+    };
+    for (const callback of this.listeners[name] || []) callback(dispatched);
   }
 
   append(...children) {
@@ -146,6 +313,23 @@ class FakeElement {
 
   removeAttribute(name) {
     this.attributes.delete(name);
+  }
+
+  toggleAttribute(name, force) {
+    if (force) this.setAttribute(name, "");
+    else this.removeAttribute(name);
+  }
+
+  querySelectorAll() {
+    return [];
+  }
+
+  getBoundingClientRect() {
+    return {width: 900, height: 100};
+  }
+
+  click() {
+    this.dispatch("click");
   }
 
   getAttribute(name) {
@@ -1814,6 +1998,12 @@ test("editor state distinguishes saved, draft, invalid, conflict, and reconnect"
     freeLayout.deriveEditorState({...baseState, appliedDirty: true}).label,
     "Applied but unsaved",
   );
+  assert.equal(
+    freeLayout.deriveEditorState({
+      ...baseState, migrationPending: true,
+    }).label,
+    "Migration pending · save required",
+  );
 });
 
 test("Delete shortcuts are ignored while editing form content", () => {
@@ -1827,4 +2017,179 @@ test("Delete shortcuts are ignored while editing form content", () => {
     true,
   );
   assert.equal(freeLayout.isTextEntryTarget({tagName: "BUTTON"}), false);
+});
+
+test("migration-pending canonical state saves without Apply", async () => {
+  const fixture = freeEditorFixture({migrationPending: true});
+  await fixture.editor.initialize();
+
+  assert.equal(fixture.editor.state.draftDirty, false);
+  assert.equal(fixture.editor.state.appliedDirty, false);
+  assert.equal(fixture.editor.state.migrationPending, true);
+  assert.equal(fixture.elements.get("#fl-save").disabled, false);
+  assert.equal(
+    fixture.elements.get("#fl-editor-state").textContent,
+    "Migration pending · save required",
+  );
+
+  assert.equal(await fixture.editor.saveApplied(), true);
+  assert.equal(fixture.editor.state.migrationPending, false);
+  assert.equal(fixture.editor.state.activeRevision, 1);
+  assert.equal(fixture.editor.state.savedRevision, 2);
+  assert.equal(fixture.elements.get("#fl-save").disabled, true);
+  assert.equal(
+    fixture.elements.get("#fl-editor-state").textContent,
+    "Saved",
+  );
+  const writes = fixture.calls.filter(
+    (call) => call.options.method === "PUT"
+  );
+  assert.equal(writes.length, 1);
+  assert.equal(JSON.parse(writes[0].options.body).apply, false);
+  assert.equal(
+    fixture.calls.some((call) => call.url.endsWith("/apply")),
+    false,
+  );
+});
+
+test("failed migration save preserves pending and applied state", async () => {
+  const fixture = freeEditorFixture({
+    migrationPending: true,
+    saveStatus: 500,
+  });
+  await fixture.editor.initialize();
+  const applied = JSON.stringify(fixture.editor.state.applied);
+
+  assert.equal(await fixture.editor.saveApplied(), false);
+  assert.equal(fixture.editor.state.migrationPending, true);
+  assert.equal(fixture.editor.state.activeRevision, 1);
+  assert.equal(fixture.editor.state.savedRevision, 1);
+  assert.equal(JSON.stringify(fixture.editor.state.applied), applied);
+  assert.equal(fixture.elements.get("#fl-save").disabled, false);
+});
+
+test("already-v2 saved state does not enable migration save", async () => {
+  const fixture = freeEditorFixture({migrationPending: false});
+  await fixture.editor.initialize();
+
+  assert.equal(fixture.editor.state.migrationPending, false);
+  assert.equal(fixture.elements.get("#fl-save").disabled, true);
+  assert.equal(
+    fixture.elements.get("#fl-editor-state").textContent,
+    "Saved",
+  );
+});
+
+test("region selection survives click release, inspector, drag, resize, and preview", async () => {
+  const fixture = freeEditorFixture();
+  await fixture.editor.initialize();
+  const layer = fixture.elements.get("#fl-region-layer");
+
+  let overlay = layer.children[0];
+  overlay.dispatch("pointerdown", {
+    button: 0,
+    pointerId: 7,
+    clientX: 50,
+    clientY: 20,
+  });
+  fixture.windowListeners.pointerup({pointerId: 7});
+  layer.dispatch("click", {target: layer});
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+  assert.equal(fixture.elements.get("#fl-selected-region").hidden, false);
+
+  const name = fixture.elements.get("#fl-region-name");
+  name.value = "Selected clock";
+  fixture.elements.get("#fl-region-inspector").dispatch("input", {
+    target: name,
+  });
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+
+  overlay = layer.children[0];
+  overlay.dispatch("pointerdown", {
+    button: 0,
+    pointerId: 8,
+    clientX: 50,
+    clientY: 20,
+  });
+  fixture.windowListeners.pointermove({
+    pointerId: 8,
+    clientX: 150,
+    clientY: 30,
+  });
+  fixture.windowListeners.pointerup({pointerId: 8});
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+
+  overlay = layer.children[0];
+  const resizeHandle = overlay.children[1];
+  overlay.dispatch("pointerdown", {
+    target: resizeHandle,
+    button: 0,
+    pointerId: 9,
+    clientX: 150,
+    clientY: 30,
+  });
+  fixture.windowListeners.pointermove({
+    pointerId: 9,
+    clientX: 140,
+    clientY: 20,
+  });
+  fixture.windowListeners.pointerup({pointerId: 9});
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+
+  await fixture.editor.validateDraft();
+  fixture.editor.render();
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+  assert.equal(fixture.elements.get("#fl-selected-region").hidden, false);
+});
+
+test("selection clears only for unused canvas, deletion, or missing profile region", async () => {
+  const profiles = {
+    default: freeProfile([freeRegion()]),
+    matching: freeProfile([freeRegion({name: "Matching"})]),
+    different: freeProfile([freeRegion({
+      id: "region-2", name: "Different",
+    })]),
+  };
+  const fixture = freeEditorFixture({profiles});
+  await fixture.editor.initialize();
+  const layer = fixture.elements.get("#fl-region-layer");
+
+  layer.children[0].dispatch("pointerdown", {
+    button: 0,
+    pointerId: 1,
+    clientX: 20,
+    clientY: 20,
+  });
+  fixture.windowListeners.pointerup({pointerId: 1});
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+
+  const profile = fixture.elements.get("#fl-profile");
+  profile.value = "matching";
+  profile.dispatch("change");
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+
+  profile.value = "different";
+  profile.dispatch("change");
+  assert.equal(fixture.editor.state.selectedRegionId, null);
+
+  layer.children[0].dispatch("pointerdown", {
+    button: 0,
+    pointerId: 2,
+    clientX: 20,
+    clientY: 20,
+  });
+  fixture.windowListeners.pointerup({pointerId: 2});
+  assert.equal(fixture.editor.state.selectedRegionId, "region-2");
+  layer.dispatch("pointerdown", {target: layer});
+  assert.equal(fixture.editor.state.selectedRegionId, null);
+
+  layer.children[0].dispatch("pointerdown", {
+    button: 0,
+    pointerId: 3,
+    clientX: 20,
+    clientY: 20,
+  });
+  fixture.windowListeners.pointerup({pointerId: 3});
+  fixture.elements.get("#fl-delete-region").dispatch("click");
+  assert.equal(fixture.editor.state.selectedRegionId, null);
 });

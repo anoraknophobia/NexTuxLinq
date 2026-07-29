@@ -82,6 +82,7 @@ class ServiceConfigurationSnapshot:
     active_revision: int
     saved_revision: int | None
     dirty: bool
+    migration_pending: bool
     legacy_configuration: ConfigurationDocument | None
     legacy_built_in_default: ConfigurationDocument
     legacy_editor_supported: bool
@@ -118,6 +119,7 @@ class CanonicalSaveResult:
     active_revision: int
     saved_revision: int | None
     dirty: bool
+    migration_pending: bool
     warning: str | None = None
 
 
@@ -195,6 +197,7 @@ class NexTuxLinqService:
         self._saved_configuration: ConfigurationDocumentV2 | None = None
         self._saved_revision: int | None = None
         self._saved_revision_counter = 0
+        self._migration_pending = False
         self._last_render_result: RenderResult | None = None
         self._last_render_revision: int | None = None
         self._mutation_lock = asyncio.Lock()
@@ -253,6 +256,7 @@ class NexTuxLinqService:
                 )
                 self._saved_revision = 1 if loaded.persisted else None
                 self._saved_revision_counter = self._saved_revision or 0
+                self._migration_pending = loaded.migration_pending
                 self.state.update(
                     active_configuration_revision=1,
                     configuration_warning=loaded.warning,
@@ -480,6 +484,7 @@ class NexTuxLinqService:
                 active_revision=self.snapshot().active_configuration_revision,
                 saved_revision=self._saved_revision,
                 dirty=self._saved_configuration != configuration,
+                migration_pending=self._migration_pending,
                 legacy_configuration=legacy,
                 legacy_built_in_default=default_configuration(),
                 legacy_editor_supported=legacy is not None,
@@ -691,6 +696,7 @@ class NexTuxLinqService:
                 self._saved_configuration = configuration
                 self._saved_revision_counter += 1
                 self._saved_revision = self._saved_revision_counter
+                self._migration_pending = False
                 self.state.update(configuration_warning=warning)
                 if apply:
                     self._require_running()
@@ -722,6 +728,7 @@ class NexTuxLinqService:
             active_revision=new_revision,
             saved_revision=saved_revision,
             dirty=dirty,
+            migration_pending=False,
             warning=warning,
         )
 

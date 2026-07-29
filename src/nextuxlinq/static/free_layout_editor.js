@@ -390,6 +390,21 @@
       || Boolean(target?.isContentEditable);
   }
 
+  function selectionForProfile(selectedRegionId, profile) {
+    if (!selectedRegionId || !profile) return null;
+    return profile.regions.some(
+      (region) => region.id === selectedRegionId,
+    ) ? selectedRegionId : null;
+  }
+
+  function selectionForCanvasPointer(
+    selectedRegionId,
+    eventTarget,
+    canvasLayer,
+  ) {
+    return eventTarget === canvasLayer ? null : selectedRegionId;
+  }
+
   function setRegionWidget(region, widgetType, defaults) {
     if (!WIDGET_TYPES.includes(widgetType)) return clone(region);
     const result = clone(region);
@@ -490,6 +505,9 @@
       return {label: "Invalid draft", className: "invalid"};
     }
     if (state.draftDirty) return {label: "Local draft", className: "draft"};
+    if (state.migrationPending) {
+      return {label: "Migration pending · save required", className: "unsaved"};
+    }
     if (state.appliedDirty) return {label: "Applied but unsaved", className: "unsaved"};
     return {label: "Saved", className: "saved"};
   }
@@ -556,6 +574,7 @@
       activeRevision: null,
       savedRevision: null,
       appliedDirty: false,
+      migrationPending: false,
       draftDirty: false,
       selectedRegionId: null,
       localValidation: null,
@@ -869,7 +888,8 @@
       elements.apply.disabled = elements.apply.disabled
         || state.conflict || state.disconnected;
       elements.save.disabled = busy || state.conflict || state.disconnected
-        || state.draftDirty || !state.appliedDirty;
+        || state.draftDirty
+        || (!state.appliedDirty && !state.migrationPending);
       elements.validate.disabled = busy || state.inputErrors.size > 0
         || !state.localValidation.valid;
       elements.reload.disabled = busy || !state.draftDirty;
@@ -992,20 +1012,26 @@
             "warning",
           );
         } else if (changed) {
+          const selectedRegionId = state.selectedRegionId;
           state.applied = clone(result.configuration);
           state.draft = clone(result.configuration);
           state.activeRevision = result.active_revision;
           state.savedRevision = result.saved_revision;
           state.appliedDirty = Boolean(result.dirty);
+          state.migrationPending = Boolean(result.migration_pending);
           state.pendingRemote = null;
           state.conflict = false;
-          state.selectedRegionId = null;
+          state.selectedRegionId = selectionForProfile(
+            selectedRegionId,
+            activeProfile(),
+          );
           updateDerivedState();
           state.serverValidation = "idle";
           render();
           await validateDraft();
         } else {
           state.appliedDirty = Boolean(result.dirty);
+          state.migrationPending = Boolean(result.migration_pending);
           render();
         }
       } catch (error) {
@@ -1144,7 +1170,8 @@
 
     async function saveApplied() {
       if (state.submitting || state.conflict || state.disconnected
-          || state.draftDirty || !state.appliedDirty) return false;
+          || state.draftDirty
+          || (!state.appliedDirty && !state.migrationPending)) return false;
       state.submitting = true;
       render();
       try {
@@ -1160,6 +1187,7 @@
         });
         state.savedRevision = result.saved_revision;
         state.appliedDirty = Boolean(result.dirty);
+        state.migrationPending = Boolean(result.migration_pending);
         state.conflict = false;
         state.pendingRemote = null;
         setMessage(result.warning || "Applied configuration saved.",
@@ -1186,12 +1214,17 @@
 
     async function reload() {
       const result = await request("/config");
+      const selectedRegionId = state.selectedRegionId;
       state.applied = clone(result.configuration);
       state.draft = clone(result.configuration);
       state.activeRevision = result.active_revision;
       state.savedRevision = result.saved_revision;
       state.appliedDirty = Boolean(result.dirty);
-      state.selectedRegionId = null;
+      state.migrationPending = Boolean(result.migration_pending);
+      state.selectedRegionId = selectionForProfile(
+        selectedRegionId,
+        activeProfile(),
+      );
       state.conflict = false;
       state.serverErrors = [];
       updateDerivedState();
@@ -1318,9 +1351,14 @@
     }
 
     function bind() {
-      elements.layer.addEventListener("click", (event) => {
-        if (event.target === elements.layer) {
-          state.selectedRegionId = null;
+      elements.layer.addEventListener("pointerdown", (event) => {
+        const selectedRegionId = selectionForCanvasPointer(
+          state.selectedRegionId,
+          event.target,
+          elements.layer,
+        );
+        if (selectedRegionId !== state.selectedRegionId) {
+          state.selectedRegionId = selectedRegionId;
           render();
         }
       });
@@ -1335,8 +1373,11 @@
       elements.profile.addEventListener("change", () => {
         mutate((candidate) => {
           candidate.active_profile = elements.profile.value;
+          state.selectedRegionId = selectionForProfile(
+            state.selectedRegionId,
+            candidate.profiles[candidate.active_profile],
+          );
         });
-        state.selectedRegionId = null;
       });
       elements.canvasBackground.addEventListener("input", () => {
         mutate((candidate) => {
@@ -1443,8 +1484,13 @@
             if (typeof windowObject.confirm === "function"
                 && !windowObject.confirm(`Delete profile ${source}?`)) return;
             const changed = profileAction(state.draft, action, source, "");
-            if (changed) mutate((candidate) => Object.assign(candidate, changed));
-            state.selectedRegionId = null;
+            if (changed) {
+              state.selectedRegionId = selectionForProfile(
+                state.selectedRegionId,
+                changed.profiles[changed.active_profile],
+              );
+              mutate((candidate) => Object.assign(candidate, changed));
+            }
             return;
           }
           const promptLabel = {
@@ -1462,22 +1508,32 @@
               "error");
             return;
           }
+          state.selectedRegionId = selectionForProfile(
+            state.selectedRegionId,
+            changed.profiles[changed.active_profile],
+          );
           mutate((candidate) => Object.assign(candidate, changed));
-          state.selectedRegionId = null;
         });
       }
       elements.validate.addEventListener("click", () => void validateDraft());
       elements.apply.addEventListener("click", () => void applyDraft());
       elements.save.addEventListener("click", () => void saveApplied());
       elements.reload.addEventListener("click", () => {
+        const selectedRegionId = state.selectedRegionId;
         if (state.pendingRemote) {
           state.applied = clone(state.pendingRemote.configuration);
           state.activeRevision = state.pendingRemote.active_revision;
           state.savedRevision = state.pendingRemote.saved_revision;
           state.appliedDirty = Boolean(state.pendingRemote.dirty);
+          state.migrationPending = Boolean(
+            state.pendingRemote.migration_pending,
+          );
         }
         state.draft = clone(state.applied);
-        state.selectedRegionId = null;
+        state.selectedRegionId = selectionForProfile(
+          selectedRegionId,
+          activeProfile(),
+        );
         state.serverErrors = [];
         state.inputErrors.clear();
         state.pendingRemote = null;
@@ -1520,6 +1576,7 @@
         state.activeRevision = configuration.active_revision;
         state.savedRevision = configuration.saved_revision;
         state.appliedDirty = Boolean(configuration.dirty);
+        state.migrationPending = Boolean(configuration.migration_pending);
         updateDerivedState();
         bind();
         render();
@@ -1574,6 +1631,8 @@
     toggleRegion,
     shouldConfirmRegionDelete,
     isTextEntryTarget,
+    selectionForProfile,
+    selectionForCanvasPointer,
     setRegionWidget,
     geometryFromViewer,
     moveGeometryInViewer,

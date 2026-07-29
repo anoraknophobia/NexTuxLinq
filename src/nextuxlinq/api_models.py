@@ -198,6 +198,7 @@ class CanonicalConfigResponse(StrictModel):
     active_revision: int
     saved_revision: int | None
     dirty: bool
+    migration_pending: bool
     legacy_editor_supported: bool
 
 
@@ -253,6 +254,7 @@ class CanonicalSaveResponse(StrictModel):
     active_revision: int
     saved_revision: int | None
     dirty: bool
+    migration_pending: bool
     warning: str | None
 
 

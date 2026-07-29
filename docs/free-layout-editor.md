@@ -40,6 +40,13 @@ local draft. Revision conflicts preserve the local draft and require an
 explicit reload rather than fabricating a merge. Reconnect polling accepts a
 newer server state only when no local draft would be lost.
 
+When a schema-v1 file was migrated in memory, the editor shows **Migration
+pending** and enables **Save applied configuration** even when there is no
+ordinary profile change. That explicit save needs no Apply step: it validates
+the already-applied canonical document, preserves the one-time schema-v1
+backup, and atomically writes schema v2. A failed save leaves the migration
+pending and the original file and applied state unchanged.
+
 The editor uses no frontend framework or external JavaScript dependency. It
 does not change Creator ordering, device framebuffer orientation, DeviceWorker
 ownership, or Matrix900 protocol behavior. NexTuxLinq continues to support only
