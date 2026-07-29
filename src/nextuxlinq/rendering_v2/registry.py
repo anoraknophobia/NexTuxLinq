@@ -1,4 +1,4 @@
-"""Widget rendering contracts and inactive canonical registry construction."""
+"""Widget rendering contracts and canonical registry construction."""
 
 from __future__ import annotations
 
@@ -317,7 +317,7 @@ def render_blank(
 
 
 def create_widget_registry() -> WidgetRegistry:
-    """Create a fresh deterministic registry of all inactive widgets."""
+    """Create a fresh deterministic registry of all canonical widgets."""
     from nextuxlinq.rendering_v2.widgets.clock import render_clock
     from nextuxlinq.rendering_v2.widgets.date import render_date
     from nextuxlinq.rendering_v2.widgets.scrolling_text import (

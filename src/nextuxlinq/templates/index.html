@@ -43,75 +43,24 @@
       </details>
     </section>
 
-    <section aria-labelledby="preview-heading">
-      <div class="section-heading">
-        <div>
-          <h2 id="preview-heading">Physical display preview</h2>
-          <p>Viewer perspective, matching how the installed Matrix900 is seen.</p>
+    <div id="free-layout-root">
+      <section aria-labelledby="profile-heading">
+        <div class="section-heading">
+          <div>
+            <h2 id="profile-heading">Profile</h2>
+            <p>Changes remain a local draft until Apply.</p>
+          </div>
+          <strong id="fl-editor-state" class="editor-state">Loading</strong>
         </div>
-        <span id="preview-revision">Revision —</span>
-      </div>
-      <div class="canvas-shell">
-        <canvas id="preview" width="90" height="10">
-          A 90 by 10 pixel preview of the Matrix900 display.
-        </canvas>
-      </div>
-      <ol id="region-labels" class="region-labels"
-          aria-label="Viewer-perspective display regions"></ol>
-    </section>
-
-    <section aria-labelledby="settings-heading">
-      <h2 id="settings-heading">Profile settings</h2>
-      <div id="configuration-state" class="configuration-state"
-           role="status" aria-live="polite">
-        <span class="profile-state-label">Profile state</span>
-        <strong id="configuration-state-summary">Loading settings…</strong>
-        <span id="configuration-state-detail" class="visually-hidden"></span>
-      </div>
-      <form id="profile-form">
-        <div class="form-grid">
-          <label class="profile-field">
-            <span class="profile-field-label">Scrolling text</span>
-            <input class="profile-control" id="scrolling-text"
-                   name="scrolling_text" maxlength="64" required
-                   aria-describedby="scrolling-text-help scrolling-text-error">
-            <span id="scrolling-text-help" class="field-help">
-              Up to 64 characters. Supported: A–Z, 0–9, spaces, and
-              . - _ : ! ? /. Lowercase letters are converted to uppercase
-              when applied.
-            </span>
-            <span id="scrolling-text-error" class="field-error"></span>
+        <div class="compact-controls">
+          <label>Profile
+            <select id="fl-profile" aria-label="Active draft profile"></select>
           </label>
-          <label class="profile-field">
-            <span class="profile-field-label">Text color</span>
-            <span class="profile-control color-control">
-              <input class="color-picker" id="text-color" name="text_color"
-                     type="color" required aria-describedby="text-color-error">
-            </span>
-            <span id="text-color-error" class="field-error"></span>
+          <label>Canvas background
+            <input id="fl-canvas-background" type="color" value="#000000">
           </label>
-          <label class="profile-field">
-            <span class="profile-field-label">Clock color</span>
-            <span class="profile-control color-control">
-              <input class="color-picker" id="clock-color" name="clock_color"
-                     type="color" required aria-describedby="clock-color-error">
-            </span>
-            <span id="clock-color-error" class="field-error"></span>
-          </label>
-          <label class="profile-field">
-            <span class="profile-field-label">
-              Scroll speed (pixels per second)
-            </span>
-            <input class="profile-control" id="scroll-speed"
-                   name="scroll_speed" type="number"
-                   min="0.5" max="20" step="any" inputmode="decimal" required
-                   aria-describedby="scroll-speed-error">
-            <span id="scroll-speed-error" class="field-error"></span>
-          </label>
-          <label class="profile-field">
-            <span class="profile-field-label">Brightness</span>
-            <select class="profile-control" id="brightness" name="brightness"
-                    aria-describedby="brightness-error">
+          <label>Brightness
+            <select id="fl-brightness">
               <option value="">Leave unchanged</option>
               <option value="10">10%</option><option value="20">20%</option>
               <option value="30">30%</option><option value="40">40%</option>
@@ -119,35 +68,298 @@
               <option value="70">70%</option><option value="80">80%</option>
               <option value="90">90%</option><option value="100">100%</option>
             </select>
-            <span id="brightness-error" class="field-error"></span>
           </label>
+          <div class="profile-actions" aria-label="Profile actions">
+            <button type="button" data-profile-action="create">New</button>
+            <button type="button" data-profile-action="duplicate">Duplicate</button>
+            <button type="button" data-profile-action="rename">Rename</button>
+            <button type="button" data-profile-action="delete">Delete</button>
+          </div>
         </div>
+      </section>
+
+      <section aria-labelledby="editor-heading">
+        <div class="section-heading">
+          <div>
+            <h2 id="editor-heading">Free-layout editor</h2>
+            <p>Viewer perspective: Rear is left and Front is right.</p>
+          </div>
+          <span>90 × 10 integer pixels</span>
+        </div>
+        <div class="region-toolbar" aria-label="Region actions">
+          <button id="fl-add-region" type="button">Add region</button>
+          <button id="fl-duplicate-region" type="button">Duplicate</button>
+          <button id="fl-delete-region" type="button">Delete</button>
+          <button id="fl-region-earlier" type="button">Earlier</button>
+          <button id="fl-region-later" type="button">Later</button>
+          <button id="fl-toggle-region" type="button">Disable</button>
+        </div>
+        <div class="editor-workspace">
+          <div class="layout-canvas-shell">
+            <div id="fl-editor-canvas" class="layout-canvas"
+                 aria-label="Viewer-perspective 90 by 10 layout canvas">
+              <div id="fl-region-layer" class="layout-region-layer"></div>
+            </div>
+            <p class="field-help">
+              Drag regions or use the inspector. Resize with a corner handle.
+              Coordinates sent to NexTuxLinq remain logical, not mirrored.
+            </p>
+          </div>
+
+          <aside id="fl-region-inspector" class="region-inspector"
+                 aria-labelledby="inspector-heading">
+            <h3 id="inspector-heading">Selected region</h3>
+            <p id="fl-no-selection">Select a region to edit it.</p>
+            <div id="fl-selected-region" hidden>
+              <div class="inspector-grid">
+                <label>Name
+                  <input id="fl-region-name" data-region-field="name"
+                         maxlength="64">
+                </label>
+                <label class="checkbox-label">
+                  <input id="fl-region-enabled" data-region-field="enabled"
+                         type="checkbox"> Enabled
+                </label>
+                <label>Widget
+                  <select id="fl-widget-type">
+                    <option value="blank">Nothing / Gap</option>
+                    <option value="clock">Clock</option>
+                    <option value="static_text">Static Text</option>
+                    <option value="scrolling_text">Scrolling Text</option>
+                    <option value="date">Date</option>
+                  </select>
+                </label>
+                <label class="checkbox-label">
+                  <input id="fl-use-region-background" type="checkbox">
+                  Region background
+                </label>
+                <label>Background color
+                  <input id="fl-region-background" type="color" value="#000000">
+                </label>
+              </div>
+
+              <fieldset>
+                <legend>Geometry</legend>
+                <div class="geometry-grid">
+                  <label>X <input id="fl-x" data-region-field="x" type="text"
+                                  inputmode="numeric" pattern="[0-9]+"></label>
+                  <label>Y <input id="fl-y" data-region-field="y" type="text"
+                                  inputmode="numeric" pattern="[0-9]+"></label>
+                  <label>Width <input id="fl-width" data-region-field="width"
+                                      type="text" inputmode="numeric"
+                                      pattern="[0-9]+"></label>
+                  <label>Height <input id="fl-height" data-region-field="height"
+                                       type="text" inputmode="numeric"
+                                       pattern="[0-9]+"></label>
+                </div>
+                <div class="helper-actions" aria-label="Geometry helpers">
+                  <button type="button" data-geometry-helper="full_width">Full width</button>
+                  <button type="button" data-geometry-helper="half_width">Half width</button>
+                  <button type="button" data-geometry-helper="full_height">Full height</button>
+                  <button type="button" data-geometry-helper="top_half">Top half</button>
+                  <button type="button" data-geometry-helper="bottom_half">Bottom half</button>
+                  <button type="button" data-geometry-helper="viewer_left">Viewer left half</button>
+                  <button type="button" data-geometry-helper="viewer_right">Viewer right half</button>
+                </div>
+              </fieldset>
+
+              <div id="fl-widget-settings">
+                <fieldset data-widget-panel="blank">
+                  <legend>Nothing / Gap</legend>
+                  <p>This region draws only its optional background.</p>
+                </fieldset>
+
+                <fieldset data-widget-panel="clock" hidden>
+                  <legend>Clock</legend>
+                  <div class="inspector-grid">
+                    <label>Time format
+                      <select data-setting="format">
+                        <option value="24h">24-hour</option>
+                        <option value="12h">12-hour</option>
+                      </select>
+                    </label>
+                    <label class="checkbox-label"><input type="checkbox"
+                      data-setting="show_seconds"> Show seconds</label>
+                    <label class="checkbox-label"><input type="checkbox"
+                      data-setting="blink_separator"> Blink separator</label>
+                    <label>Time zone <input data-setting="time_zone"
+                      maxlength="128" placeholder="local"></label>
+                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label>Font <select data-setting="font">
+                      <option value="auto">Auto</option><option value="3x5">3×5</option>
+                      <option value="3x7">3×7</option><option value="5x7">5×7</option>
+                    </select></label>
+                    <label>Horizontal <select data-setting="horizontal_alignment">
+                      <option value="start">Start</option><option value="center">Center</option>
+                      <option value="end">End</option>
+                    </select></label>
+                    <label>Vertical <select data-setting="vertical_alignment">
+                      <option value="top">Top</option><option value="center">Center</option>
+                      <option value="bottom">Bottom</option>
+                    </select></label>
+                  </div>
+                  <p class="field-help">12-hour mode has no leading zero or AM/PM. Content is never stretched.</p>
+                </fieldset>
+
+                <fieldset data-widget-panel="static_text" hidden>
+                  <legend>Static Text</legend>
+                  <div class="inspector-grid">
+                    <label class="wide-field">Text
+                      <textarea data-setting="content" maxlength="64"></textarea>
+                    </label>
+                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label class="checkbox-label"><input type="checkbox"
+                      data-setting="uppercase"> ASCII uppercase</label>
+                    <label>Font <select data-setting="font">
+                      <option value="auto">Auto</option><option value="3x5">3×5</option>
+                      <option value="3x7">3×7</option><option value="5x7">5×7</option>
+                    </select></label>
+                    <label>Horizontal <select data-setting="horizontal_alignment">
+                      <option value="start">Start</option><option value="center">Center</option>
+                      <option value="end">End</option>
+                    </select></label>
+                    <label>Vertical <select data-setting="vertical_alignment">
+                      <option value="top">Top</option><option value="center">Center</option>
+                      <option value="bottom">Bottom</option>
+                    </select></label>
+                    <label>Overflow <select data-setting="overflow">
+                      <option value="error">Error</option><option value="truncate">Truncate</option>
+                      <option value="clip">Clip</option>
+                    </select></label>
+                  </div>
+                  <p class="field-help">Supported characters depend on the selected bitmap font. Unsupported text is rejected, never transliterated.</p>
+                </fieldset>
+
+                <fieldset data-widget-panel="scrolling_text" hidden>
+                  <legend>Scrolling Text</legend>
+                  <div class="inspector-grid">
+                    <label class="wide-field">Text
+                      <textarea data-setting="content" maxlength="64"></textarea>
+                    </label>
+                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label class="checkbox-label"><input type="checkbox"
+                      data-setting="uppercase"> ASCII uppercase</label>
+                    <label>Font <select data-setting="font">
+                      <option value="auto">Auto</option><option value="3x5">3×5</option>
+                      <option value="3x7">3×7</option><option value="5x7">5×7</option>
+                    </select></label>
+                    <label>Direction <select data-setting="direction">
+                      <option value="left">Left</option><option value="right">Right</option>
+                    </select></label>
+                    <label>Speed <input data-setting="speed" data-kind="number"
+                      type="number" min="0.5" max="20" step="0.1"></label>
+                    <label>Initial alignment <select data-setting="initial_alignment">
+                      <option value="start">Start</option><option value="center">Center</option>
+                      <option value="end">End</option>
+                    </select></label>
+                    <label>Vertical <select data-setting="vertical_alignment">
+                      <option value="top">Top</option><option value="center">Center</option>
+                      <option value="bottom">Bottom</option>
+                    </select></label>
+                    <label>Trailing gap <input data-setting="trailing_gap"
+                      data-kind="integer" type="number" min="0" max="90" step="1"></label>
+                  </div>
+                  <p class="field-help">Depending on alignment and animation phase, text may begin outside the region. Direction never mirrors glyphs.</p>
+                </fieldset>
+
+                <fieldset data-widget-panel="date" hidden>
+                  <legend>Date</legend>
+                  <div class="inspector-grid">
+                    <label>Date format <select data-setting="format">
+                      <option value="day_month_full_year">DD.MM.YYYY</option>
+                      <option value="day_month_short_year">DD.MM.YY</option>
+                      <option value="day_month">DD.MM.</option>
+                      <option value="weekday_day_month">MO. DD.MM.</option>
+                    </select></label>
+                    <label>Time zone <input data-setting="time_zone"
+                      maxlength="128" placeholder="local"></label>
+                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label>Font <select data-setting="font">
+                      <option value="auto">Auto</option><option value="3x5">3×5</option>
+                      <option value="3x7">3×7</option><option value="5x7">5×7</option>
+                    </select></label>
+                    <label>Horizontal <select data-setting="horizontal_alignment">
+                      <option value="start">Start</option><option value="center">Center</option>
+                      <option value="end">End</option>
+                    </select></label>
+                    <label>Vertical <select data-setting="vertical_alignment">
+                      <option value="top">Top</option><option value="center">Center</option>
+                      <option value="bottom">Bottom</option>
+                    </select></label>
+                    <label>Overflow <select data-setting="overflow">
+                      <option value="error">Error</option><option value="truncate">Truncate</option>
+                      <option value="clip">Clip</option>
+                    </select></label>
+                  </div>
+                  <p class="field-help">German weekdays: MO. DI. MI. DO. FR. SA. SO.</p>
+                </fieldset>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section aria-labelledby="preview-heading">
+        <div class="section-heading">
+          <div>
+            <h2 id="preview-heading">Physical display preview</h2>
+            <p>Viewer perspective, matching how the installed Matrix900 is seen.</p>
+          </div>
+          <span id="fl-preview-state">Waiting for validation</span>
+        </div>
+        <div class="canvas-shell">
+          <canvas id="draft-preview" width="90" height="10">
+            A 90 by 10 pixel viewer-perspective preview.
+          </canvas>
+        </div>
+      </section>
+
+      <section aria-labelledby="validation-heading">
+        <div class="section-heading">
+          <div>
+            <h2 id="validation-heading">Validate, apply, and save</h2>
+            <p>Validation and preview never persist or upload a frame.</p>
+          </div>
+        </div>
+        <ul id="fl-validation-errors" class="validation-errors"
+            aria-live="polite"></ul>
         <div class="actions">
-          <button type="submit" data-action="apply">Apply</button>
-          <button type="button" data-action="save" class="primary">Save configuration</button>
-          <button type="button" data-action="defaults">Restore built-in defaults</button>
-          <button type="button" data-action="reload-applied">Reload applied settings</button>
+          <button id="fl-validate" type="button">Validate draft</button>
+          <button id="fl-apply" type="button">Apply</button>
+          <button id="fl-save" type="button" class="primary">Save applied configuration</button>
+          <button id="fl-reload" type="button">Discard draft</button>
         </div>
+        <p id="fl-editor-message" class="message" role="status"
+           aria-live="polite"></p>
+      </section>
+    </div>
+
+    <div id="legacy-compatibility-host" hidden>
+      <canvas id="preview" width="90" height="10"></canvas>
+      <ol id="region-labels"></ol>
+      <span id="preview-revision"></span>
+      <div id="configuration-state"><strong id="configuration-state-summary"></strong>
+        <span id="configuration-state-detail"></span></div>
+      <form id="profile-form">
+        <input id="scrolling-text"><span id="scrolling-text-error"></span>
+        <input id="text-color" type="color"><span id="text-color-error"></span>
+        <input id="clock-color" type="color"><span id="clock-color-error"></span>
+        <input id="scroll-speed"><span id="scroll-speed-error"></span>
+        <select id="brightness"><option value=""></option></select>
+        <span id="brightness-error"></span>
+        <button data-action="apply"></button>
+        <button type="button" data-action="save"></button>
+        <button type="button" data-action="defaults"></button>
+        <button type="button" data-action="reload-applied"></button>
       </form>
-      <div id="reconciliation-panel" class="reconciliation-panel" hidden
-           role="status" aria-live="polite">
-        <p id="reconciliation-message"></p>
-        <div class="actions">
-          <button type="button" data-action="keep-local-draft">
-            Keep local draft
-          </button>
-          <button type="button" data-action="reload-reconciliation">
-            Reload applied settings
-          </button>
-        </div>
-      </div>
-      <p id="connection-message" class="message error connection-message"
-         role="status" aria-live="polite"></p>
-      <p id="message" class="message" role="status" aria-live="polite"></p>
-      <p id="background-message" class="message warning"
-         role="status" aria-live="polite"></p>
-    </section>
+      <div id="reconciliation-panel"><p id="reconciliation-message"></p>
+        <button data-action="keep-local-draft"></button>
+        <button data-action="reload-reconciliation"></button></div>
+      <p id="connection-message"></p><p id="message"></p>
+      <p id="background-message"></p>
+    </div>
   </main>
   <script src="/static/app.js" defer></script>
+  <script src="/static/free_layout_editor.js" defer></script>
 </body>
 </html>

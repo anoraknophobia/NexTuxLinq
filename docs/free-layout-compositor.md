@@ -13,8 +13,8 @@ background color, and exactly one widget assignment. A widget supplies the
 content and content-specific settings. Geometry does not change when a user
 selects another widget type.
 
-The future visual editor will show one widget dropdown for each region. Initial
-choices will include:
+The active visual editor shows one widget dropdown for each region. Choices
+are:
 
 - Nothing / Gap
 - Clock
@@ -126,7 +126,8 @@ clipping, trailing-gap, intermediate, and cycle-reset phases.
 
 The service uses this compositor to validate candidates and to generate both
 preview and DeviceWorker framebuffers. The canonical API exposes validation
-and update-policy metadata. The current GUI still cannot edit arbitrary
-regions; it uses a strict compatibility adapter and becomes read-only for
-profiles it cannot represent. Physical Matrix900 validation remains pending.
-See [Phase 4 backend activation](phase4-backend.md).
+and update-policy metadata. The GUI edits arbitrary regions and obtains draft
+previews through the same validation path without persistence or upload.
+Physical Matrix900 validation remains a separate operational step. See
+[Phase 4 backend activation](phase4-backend.md) and
+[Visual free-layout editor](free-layout-editor.md).

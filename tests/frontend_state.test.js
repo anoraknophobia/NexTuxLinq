@@ -3,6 +3,86 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const frontend = require("../src/nextuxlinq/static/app.js");
+const freeLayout = require(
+  "../src/nextuxlinq/static/free_layout_editor.js"
+);
+
+const widgetMetadata = {
+  canvas_width: 90,
+  canvas_height: 10,
+  max_profiles: 32,
+  max_regions_per_profile: 32,
+  max_regions_per_document: 128,
+  widget_definitions: [
+    {
+      type: "blank", label: "Nothing / Gap", default_settings: {},
+      minimum_width: 1, minimum_height: 1,
+    },
+    {
+      type: "clock", label: "Clock",
+      default_settings: {
+        format: "24h", show_seconds: false, blink_separator: false,
+        time_zone: "local", color: "#FFFFFF",
+        horizontal_alignment: "center", vertical_alignment: "center",
+        font: "auto",
+      },
+      minimum_width: 13, minimum_height: 5,
+    },
+    {
+      type: "static_text", label: "Static Text",
+      default_settings: {
+        content: "TEXT", color: "#FFFFFF",
+        horizontal_alignment: "center", vertical_alignment: "center",
+        font: "auto", uppercase: true, overflow: "error",
+      },
+      minimum_width: 1, minimum_height: 5,
+    },
+    {
+      type: "scrolling_text", label: "Scrolling Text",
+      default_settings: {
+        content: "TEXT", direction: "left", speed: 5, color: "#FFFFFF",
+        initial_alignment: "end", vertical_alignment: "center",
+        font: "auto", uppercase: true, trailing_gap: 6,
+      },
+      minimum_width: 1, minimum_height: 5,
+    },
+    {
+      type: "date", label: "Date",
+      default_settings: {
+        format: "day_month_full_year", time_zone: "local",
+        color: "#FFFFFF", horizontal_alignment: "center",
+        vertical_alignment: "center", font: "auto", overflow: "error",
+      },
+      minimum_width: 19, minimum_height: 5,
+    },
+  ],
+};
+
+function freeProfile(regions = []) {
+  return {
+    brightness: null,
+    canvas: {width: 90, height: 10, background_color: "#000000"},
+    regions,
+  };
+}
+
+function freeRegion(changes = {}) {
+  return {
+    id: "region-1", name: "Region 1",
+    x: 0, y: 0, width: 10, height: 5,
+    enabled: true, background_color: null,
+    widget: {type: "blank", settings: {}},
+    ...changes,
+  };
+}
+
+function freeConfiguration(profileValue = freeProfile()) {
+  return {
+    schema_version: 2,
+    active_profile: "default",
+    profiles: {default: profileValue},
+  };
+}
 
 class FakeElement {
   constructor(tagName = "div") {
@@ -1447,4 +1527,304 @@ test("network failure uses the friendly warning and reconnects safely", async ()
     false,
   );
   assert.equal(fetch.remaining(), 0);
+});
+
+test("free-layout coordinates round-trip in viewer perspective", () => {
+  assert.equal(freeLayout.logicalToViewerX(0, 24), 66);
+  assert.equal(freeLayout.logicalToViewerX(59, 31), 0);
+  assert.equal(freeLayout.viewerToLogicalX(66, 24), 0);
+  for (const geometry of [
+    {x: 0, y: 0, width: 90, height: 10},
+    {x: 89, y: 9, width: 1, height: 1},
+    {x: 17, y: 3, width: 23, height: 4},
+  ]) {
+    const viewerX = freeLayout.logicalToViewerX(
+      geometry.x, geometry.width
+    );
+    assert.equal(
+      freeLayout.viewerToLogicalX(viewerX, geometry.width),
+      geometry.x,
+    );
+    assert.deepEqual(
+      freeLayout.geometryFromViewer(
+        viewerX, geometry.y, geometry.width, geometry.height
+      ),
+      geometry,
+    );
+  }
+});
+
+test("free-layout drag and resize snap and clamp in viewer coordinates", () => {
+  const original = {x: 0, y: 1, width: 24, height: 7};
+  assert.deepEqual(
+    freeLayout.moveGeometryInViewer(original, -10, 9),
+    {x: 10, y: 3, width: 24, height: 7},
+  );
+  assert.deepEqual(
+    freeLayout.moveGeometryInViewer(original, 100, -100),
+    {x: 0, y: 0, width: 24, height: 7},
+  );
+  assert.deepEqual(
+    freeLayout.resizeGeometryInViewer(original, "nw", -5, -2),
+    {x: 0, y: 0, width: 29, height: 8},
+  );
+  assert.deepEqual(
+    freeLayout.resizeGeometryInViewer(original, "se", -5, 4),
+    {x: 5, y: 1, width: 19, height: 9},
+  );
+  assert.deepEqual(
+    freeLayout.clampGeometry({x: -8.2, y: 20, width: 95, height: 0}),
+    {x: 0, y: 9, width: 90, height: 1},
+  );
+});
+
+test("free-layout region operations preserve order and stable identities", () => {
+  const defaults = freeLayout.widgetDefaultMap(widgetMetadata);
+  const first = freeLayout.addRegion(freeProfile(), defaults, widgetMetadata);
+  assert.equal(first.regionId, "region-1");
+  assert.equal(first.profile.regions.length, 1);
+  assert.deepEqual(first.profile.regions[0].widget, {
+    type: "blank", settings: {},
+  });
+
+  const second = freeLayout.addRegion(
+    first.profile, defaults, widgetMetadata
+  );
+  assert.equal(second.regionId, "region-2");
+  assert.equal(
+    freeLayout.rectanglesOverlap(
+      second.profile.regions[0], second.profile.regions[1]
+    ),
+    false,
+  );
+  const duplicate = freeLayout.duplicateRegion(
+    second.profile, "region-1"
+  );
+  assert.equal(duplicate.regionId, "region-3");
+  assert.equal(duplicate.profile.regions[2].widget.type, "blank");
+  assert.notEqual(duplicate.profile.regions[2].id, "region-1");
+
+  const earlier = freeLayout.reorderRegion(
+    duplicate.profile, "region-3", -1
+  );
+  assert.deepEqual(
+    earlier.regions.map((region) => region.id),
+    ["region-1", "region-3", "region-2"],
+  );
+  const disabled = freeLayout.toggleRegion(earlier, "region-3");
+  assert.equal(disabled.regions[1].enabled, false);
+  const removed = freeLayout.removeRegion(disabled, "region-3");
+  assert.deepEqual(
+    removed.regions.map((region) => region.id),
+    ["region-1", "region-2"],
+  );
+  assert.equal(
+    freeLayout.shouldConfirmRegionDelete(freeRegion()),
+    false,
+  );
+  assert.equal(
+    freeLayout.shouldConfirmRegionDelete(freeRegion({
+      widget: {
+        type: "static_text",
+        settings: widgetMetadata.widget_definitions[2].default_settings,
+      },
+    })),
+    true,
+  );
+});
+
+test("local validation marks overlaps, bounds, dimensions, and duplicate IDs", () => {
+  const overlapping = freeConfiguration(freeProfile([
+    freeRegion(),
+    freeRegion({id: "region-2", x: 5}),
+  ]));
+  const overlap = freeLayout.validateLocalCandidate(
+    overlapping, widgetMetadata
+  );
+  assert.equal(overlap.valid, false);
+  assert.equal(overlap.invalidRegionIds.has("region-1"), true);
+  assert.equal(overlap.invalidRegionIds.has("region-2"), true);
+  assert.equal(
+    overlap.errors.some((error) => error.category === "overlap"),
+    true,
+  );
+
+  for (const change of [
+    {x: 90},
+    {width: 0},
+    {x: 0, id: "region-1"},
+  ]) {
+    const regions = change.id
+      ? [freeRegion(), freeRegion({...change, x: 20})]
+      : [freeRegion(change)];
+    assert.equal(
+      freeLayout.validateLocalCandidate(
+        freeConfiguration(freeProfile(regions)), widgetMetadata
+      ).valid,
+      false,
+    );
+  }
+});
+
+test("widget selection uses exactly five canonical defaults", () => {
+  assert.deepEqual(freeLayout.WIDGET_TYPES, [
+    "blank", "clock", "static_text", "scrolling_text", "date",
+  ]);
+  const defaults = freeLayout.widgetDefaultMap(widgetMetadata);
+  const source = freeRegion({
+    x: 11, y: 5, width: 20, height: 5,
+    background_color: "#123456",
+  });
+  for (const type of freeLayout.WIDGET_TYPES) {
+    const changed = freeLayout.setRegionWidget(source, type, defaults);
+    assert.equal(changed.widget.type, type);
+    assert.deepEqual(changed.widget.settings, defaults[type]);
+    assert.deepEqual(
+      {
+        x: changed.x, y: changed.y,
+        width: changed.width, height: changed.height,
+        background_color: changed.background_color,
+      },
+      {
+        x: 11, y: 5, width: 20, height: 5,
+        background_color: "#123456",
+      },
+    );
+  }
+  assert.deepEqual(
+    Object.keys(freeLayout.setRegionWidget(
+      source, "blank", defaults
+    ).widget.settings),
+    [],
+  );
+});
+
+test("widget settings validate exact models and German date formats", () => {
+  const defaults = freeLayout.widgetDefaultMap(widgetMetadata);
+  for (const type of freeLayout.WIDGET_TYPES) {
+    assert.equal(
+      freeLayout.validateWidgetSettings({
+        type, settings: defaults[type],
+      }, widgetMetadata),
+      null,
+    );
+  }
+  for (const format of [
+    "day_month_full_year",
+    "day_month_short_year",
+    "day_month",
+    "weekday_day_month",
+  ]) {
+    assert.equal(
+      freeLayout.validateWidgetSettings({
+        type: "date",
+        settings: {...defaults.date, format},
+      }, widgetMetadata),
+      null,
+    );
+  }
+  assert.equal(
+    freeLayout.validateWidgetSettings({
+      type: "clock",
+      settings: {...defaults.clock, unknown: true},
+    }, widgetMetadata),
+    "settings",
+  );
+  assert.equal(
+    freeLayout.validateWidgetSettings({
+      type: "scrolling_text",
+      settings: {...defaults.scrolling_text, trailing_gap: 1.5},
+    }, widgetMetadata),
+    "settings",
+  );
+  assert.equal(
+    freeLayout.validateWidgetSettings({
+      type: "static_text",
+      settings: {...defaults.static_text, content: ""},
+    }, widgetMetadata),
+    "content",
+  );
+  assert.equal(
+    freeLayout.validateWidgetSettings({
+      type: "date",
+      settings: {...defaults.date, format: "MM/DD/YYYY"},
+    }, widgetMetadata),
+    "settings",
+  );
+});
+
+test("profile actions keep canonical layouts and new profiles empty", () => {
+  const original = freeConfiguration(freeProfile([freeRegion()]));
+  const created = freeLayout.profileAction(
+    original, "create", "default", "empty"
+  );
+  assert.equal(created.active_profile, "empty");
+  assert.deepEqual(created.profiles.empty, freeLayout.createEmptyProfile());
+  const duplicated = freeLayout.profileAction(
+    original, "duplicate", "default", "copy"
+  );
+  assert.deepEqual(duplicated.profiles.copy, original.profiles.default);
+  assert.notEqual(duplicated.profiles.copy, original.profiles.default);
+  const renamed = freeLayout.profileAction(
+    duplicated, "rename", "copy", "renamed"
+  );
+  assert.equal(renamed.active_profile, "renamed");
+  assert.equal("copy" in renamed.profiles, false);
+  const deleted = freeLayout.profileAction(
+    renamed, "delete", "renamed", ""
+  );
+  assert.equal(deleted.active_profile, "default");
+  assert.equal("renamed" in deleted.profiles, false);
+  assert.equal(
+    freeLayout.profileAction(original, "delete", "default", ""),
+    null,
+  );
+});
+
+test("editor state distinguishes saved, draft, invalid, conflict, and reconnect", () => {
+  const baseState = {
+    applied: freeConfiguration(),
+    conflict: false,
+    disconnected: false,
+    localValidation: {valid: true},
+    serverValidation: "valid",
+    draftDirty: false,
+    appliedDirty: false,
+  };
+  assert.equal(freeLayout.deriveEditorState(baseState).label, "Saved");
+  assert.equal(
+    freeLayout.deriveEditorState({...baseState, draftDirty: true}).label,
+    "Local draft",
+  );
+  assert.equal(
+    freeLayout.deriveEditorState({
+      ...baseState, localValidation: {valid: false},
+    }).label,
+    "Invalid draft",
+  );
+  assert.equal(
+    freeLayout.deriveEditorState({...baseState, conflict: true}).label,
+    "Revision conflict",
+  );
+  assert.equal(
+    freeLayout.deriveEditorState({...baseState, disconnected: true}).label,
+    "Disconnected · reconnecting",
+  );
+  assert.equal(
+    freeLayout.deriveEditorState({...baseState, appliedDirty: true}).label,
+    "Applied but unsaved",
+  );
+});
+
+test("Delete shortcuts are ignored while editing form content", () => {
+  for (const tagName of ["INPUT", "TEXTAREA", "SELECT"]) {
+    assert.equal(freeLayout.isTextEntryTarget({tagName}), true);
+  }
+  assert.equal(
+    freeLayout.isTextEntryTarget({
+      tagName: "DIV", isContentEditable: true,
+    }),
+    true,
+  );
+  assert.equal(freeLayout.isTextEntryTarget({tagName: "BUTTON"}), false);
 });

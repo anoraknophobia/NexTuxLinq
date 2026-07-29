@@ -21,9 +21,9 @@ security boundary between local processes.
 
 The service keeps canonical schema-v2 configuration in memory. Valid schema-v1
 files migrate deterministically in memory without an automatic rewrite. The
-GUI's **Apply** action changes only the running configuration. **Save
-configuration** atomically writes the complete schema-v2 configuration and
-applies it.
+GUI's **Apply** action changes only the running configuration. **Save applied
+configuration** atomically writes that already-applied schema-v2
+configuration without applying a different browser draft.
 Configuration is stored at:
 
 ```text
@@ -32,7 +32,7 @@ ${XDG_CONFIG_HOME:-~/.config}/nextuxlinq/config.json
 
 When the canonical file is absent, NexTuxLinq can load the pre-rename file at
 `${XDG_CONFIG_HOME:-~/.config}/nexlinq/config.json`. The GUI surfaces a fixed
-migration warning. The next successful **Save configuration** writes the
+migration warning. The next successful **Save applied configuration** writes the
 canonical file with the existing atomic-save and permission guarantees. The
 legacy file is never deleted automatically, and it is never preferred over an
 existing canonical file. Migration reads accept only a bounded, privately
@@ -52,17 +52,17 @@ The GUI tracks three related states explicitly:
 - a synchronized configuration is both applied and saved.
 
 The API `dirty` value is authoritative for the applied-versus-saved state.
-**Reload applied settings** fetches the current runtime configuration and
-discards only local browser edits. It never claims to restore the persisted
-configuration. Apply and Save share native form validation, followed by the
-authoritative server validation.
+**Discard draft** restores the current runtime configuration and discards only
+local browser edits. It never claims to restore the persisted configuration.
+Apply and Save follow immediate local checks and authoritative complete
+candidate validation.
 
 After a daemon reconnect, the GUI compares revisions, the active profile,
 `dirty`, and a structural configuration fingerprint. An unchanged runtime
 keeps any local draft without interruption. If the runtime changed, the draft
-remains visible and mutations pause until the user explicitly keeps and
-rebases the local draft or reloads the applied settings. Background polling
-does not overwrite action, reconciliation, or field-validation errors.
+remains visible in a revision-conflict state until the user explicitly
+discards it and reloads the newer applied state. The editor never fabricates a
+merge or overwrites the newer revision.
 
 Frontend transition and minimal DOM tests use Node.js 20 or newer through
 Python's normal pytest suite. They use only built-in Node modules; Node.js is
@@ -71,9 +71,10 @@ not needed to run the daemon or packaged web GUI.
 The versioned local API is available below `/api/v1`. Canonical schema-v2
 state, validation, apply, save, and profile selection are under
 `/api/v1/free-layout`; validation has no persistence or upload side effect.
-The existing legacy-shaped endpoints remain available to the packaged GUI.
-Profiles that cannot be represented by that form are read-only rather than
-flattened. See [`phase4-backend.md`](phase4-backend.md).
+The visual editor uses these canonical endpoints. Existing legacy-shaped
+endpoints remain available as a compatibility surface and still refuse to
+flatten profiles they cannot represent. See
+[`free-layout-editor.md`](free-layout-editor.md).
 
 Runtime and persisted configuration use independent monotonic revisions.
 `POST /api/v1/apply` checks and advances the active revision only.

@@ -33,6 +33,7 @@ from nextuxlinq.api_models import (
     ConfigurationModel,
     DomainValidationError,
     ErrorResponse,
+    FreeLayoutMetadataResponse,
     PreviewRegion,
     PreviewResponse,
     ProfileSelectionRequest,
@@ -40,9 +41,15 @@ from nextuxlinq.api_models import (
     SaveRequest,
     SaveResponse,
     StatusResponse,
+    WidgetEditorDefinition,
 )
 from nextuxlinq.config_store import ConfigSaveError
 from nextuxlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH
+from nextuxlinq.models import MAX_PROFILES
+from nextuxlinq.models_v2 import (
+    MAX_REGIONS_PER_DOCUMENT,
+    MAX_REGIONS_PER_PROFILE,
+)
 from nextuxlinq.service import (
     CandidateValidationError,
     NexTuxLinqService,
@@ -433,6 +440,15 @@ def create_app(
             media_type="text/javascript",
         )
 
+    @app.get("/static/free_layout_editor.js", include_in_schema=False)
+    async def free_layout_javascript() -> Response:
+        return Response(
+            (
+                PACKAGE_DIRECTORY / "static" / "free_layout_editor.js"
+            ).read_bytes(),
+            media_type="text/javascript",
+        )
+
     @app.get(f"{API_PREFIX}/status", response_model=StatusResponse)
     async def status() -> StatusResponse:
         state = service.snapshot()
@@ -591,6 +607,29 @@ def create_app(
             saved_revision=snapshot.saved_revision,
             dirty=snapshot.dirty,
             legacy_editor_supported=snapshot.legacy_editor_supported,
+        )
+
+    @app.get(
+        f"{API_PREFIX}/free-layout/metadata",
+        response_model=FreeLayoutMetadataResponse,
+    )
+    async def free_layout_metadata() -> FreeLayoutMetadataResponse:
+        return FreeLayoutMetadataResponse(
+            canvas_width=MATRIX_WIDTH,
+            canvas_height=MATRIX_HEIGHT,
+            max_profiles=MAX_PROFILES,
+            max_regions_per_profile=MAX_REGIONS_PER_PROFILE,
+            max_regions_per_document=MAX_REGIONS_PER_DOCUMENT,
+            widget_definitions=[
+                WidgetEditorDefinition(
+                    type=definition.widget_type.value,
+                    label=definition.display_label,
+                    default_settings=definition.default_settings.to_dict(),
+                    minimum_width=definition.minimum_width,
+                    minimum_height=definition.minimum_height,
+                )
+                for definition in service.get_widget_definitions()
+            ],
         )
 
     @app.post(

@@ -6,8 +6,8 @@ canonical registry and compositor. Phase 4 activates that registry through
 the canonical schema-v2 service. DeviceWorker, Creator reports, and physical
 orientation remain unchanged.
 
-The future visual editor will provide one widget dropdown per region. The
-current GUI remains a compatibility form and cannot edit arbitrary regions.
+The active visual editor provides exactly one widget dropdown per region and
+shows only settings belonging to the selected widget.
 
 ## Clock
 
@@ -148,11 +148,11 @@ Two independent five-pixel rows can use automatic `3x5` fonts without vertical
 bleed. The compositor does not use editor minimum guidance to reject narrower
 valid scrolling, clipping, truncation, or blank regions.
 
-## Phase 4 activation and deferred work
+## Backend and editor activation
 
 Schema v2, compositor rendering, update-policy scheduling, persistence, and
-canonical local API operations are active in the backend. The current web GUI
-can still edit only an exactly representable migrated legacy layout; other
-profiles are safely read-only. The visual free-layout editor and live physical
-Matrix900 validation remain deferred. See
+canonical local API operations are active in the backend. The web GUI edits
+arbitrary 90×10 profiles through the canonical API and keeps draft validation
+separate from Apply and Save. See
+[Visual free-layout editor](free-layout-editor.md) and
 [Phase 4 backend activation](phase4-backend.md).

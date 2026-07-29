@@ -153,6 +153,52 @@ def test_canonical_configuration_and_preview_are_schema_v2(api_client) -> None:
     assert worker.frames == []
 
 
+def test_free_layout_metadata_exposes_canonical_widget_defaults(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    before = service.get_configuration()
+
+    response = client.get("/api/v1/free-layout/metadata")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["canvas_width"] == 90
+    assert body["canvas_height"] == 10
+    assert body["max_profiles"] == 32
+    assert body["max_regions_per_profile"] == 32
+    assert body["max_regions_per_document"] == 128
+    definitions = body["widget_definitions"]
+    assert [definition["type"] for definition in definitions] == [
+        "blank",
+        "clock",
+        "static_text",
+        "scrolling_text",
+        "date",
+    ]
+    assert definitions[0]["default_settings"] == {}
+    assert definitions[1]["default_settings"] == {
+        "format": "24h",
+        "show_seconds": False,
+        "blink_separator": False,
+        "time_zone": "local",
+        "color": "#FFFFFF",
+        "horizontal_alignment": "center",
+        "vertical_alignment": "center",
+        "font": "auto",
+    }
+    assert definitions[2]["default_settings"]["content"] == "TEXT"
+    assert definitions[3]["default_settings"]["direction"] == "left"
+    assert definitions[3]["default_settings"]["speed"] == 5
+    assert definitions[3]["default_settings"]["trailing_gap"] == 6
+    assert definitions[4]["default_settings"]["format"] == (
+        "day_month_full_year"
+    )
+    assert service.get_configuration() == before
+    assert store.saved == []
+    assert worker.frames == []
+
+
 def test_canonical_validation_uses_real_compositor_without_side_effects(
     api_client,
 ) -> None:
@@ -920,15 +966,26 @@ def test_frontend_and_local_assets_are_self_contained(api_client) -> None:
                 await async_client.get("/"),
                 await async_client.get("/static/app.css"),
                 await async_client.get("/static/app.js"),
+                await async_client.get(
+                    "/static/free_layout_editor.js"
+                ),
             )
 
-    page, css, javascript = asyncio.run(fetch_assets())
+    page, css, javascript, editor = asyncio.run(fetch_assets())
 
-    assert page.status_code == css.status_code == javascript.status_code == 200
+    assert (
+        page.status_code
+        == css.status_code
+        == javascript.status_code
+        == editor.status_code
+        == 200
+    )
     assert "NexTuxLinq Matrix900 Controller" in page.text
     assert 'name="application-name"' in page.text
     assert 'aria-live="polite"' in page.text
-    assert "A 90 by 10 pixel preview" in page.text
+    assert "A 90 by 10 pixel viewer-perspective preview" in page.text
+    assert "Free-layout editor" in page.text
+    assert "createEditor" in editor.text
     assert "https://" not in page.text
     assert "http://" not in javascript.text
     assert "https://" not in javascript.text
@@ -939,7 +996,9 @@ def test_frontend_and_local_assets_are_self_contained(api_client) -> None:
     assert 'id="configuration-state"' in page.text
     assert 'id="multiple-device-warning"' in page.text
     assert 'id="region-labels"' in page.text
-    assert "Reload applied settings" in page.text
+    assert "Discard draft" in page.text
     assert 'request("/config")' in javascript.text
     assert "reloadAppliedSettings" in javascript.text
+    assert 'request("/config")' in editor.text
+    assert "reconcileConfiguration" in editor.text
     assert 'windowObject.addEventListener("beforeunload"' in javascript.text

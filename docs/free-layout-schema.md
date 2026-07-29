@@ -2,8 +2,8 @@
 
 Schema v2 is the canonical NexTuxLinq backend configuration for Matrix900
 free-form layouts as of Phase 4. Schema-v1 input remains supported through
-deterministic in-memory migration. The current GUI remains legacy-shaped; the
-visual free-layout editor is still deferred.
+deterministic in-memory migration. The active
+[visual free-layout editor](free-layout-editor.md) edits this schema directly.
 
 ## Canvas and geometry
 

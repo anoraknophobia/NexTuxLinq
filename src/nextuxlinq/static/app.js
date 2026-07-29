@@ -5,6 +5,9 @@
   if (typeof module === "object" && module.exports) {
     module.exports = frontend;
   }
+  if (root) {
+    root.NexTuxLinqFrontend = frontend;
+  }
   if (root && root.document) {
     frontend.bootstrap({
       document: root.document,
@@ -13,6 +16,9 @@
       clearTimeout: root.clearTimeout.bind(root),
       decodeBase64: root.atob.bind(root),
       window: root,
+      previewPollingEnabled: !root.document.querySelector(
+        "#free-layout-root"
+      ),
     });
   }
 })(typeof globalThis === "object" ? globalThis : this, function frontendFactory() {
@@ -451,6 +457,7 @@
     const fetchFunction = dependencies.fetch;
     const setTimeoutFunction = dependencies.setTimeout;
     const clearTimeoutFunction = dependencies.clearTimeout;
+    const previewPollingEnabled = dependencies.previewPollingEnabled !== false;
     const decodeBase64 = dependencies.decodeBase64;
     const windowObject = dependencies.window ?? null;
     const state = createInitialState();
@@ -1244,7 +1251,7 @@
         }
       } finally {
         void pollStatus();
-        void pollPreview();
+        if (previewPollingEnabled) void pollPreview();
       }
     }
 

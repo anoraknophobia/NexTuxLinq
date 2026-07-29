@@ -2,7 +2,8 @@
 
 Phase 3A established the bitmap-font and local text-drawing foundation for
 NexTuxLinq Matrix900 free-layout widgets. Phase 4 activates its widget users
-through the canonical compositor; the visual editor remains deferred.
+through the canonical compositor. The visual editor exposes Auto, 3×5, 3×7,
+and 5×7 choices for widgets that use this foundation.
 
 ## Fonts
 
@@ -72,6 +73,6 @@ migration-equivalence tests confirm exact legacy 3×7 and 5×7 glyphs, spacing,
 alignment, colors, and scrolling framebuffers.
 
 The Phase 4 service schedules and exposes these widget renderers through the
-canonical API. The current web GUI cannot configure arbitrary free-layout
-widgets. Migration-equivalence tests preserve schema-v1 framebuffer behavior,
-and physical Matrix900 validation remains pending.
+canonical API. The visual editor configures their canonical font choices.
+Migration-equivalence tests preserve schema-v1 framebuffer behavior, and
+physical Matrix900 validation remains a separate operational step.

@@ -20,12 +20,19 @@ def _frontend_source() -> tuple[str, str, str]:
     )
 
 
+def _editor_source() -> str:
+    return files("nextuxlinq").joinpath(
+        "static", "free_layout_editor.js"
+    ).read_text(encoding="utf-8")
+
+
 def test_templates_and_static_assets_are_package_resources() -> None:
     package = files("nextuxlinq")
     resources = (
         package.joinpath("templates", "index.html"),
         package.joinpath("static", "app.css"),
         package.joinpath("static", "app.js"),
+        package.joinpath("static", "free_layout_editor.js"),
     )
     for resource in resources:
         assert resource.is_file()
@@ -60,7 +67,7 @@ def test_polling_retries_and_reconnection_restores_mutation_controls() -> None:
 
 def test_frontend_state_and_accessibility_resources() -> None:
     page, javascript, _ = _frontend_source()
-    normalized_page = " ".join(page.split())
+    editor = _editor_source()
 
     for state_property in (
         "acceptedFingerprint",
@@ -77,12 +84,14 @@ def test_frontend_state_and_accessibility_resources() -> None:
     assert "Applied changes not saved" in javascript
     assert 'primary: "Saved"' in javascript
     assert "Revert unsaved edits" not in page
-    assert page.count("Reload applied settings") == 2
-    assert 'min="0.5" max="20" step="any" inputmode="decimal"' in page
-    assert (
-        "Lowercase letters are converted to uppercase when applied."
-        in normalized_page
-    )
+    assert 'id="fl-editor-state"' in page
+    assert "Invalid draft" in editor
+    assert "Revision conflict" in editor
+    assert "Disconnected · reconnecting" in editor
+    assert 'min="0.5" max="20" step="0.1"' in page
+    assert "ASCII uppercase" in page
+    assert 'windowObject.addEventListener("keydown"' in editor
+    assert '["input", "textarea", "select"].includes(tag)' in editor
 
 
 def test_status_information_uses_compact_main_and_technical_sections() -> None:
@@ -130,12 +139,10 @@ def test_status_information_uses_compact_main_and_technical_sections() -> None:
 def test_profile_state_is_one_compact_status_without_revision_cards() -> None:
     page, _, css = _frontend_source()
     settings = page.split(
-        '<section aria-labelledby="settings-heading">', 1
+        '<section aria-labelledby="profile-heading">', 1
     )[1].split("</section>", 1)[0]
 
-    assert 'class="profile-state-label"' in settings
-    assert 'id="configuration-state-summary"' in settings
-    assert 'id="configuration-state-detail" class="visually-hidden"' in settings
+    assert 'id="fl-editor-state" class="editor-state"' in settings
     for obsolete_id in (
         "draft-state",
         "runtime-state",
@@ -144,72 +151,101 @@ def test_profile_state_is_one_compact_status_without_revision_cards() -> None:
     ):
         assert f'id="{obsolete_id}"' not in settings
     assert "configuration-state-values" not in settings
-    assert ".visually-hidden {" in css
+    assert ".editor-state {" in css
 
 
 def test_preview_regions_use_safe_dynamic_dom_rendering() -> None:
     page, javascript, css = _frontend_source()
+    editor = _editor_source()
 
-    assert '<ol id="region-labels" class="region-labels"' in page
-    assert 'aria-label="Viewer-perspective display regions"></ol>' in page
+    assert 'id="fl-region-layer" class="layout-region-layer"' in page
+    assert 'aria-label="Viewer-perspective 90 by 10 layout canvas"' in page
     assert (
         "Viewer perspective, matching how the installed Matrix900 is seen."
         in page
     )
-    assert "normalizeRegions(" in javascript
-    assert "preview.height" in javascript
-    assert "placeRegionsForViewer(" in javascript
-    assert "copyFramebufferForViewer(" in javascript
-    assert "name.textContent = region.name;" in javascript
-    assert "replaceChildren(...children);" in javascript
-    assert "innerHTML" not in javascript
-    assert "front_clock_width" not in javascript
-    assert "grid-template-columns: repeat(90, minmax(0, 1fr));" in css
-    assert (
-        "grid-column: var(--region-viewer-start) / span var(--region-width);"
-        in css
-    )
+    assert "logicalToViewerX(region.x, region.width)" in editor
+    assert "base.placeRegionsForViewer(regions, CANVAS_WIDTH)" in editor
+    assert "base.copyFramebufferForViewer(" in editor
+    assert "label.textContent =" in editor
+    assert "replaceChildren(...regions);" in editor
+    assert "innerHTML" not in editor
+    assert "front_clock_width" not in editor
+    assert "aspect-ratio: 9 / 1;" in css
+    assert "left: calc(var(--viewer-x) * 100% / 90);" in css
+    assert "transform: scaleX(-1)" not in css
 
 
-def test_profile_form_layout_has_safe_responsive_sizing() -> None:
+def test_visual_editor_layout_has_safe_responsive_sizing() -> None:
     page, _, css = _frontend_source()
 
-    assert page.count('class="profile-field"') == 5
-    assert page.count('class="profile-field-label"') == 5
-    assert page.count('class="profile-control') == 5
-    assert ".profile-field {" in css
-    assert (
-        "grid-template-rows: var(--profile-label-height) "
-        "var(--profile-control-height);"
-    ) in css
-    assert "--profile-label-height: 2.5rem;" in css
-    assert "height: var(--profile-label-height);" in css
-    assert "--profile-control-height: 2.8rem;" in css
-    assert "height: var(--profile-control-height);" in css
-    assert "min-height: var(--profile-control-height);" in css
-    assert "max-height: var(--profile-control-height);" in css
+    assert 'id="free-layout-root"' in page
+    assert 'class="editor-workspace"' in page
+    assert 'class="region-inspector"' in page
+    assert 'class="geometry-grid"' in page
+    assert page.count('data-widget-panel="') == 5
+    assert ".editor-workspace {" in css
+    assert ".layout-canvas-shell {" in css
+    assert ".region-inspector {" in css
     assert "box-sizing: border-box;" in css
-    assert '<input class="profile-control" id="scrolling-text"' in page
-    assert '<input class="profile-control" id="scroll-speed"' in page
-    assert '<select class="profile-control"' in page
-    assert page.count('class="profile-control color-control"') == 2
-    assert "appearance: none;" in css
-    assert "-webkit-appearance: none;" in css
-    assert ".color-picker::-webkit-color-swatch-wrapper { padding: 0; }" in css
-    assert ".color-picker::-webkit-color-swatch {" in css
-    assert ".color-picker::-moz-color-swatch {" in css
-    assert "repeat(auto-fit, minmax(min(100%, 190px), 1fr))" in css
-    assert (
-        ".status-grid > *, .technical-grid > *, .form-grid > * "
-        "{ min-width: 0; }"
-    ) in css
     assert "* { box-sizing: border-box; }" in css
     assert ".actions { display: flex; flex-wrap: wrap;" in css
     assert ".actions > button { min-width: 0; max-width: 100%; white-space: normal; }" in css
-    assert "@media (max-width: 480px)" in css
-    assert ".status-grid, .technical-grid, .form-grid {" in css
+    assert "@media (max-width: 650px)" in css
     assert "grid-template-columns: minmax(0, 1fr);" in css
-    assert "repeat(5," not in css
+    assert "overflow-x: auto;" in css
+    assert "@media (max-width: 480px)" in css
+    assert "grid-template-columns: minmax(0, 1fr);" in css
+
+
+def test_visual_editor_exposes_only_canonical_widget_controls() -> None:
+    page, _, _ = _frontend_source()
+    editor = _editor_source()
+    inspector = page.split('id="fl-region-inspector"', 1)[1].split(
+        "</aside>", 1
+    )[0]
+
+    for widget_type in (
+        "blank",
+        "clock",
+        "static_text",
+        "scrolling_text",
+        "date",
+    ):
+        assert inspector.count(
+            f'data-widget-panel="{widget_type}"'
+        ) == 1
+        assert inspector.count(f'<option value="{widget_type}">') == 1
+    assert 'data-widget-panel="blank"' in inspector
+    blank = inspector.split('data-widget-panel="blank"', 1)[1].split(
+        "</fieldset>", 1
+    )[0]
+    assert "data-setting" not in blank
+    for setting in (
+        "show_seconds",
+        "blink_separator",
+        "time_zone",
+        "uppercase",
+        "overflow",
+        "direction",
+        "speed",
+        "initial_alignment",
+        "trailing_gap",
+    ):
+        assert f'data-setting="{setting}"' in inspector
+    for date_format in (
+        "day_month_full_year",
+        "day_month_short_year",
+        "day_month",
+        "weekday_day_month",
+    ):
+        assert f'value="{date_format}"' in inspector
+    assert "innerHTML" not in editor
+    assert "setInterval" not in editor
+    assert "eval(" not in editor
+    assert "http://" not in editor
+    assert "https://" not in editor
+    assert "documentObject.hidden" in editor
 
 
 def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:
@@ -242,6 +278,7 @@ def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:
         "nextuxlinq/templates/index.html",
         "nextuxlinq/static/app.css",
         "nextuxlinq/static/app.js",
+        "nextuxlinq/static/free_layout_editor.js",
     }
     with zipfile.ZipFile(wheels[0]) as archive:
         names = set(archive.namelist())
@@ -304,7 +341,8 @@ def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:
         "root=files('nextuxlinq'); "
         "assert root.joinpath('templates','index.html').read_bytes(); "
         "assert root.joinpath('static','app.css').read_bytes(); "
-        "assert root.joinpath('static','app.js').read_bytes()"
+        "assert root.joinpath('static','app.js').read_bytes(); "
+        "assert root.joinpath('static','free_layout_editor.js').read_bytes()"
     )
     subprocess.run(
         [sys.executable, "-I", "-c", check],

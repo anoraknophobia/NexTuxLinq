@@ -201,6 +201,23 @@ class CanonicalConfigResponse(StrictModel):
     legacy_editor_supported: bool
 
 
+class WidgetEditorDefinition(StrictModel):
+    type: str
+    label: str
+    default_settings: dict[str, Any]
+    minimum_width: int | None
+    minimum_height: int | None
+
+
+class FreeLayoutMetadataResponse(StrictModel):
+    canvas_width: int
+    canvas_height: int
+    max_profiles: int
+    max_regions_per_profile: int
+    max_regions_per_document: int
+    widget_definitions: list[WidgetEditorDefinition]
+
+
 class CanonicalValidateRequest(StrictModel):
     configuration: CanonicalConfigurationModel
 

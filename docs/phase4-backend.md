@@ -1,8 +1,8 @@
 # Free-layout backend activation
 
 Phase 4 makes schema v2 and `rendering_v2` the canonical NexTuxLinq backend
-for the Phanteks Matrix900. It does not add the visual free-layout editor or
-support another device.
+for the Phanteks Matrix900. The subsequent web-editor phase exposes that
+canonical model visually; neither phase adds support for another device.
 
 ## Configuration and persistence
 
@@ -45,7 +45,7 @@ Cadence waits use monotonic durations, boundaries are recalculated after each
 frame, and the DeviceWorker's existing bounded latest-wins frame slot prevents
 an unbounded physical-upload backlog.
 
-## API and current GUI
+## API and web GUI
 
 The existing `/api/v1/config`, `/api/v1/apply`, `/api/v1/preview`, and save
 workflow remain available through a strict legacy-form adapter. The adapter
@@ -57,12 +57,13 @@ under `/api/v1/free-layout`. Candidate validation uses the real registry and
 compositor but does not persist or upload. Responses use stable schema
 identifiers and sanitized region/widget error metadata.
 
-The current GUI remains the existing form, not a free-layout editor. A
-representable migrated profile remains editable. An arbitrary free-layout
-profile is shown as read-only while status and preview remain available. The
-preview remains viewer-oriented (Rear on the left, Front on the right), while
-stored coordinates and renderer output remain canonical and glyphs are never
-mirrored.
+The active GUI now uses the canonical endpoints as a visual free-layout
+editor. The strict legacy-form endpoints remain available for compatibility,
+but the page does not expose a second competing fixed-layout editor. Migrated
+and arbitrary schema-v2 profiles are both editable. The editor and preview
+remain viewer-oriented (Rear on the left, Front on the right), while stored
+coordinates and renderer output remain canonical and glyphs are never
+mirrored. See [Visual free-layout editor](free-layout-editor.md).
 
 Physical Matrix900 validation of the activated path remains required. Phase 4
 does not perform or authorize a live upload during development validation.

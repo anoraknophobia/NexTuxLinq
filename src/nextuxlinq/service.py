@@ -184,7 +184,8 @@ class NexTuxLinqService:
         self._worker_stop_timeout = worker_stop_timeout
         self._task_factory = task_factory
         self._mutation_gate = mutation_gate
-        self._compositor = Compositor(create_widget_registry())
+        self._widget_registry = create_widget_registry()
+        self._compositor = Compositor(self._widget_registry)
         self._configuration: ConfigurationDocumentV2 | None = None
         self._render_task: asyncio.Task[None] | None = None
         self._render_wakeup: asyncio.Event | None = None
@@ -221,6 +222,10 @@ class NexTuxLinqService:
 
     def snapshot(self) -> DaemonSnapshot:
         return self.state.snapshot()
+
+    def get_widget_definitions(self) -> tuple[Any, ...]:
+        """Return immutable canonical definitions for editor metadata."""
+        return self._widget_registry.definitions
 
     @property
     def render_task(self) -> asyncio.Task[None] | None:

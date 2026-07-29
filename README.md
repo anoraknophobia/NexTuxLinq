@@ -87,16 +87,14 @@ It starts automatically after login and serves the loopback-only GUI at
 NexTuxLinq display/telemetry helpers so `nextuxlinqd` is the sole project
 writer.
 
-The GUI distinguishes edits in the browser from settings applied to the
-running daemon and from the configuration saved on disk. **Apply** updates
-the running profile, while **Save configuration** validates and persists the
-complete configuration. **Reload applied settings** discards only browser
-draft edits; it does not restore the saved file. If the daemon reconnects
-after its configuration changed, the GUI preserves the draft and asks whether
-to keep it or reload the newly applied settings. The backend uses canonical
-schema-v2 free-layout profiles; the current form remains compatible with
-migrated legacy layouts and becomes read-only for arbitrary layouts. See
-[`docs/phase4-backend.md`](docs/phase4-backend.md).
+The GUI provides a visual 90×10 free-layout editor for canonical schema-v2
+profiles. Regions can be added, moved, resized, reordered, and assigned one of
+the five widgets. **Apply** validates and updates the running profile, while
+**Save applied configuration** persists only the already-applied state.
+Browser drafts and revision conflicts remain explicit. The editor and preview
+use viewer perspective (Rear left, Front right), while stored integer
+coordinates and glyph pixels remain logical and unmirrored. See
+[`docs/free-layout-editor.md`](docs/free-layout-editor.md).
 
 Install and uninstall operations use a private, non-blocking manager lock.
 Replaced or uninstalled managed units are retained as private `.bak` files
