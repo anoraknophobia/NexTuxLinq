@@ -1,0 +1,19 @@
+# X-NexTuxLinq-Managed: nextuxlinqctl-service-v1
+# Example installed-operation unit. nextuxlinqctl service install replaces the
+# generic interpreter below with the absolute path of its current interpreter.
+[Unit]
+Description=NexTuxLinq Matrix900 Controller
+After=default.target
+Conflicts=nextuxlinq-display.service nextuxlinq-telemetry.service nexlinq-display.service nexlinq-telemetry.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env python3 -m nextuxlinq.daemon --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

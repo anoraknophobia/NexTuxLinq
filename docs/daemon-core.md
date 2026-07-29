@@ -11,8 +11,8 @@ python -m nextuxlinq.daemon --foreground --host 127.0.0.1 --port 8765
 ```
 
 Open <http://127.0.0.1:8765> after the process starts. The process does not
-daemonize itself, invoke systemd, or open a browser. Phase 2B does not install
-or migrate systemd services.
+daemonize itself or open a browser. Install and control it as a systemd user
+service with `nextuxlinqctl service`; see [`systemd.md`](systemd.md).
 
 The HTTP server accepts loopback addresses only. It has no account or
 authentication because it is local-only, but other processes running as the
@@ -89,5 +89,6 @@ them so repeated brightness changes cannot indefinitely starve a frame.
 
 Only the Phanteks Matrix900 with USB VID:PID `2e3c:6500` is supported.
 
-The future daemon systemd unit name is reserved as `nextuxlinqd.service`.
-Daemon systemd integration is not included in this phase.
+The installed systemd user unit is `nextuxlinqd.service`. It conflicts with the
+legacy and renamed display/telemetry helpers so the daemon remains the sole
+NexTuxLinq Matrix900 owner.

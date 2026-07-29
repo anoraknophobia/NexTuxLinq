@@ -28,7 +28,7 @@ new canonical path; an existing canonical file always takes precedence.
 Missing or invalid files fall back to the built-in display without overwriting
 the file. Saves use a temporary file and atomic replacement. The current
 standalone display command continues to use the built-in `CACHYOS` profile;
-loading saved profiles into a long-running daemon is outside this phase.
+`nextuxlinqd` loads saved profiles and owns long-running rendering.
 
 Run one frame manually:
 
@@ -42,7 +42,9 @@ Run the animated display manually at the default five frames per second:
 python -m nextuxlinq.default_display
 ```
 
-The user service is installed from `systemd/nextuxlinq-display.service`. It must not run concurrently with another process that writes HID reports to the Matrix900.
+`systemd/nextuxlinq-display.service` is retained as a development helper.
+Installing `nextuxlinqd.service` disables this helper and its telemetry
+counterpart so they do not compete for the Matrix900.
 
 The standalone command now participates in the same advisory writer lock as
 `nextuxlinqd` and direct `nextuxlinqctl` mutations. See

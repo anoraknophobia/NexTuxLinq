@@ -27,6 +27,7 @@ from nextuxlinq.presets import (
     build_layout_reports,
     build_two_slot_clock_system_reports,
 )
+from nextuxlinq.service_manager import ServiceManager, ServiceManagerError
 from nextuxlinq.telemetry import collect_default_telemetry, send_telemetry
 from nextuxlinq.writer_lock import WriterLock, WriterLockHeldError
 
@@ -180,6 +181,33 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         help="Select the captured System Data profile.",
     )
+
+    service_parser = subparsers.add_parser(
+        "service",
+        help="Install or control the nextuxlinqd systemd user service.",
+    )
+    service_actions = service_parser.add_subparsers(
+        dest="service_action",
+        required=True,
+    )
+    install_parser = service_actions.add_parser(
+        "install",
+        help="Install, enable, and start nextuxlinqd.service.",
+    )
+    install_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing foreign unit after safety validation.",
+    )
+    service_actions.add_parser(
+        "uninstall",
+        help="Stop, disable, and remove the managed unit.",
+    )
+    for action in ("start", "stop", "restart", "status"):
+        service_actions.add_parser(
+            action,
+            help=f"{action.capitalize()} nextuxlinqd.service.",
+        )
 
     return parser
 
@@ -516,12 +544,35 @@ def configure_system_widget(profile_name: str) -> int:
     print("Sent:", result.report.hex(" "))
     return 0
 
+
+def manage_service(arguments: argparse.Namespace) -> int:
+    """Run one systemd user-service operation without taking the HID lock."""
+    try:
+        manager = ServiceManager()
+    except ServiceManagerError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    if arguments.service_action == "install":
+        result = manager.install(force=arguments.force)
+    elif arguments.service_action == "uninstall":
+        result = manager.uninstall()
+    else:
+        result = manager.control(arguments.service_action)
+    for line in result.output:
+        print(line)
+    if result.error is not None:
+        print(result.error, file=sys.stderr)
+    return 0 if result.success else 1
+
+
 def main() -> int:
     """Run the nextuxlinqctl command-line interface."""
     arguments = build_parser().parse_args()
 
     if arguments.command in (None, "detect"):
         return detect_devices()
+    if arguments.command == "service":
+        return manage_service(arguments)
     try:
         with WriterLock.from_environment(owner=f"nextuxlinqctl {arguments.command}"):
             if arguments.command == "brightness":

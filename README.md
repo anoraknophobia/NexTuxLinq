@@ -72,6 +72,45 @@ nextuxlinqctl detect
 nextuxlinqctl brightness 50
 ```
 
+### Local controller service and GUI
+
+Install the Matrix900 controller as a systemd user service:
+
+```console
+nextuxlinqctl service install
+```
+
+It starts automatically after login and serves the loopback-only GUI at
+<http://127.0.0.1:8765>. Installation stops and disables old NexLinq and
+NexTuxLinq display/telemetry helpers so `nextuxlinqd` is the sole project
+writer.
+
+Install and uninstall operations use a private, non-blocking manager lock.
+Replaced or uninstalled managed units are retained as private `.bak` files
+beside the user unit; systemd does not recognize these backups, and NexTuxLinq
+never deletes them automatically.
+
+Control or inspect the service with:
+
+```console
+nextuxlinqctl service start
+nextuxlinqctl service stop
+nextuxlinqctl service restart
+nextuxlinqctl service status
+journalctl --user -u nextuxlinqd.service
+```
+
+Uninstalling preserves all configuration and profiles, reports the retained
+disabled-unit backup, and does not re-enable legacy helpers:
+
+```console
+nextuxlinqctl service uninstall
+```
+
+See [`docs/systemd.md`](docs/systemd.md) for installation safety and migration
+details. This is a user-service integration, not a distro package or public
+installer.
+
 ### Linux telemetry
 
 Send one hardware telemetry update:

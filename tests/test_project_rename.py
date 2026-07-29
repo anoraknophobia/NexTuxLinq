@@ -88,13 +88,17 @@ def test_renamed_udev_rule_preserves_matrix900_match() -> None:
     assert 'MODE="0660"' in rule
 
 
-def test_future_daemon_unit_name_is_reserved_without_integration() -> None:
+def test_daemon_unit_template_is_present_without_checkout_dependency() -> None:
     documentation = (REPOSITORY / "docs" / "daemon-core.md").read_text(
         encoding="utf-8"
     )
+    unit_path = REPOSITORY / "systemd" / "nextuxlinqd.service"
+    unit = unit_path.read_text(encoding="utf-8")
 
     assert "`nextuxlinqd.service`" in documentation
-    assert not (REPOSITORY / "systemd" / "nextuxlinqd.service").exists()
+    assert unit_path.is_file()
+    assert "nextuxlinq.daemon" in unit
+    assert "nex" + "linq-linux" not in unit
 
 
 def test_renamed_helpers_conflict_with_other_and_legacy_writers() -> None:
@@ -143,6 +147,8 @@ def _classify_legacy_name(relative: str, line: str) -> str | None:
         marker in folded for marker in official_markers
     ):
         return "official Phanteks product or verified protocol"
+    if relative == "README.md" and "old " + legacy_name in folded:
+        return "legacy service migration"
     if (
         relative == "tests/test_free_text.py"
         and f'"{legacy_name}"' in folded
@@ -167,6 +173,17 @@ def _classify_legacy_name(relative: str, line: str) -> str | None:
         "tests/test_writer_lock.py",
     }:
         return "legacy writer-lock migration"
+    if relative == "src/nextuxlinq/service_manager.py":
+        if (
+            f"{legacy_name}-display.service" in folded
+            or f"{legacy_name}-telemetry.service" in folded
+        ):
+            return "legacy service migration"
+    if relative == "tests/test_service_manager.py":
+        if f"{legacy_name}-display.service" in folded:
+            return "legacy service migration"
+        if legacy_name + "-linux" in folded:
+            return "local development checkout assertion"
     if relative.startswith("systemd/"):
         if folded.startswith("conflicts="):
             return "legacy service migration"
@@ -178,6 +195,8 @@ def _classify_legacy_name(relative: str, line: str) -> str | None:
         if legacy_name + " helpers" in folded:
             return "legacy service migration"
         if legacy_name + "-display.service" in folded:
+            return "legacy service migration"
+        if f"`{legacy_name}-*`" in folded:
             return "legacy service migration"
     return None
 

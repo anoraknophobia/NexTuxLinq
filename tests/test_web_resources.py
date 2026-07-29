@@ -119,6 +119,7 @@ def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:
     wheels = list(wheel_directory.glob("*.whl"))
     assert len(wheels) == 1
     expected = {
+        "nextuxlinq/service_manager.py",
         "nextuxlinq/templates/index.html",
         "nextuxlinq/static/app.css",
         "nextuxlinq/static/app.js",
