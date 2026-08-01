@@ -2,6 +2,8 @@
 
 Open-source Linux control software for the Phanteks Matrix900 display.
 
+> **AI-assisted development:** The entire NexTuxLinq codebase was created with ChatGPT 5.6 Sol and OpenAI Codex, with human direction, testing, and validation.
+
 ## Project scope
 
 This project currently targets only the Phanteks Matrix900.
