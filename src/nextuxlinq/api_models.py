@@ -255,6 +255,21 @@ class WidgetEditorDefinition(StrictModel):
     minimum_height: int | None
 
 
+class FontEditorDefinition(StrictModel):
+    id: str
+    label: str
+    glyph_height: int | None
+    maximum_glyph_width: int | None
+
+
+class FontOptionStatus(StrictModel):
+    id: str
+    available: bool
+    category: str | None
+    minimum_width: int | None
+    minimum_height: int | None
+
+
 class MetricEditorDefinition(StrictModel):
     id: str
     label: str
@@ -287,6 +302,7 @@ class FreeLayoutMetadataResponse(StrictModel):
     max_regions_per_document: int
     max_import_bytes: int
     widget_definitions: list[WidgetEditorDefinition]
+    font_definitions: list[FontEditorDefinition]
     metric_definitions: list[MetricEditorDefinition]
     bar_metric_ids: list[str]
 
@@ -376,6 +392,8 @@ class CanonicalValidateResponse(StrictModel):
     update_policy: str
     animated_content: bool
     framebuffer_base64: str
+    resolved_fonts: dict[str, str]
+    font_options: dict[str, list[FontOptionStatus]]
 
 
 class CanonicalApplyRequest(StrictModel):

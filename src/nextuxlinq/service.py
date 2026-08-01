@@ -40,6 +40,11 @@ from nextuxlinq.rendering_v2.compositor import (
     CompositorError,
     RenderResult,
 )
+from nextuxlinq.rendering_v2.fonts import (
+    AUTO_FONT_PRIORITY,
+    FontDefinition,
+    create_builtin_font_registry,
+)
 from nextuxlinq.rendering_v2.registry import (
     RenderContext,
     create_widget_registry,
@@ -54,7 +59,7 @@ from nextuxlinq.system_metrics import (
     MetricId,
     SystemMetricsSnapshot,
 )
-from nextuxlinq.widget_models import WidgetType
+from nextuxlinq.widget_models import FontChoice, WidgetType
 
 AsyncSleep = Callable[[float], Awaitable[None]]
 WallClock = Callable[[], datetime]
@@ -290,6 +295,11 @@ class NexTuxLinqService:
     def get_widget_definitions(self) -> tuple[Any, ...]:
         """Return immutable canonical definitions for editor metadata."""
         return self._widget_registry.definitions
+
+    def get_font_definitions(self) -> tuple[FontDefinition, ...]:
+        """Return concrete fonts in the explicit canonical Auto ranking."""
+        registry = create_builtin_font_registry()
+        return tuple(registry.resolve(font_id) for font_id in AUTO_FONT_PRIORITY)
 
     def get_metric_status(self) -> dict[str, str]:
         """Return sanitized availability without triggering a sample."""
@@ -701,27 +711,13 @@ class NexTuxLinqService:
         for region in profile.regions:
             if not region.enabled:
                 continue
-            isolated = ProfileConfigV2.from_dict({
-                "brightness": profile.brightness,
-                "canvas": profile.canvas.to_dict(),
-                "regions": [region.to_dict()],
-            })
-            try:
-                self._compositor.render(
-                    isolated,
-                    generation_time=wall_clock,
-                    animation_time=animation_time,
-                    metrics_snapshot=metrics_snapshot,
-                )
-            except CompositorError as error:
-                failure = (
-                    error.category.value,
-                    error.region_id,
-                    error.widget_type,
-                    error.field,
-                )
-            else:
-                failure = None
+            failure = self._isolated_region_failure(
+                profile,
+                region,
+                wall_clock=wall_clock,
+                animation_time=animation_time,
+                metrics_snapshot=metrics_snapshot,
+            )
             if failure is None:
                 continue
             category, region_id, widget_type, field = failure
@@ -745,6 +741,36 @@ class NexTuxLinqService:
                 minimum_height=minimum_height,
             ))
         return tuple(issues)
+
+    def _isolated_region_failure(
+        self,
+        profile: ProfileConfigV2,
+        region: RegionConfig,
+        *,
+        wall_clock: datetime,
+        animation_time: float,
+        metrics_snapshot: SystemMetricsSnapshot | None,
+    ) -> tuple[str, str | None, WidgetType | None, str | None] | None:
+        isolated = ProfileConfigV2.from_dict({
+            "brightness": profile.brightness,
+            "canvas": profile.canvas.to_dict(),
+            "regions": [region.to_dict()],
+        })
+        try:
+            self._compositor.render(
+                isolated,
+                generation_time=wall_clock,
+                animation_time=animation_time,
+                metrics_snapshot=metrics_snapshot,
+            )
+        except CompositorError as error:
+            return (
+                error.category.value,
+                error.region_id,
+                error.widget_type,
+                error.field,
+            )
+        return None
 
     def _minimum_render_size(
         self,
@@ -1092,6 +1118,66 @@ class NexTuxLinqService:
         }
         result = rendered[configuration.active_profile]
         return result
+
+    def get_font_validation(
+        self,
+        profile: ProfileConfigV2,
+    ) -> tuple[dict[str, str], dict[str, list[dict[str, object]]]]:
+        """Return authoritative resolved fonts and explicit-option status."""
+        if type(profile) is not ProfileConfigV2:
+            raise TypeError("profile must be a ProfileConfigV2.")
+        wall_clock = self._wall_clock()
+        animation_time = max(0.0, self._monotonic() - self._started_at)
+        snapshot = self._last_metrics_snapshot
+        resolved: dict[str, str] = {}
+        options: dict[str, list[dict[str, object]]] = {}
+        for region in profile.regions:
+            if (
+                not region.enabled
+                or "font" not in region.widget.settings.to_dict()
+            ):
+                continue
+            region_options: list[dict[str, object]] = []
+            for font_id in AUTO_FONT_PRIORITY:
+                raw = region.to_dict()
+                raw["widget"]["settings"]["font"] = font_id.value
+                candidate = RegionConfig.from_dict(raw)
+                failure = self._isolated_region_failure(
+                    profile,
+                    candidate,
+                    wall_clock=wall_clock,
+                    animation_time=animation_time,
+                    metrics_snapshot=snapshot,
+                )
+                option: dict[str, object] = {
+                    "id": font_id.value,
+                    "available": failure is None,
+                    "category": None,
+                    "minimum_width": None,
+                    "minimum_height": None,
+                }
+                if failure is None:
+                    if region.widget.settings.font is FontChoice.AUTO and (
+                        region.id not in resolved
+                    ):
+                        resolved[region.id] = font_id.value
+                    elif region.widget.settings.font is font_id:
+                        resolved[region.id] = font_id.value
+                else:
+                    category, _, _, _ = failure
+                    option["category"] = category
+                    if category in {"content_too_wide", "content_too_tall"}:
+                        minimum_width, minimum_height = self._minimum_render_size(
+                            candidate,
+                            wall_clock=wall_clock,
+                            animation_time=animation_time,
+                            metrics_snapshot=snapshot,
+                        )
+                        option["minimum_width"] = minimum_width
+                        option["minimum_height"] = minimum_height
+                region_options.append(option)
+            options[region.id] = region_options
+        return resolved, options
 
     def get_preview(self) -> PreviewSnapshot:
         generated_at = self._monotonic()

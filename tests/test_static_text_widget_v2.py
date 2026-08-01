@@ -148,6 +148,9 @@ def test_preserved_unsupported_content_fails_without_drawing(
         (FontChoice.LEGACY_3X7, "12:3", 7),
         (FontChoice.LEGACY_5X7, "AB", 7),
         (FontChoice.COMPACT_3X5, "AB", 5),
+        (FontChoice.NATIVE_4X9, "AB", 9),
+        (FontChoice.NATIVE_5X9, "AB", 9),
+        (FontChoice.NATIVE_5X10, "AB", 10),
     ],
 )
 def test_explicit_fonts_render_at_intrinsic_height(
@@ -168,7 +171,7 @@ def test_explicit_fonts_render_at_intrinsic_height(
 
 def test_auto_font_priority_and_five_pixel_fallback() -> None:
     assert render(font=FontChoice.AUTO).to_bytes() == render(
-        font=FontChoice.LEGACY_5X7
+        font=FontChoice.NATIVE_5X10
     ).to_bytes()
     assert render(height=5, font=FontChoice.AUTO).to_bytes() == render(
         height=5, font=FontChoice.COMPACT_3X5
@@ -275,7 +278,7 @@ def test_truncate_and_clip_auto_font_do_not_shrink_for_width() -> None:
             overflow=overflow,
         ).to_bytes() == render(
             width=5,
-            font=FontChoice.LEGACY_5X7,
+            font=FontChoice.NATIVE_5X10,
             overflow=overflow,
         ).to_bytes()
 

@@ -107,7 +107,9 @@ def metric_configuration(width: int) -> ConfigurationDocumentV2:
                     "enabled": True, "background_color": None,
                     "widget": {
                         "type": "system_metric",
-                        "settings": SystemMetricSettings().to_dict(),
+                        "settings": SystemMetricSettings(
+                            font="5x10",  # type: ignore[arg-type]
+                        ).to_dict(),
                     },
                 }],
             },
@@ -491,7 +493,7 @@ def test_candidate_geometry_metadata_uses_the_configured_renderer() -> None:
         service.validate_configuration(metric_configuration(34))
     metric = metric_failure.value
     assert (metric.actual_width, metric.actual_height) == (34, 10)
-    assert (metric.minimum_width, metric.minimum_height) == (35, 5)
+    assert (metric.minimum_width, metric.minimum_height) == (35, 10)
 
     clock_defaults = registry.resolve(WidgetType.CLOCK).default_settings
     assert type(clock_defaults) is ClockSettings

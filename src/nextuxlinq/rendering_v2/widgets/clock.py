@@ -6,6 +6,7 @@ import math
 from datetime import datetime
 
 from nextuxlinq.rendering_v2.fonts import (
+    AUTO_FONT_PRIORITY,
     FontDefinition,
     FontRegistry,
     FontTextError,
@@ -21,11 +22,6 @@ from nextuxlinq.rendering_v2.widgets.errors import WidgetRenderingError
 from nextuxlinq.rendering_v2.widgets.timezone import resolve_wall_clock
 from nextuxlinq.widget_models import ClockFormat, ClockSettings, FontChoice
 
-_AUTO_PRIORITY = (
-    FontChoice.LEGACY_5X7,
-    FontChoice.LEGACY_3X7,
-    FontChoice.COMPACT_3X5,
-)
 _CLOCK_CHARACTERS = "0123456789:"
 
 
@@ -129,7 +125,7 @@ def _validate_font(
     return font
 
 
-def _resolve_clock_font(
+def resolve_clock_font(
     registry: FontRegistry,
     settings: ClockSettings,
     *,
@@ -157,7 +153,7 @@ def _resolve_clock_font(
 
     supported = False
     vertically_valid = False
-    for font_id in _AUTO_PRIORITY:
+    for font_id in AUTO_FONT_PRIORITY:
         try:
             font = registry.resolve(font_id)
         except FontTextError:
@@ -219,7 +215,7 @@ def render_clock(
             value, settings.format, show_seconds=settings.show_seconds
         )
         registry = create_builtin_font_registry()
-        font = _resolve_clock_font(
+        font = resolve_clock_font(
             registry,
             settings,
             region_width=surface.width,

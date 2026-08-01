@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 
 from nextuxlinq.rendering_v2.fonts import (
+    AUTO_FONT_PRIORITY,
     FontDefinition,
     FontRegistry,
     FontTextError,
@@ -58,15 +59,16 @@ def _metric_font_registry() -> FontRegistry:
     definitions = []
     for definition in create_builtin_font_registry().definitions:
         glyphs = dict(definition.glyphs)
-        rows = _PERCENT_ROWS[definition.glyph_height]
-        if definition.glyph_height == 7 and max(
-            glyph.width for glyph in definition.glyphs.values()
-        ) <= 3:
-            rows = ("101", "001", "010", "010", "010", "100", "101")
-            glyphs["-"] = GlyphBitmap.from_strings(
-                ("000", "000", "000", "111", "000", "000", "000")
-            )
-        glyphs["%"] = GlyphBitmap.from_strings(rows)
+        if "%" not in glyphs:
+            rows = _PERCENT_ROWS[definition.glyph_height]
+            if definition.glyph_height == 7 and max(
+                glyph.width for glyph in definition.glyphs.values()
+            ) <= 3:
+                rows = ("101", "001", "010", "010", "010", "100", "101")
+                glyphs["-"] = GlyphBitmap.from_strings(
+                    ("000", "000", "000", "111", "000", "000", "000")
+                )
+            glyphs["%"] = GlyphBitmap.from_strings(rows)
         definitions.append(FontDefinition(
             font_id=definition.font_id,
             display_label=definition.display_label,
@@ -306,13 +308,6 @@ def _font_envelope_widths(
     return tuple(widths)
 
 
-_AUTO_FONT_PRIORITY = (
-    FontChoice.LEGACY_5X7,
-    FontChoice.LEGACY_3X7,
-    FontChoice.COMPACT_3X5,
-)
-
-
 def metric_text_format_envelope(settings: SystemMetricSettings) -> tuple[str, ...]:
     """Return snapshot-independent text forms used to choose one stable font."""
     values = (
@@ -335,7 +330,7 @@ def resolve_system_metric_font(
     choices = (
         (settings.font,)
         if settings.font is not FontChoice.AUTO
-        else _AUTO_FONT_PRIORITY
+        else AUTO_FONT_PRIORITY
     )
     supported_but_tall = False
     supported_and_vertical = False
@@ -355,9 +350,11 @@ def resolve_system_metric_font(
             settings.overflow is TextOverflow.ERROR
             and max(widths) > region_width
         ):
-            raise FontTextError(
-                "content_too_wide", field="content", font_id=font.font_id
-            )
+            if settings.font is not FontChoice.AUTO:
+                raise FontTextError(
+                    "content_too_wide", field="content", font_id=font.font_id
+                )
+            continue
         return font
     if supported_and_vertical and settings.overflow is TextOverflow.ERROR:
         category = "content_too_wide"

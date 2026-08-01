@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from types import MappingProxyType
 
 import pytest
 
 from nextuxlinq.rendering import FONT_3X7, FONT_5X7
 from nextuxlinq.rendering_v2.fonts.builtin import (
+    AUTO_FONT_PRIORITY,
     COMPACT_3X5_ROWS,
     LEGACY_3X7_ROWS,
     LEGACY_5X7_ROWS,
+    NATIVE_4X9_ROWS,
+    NATIVE_5X9_ROWS,
+    NATIVE_5X10_ROWS,
     create_builtin_font_registry,
 )
 from nextuxlinq.rendering_v2.fonts.models import (
@@ -199,6 +205,9 @@ def test_builtin_registry_is_fresh_deterministic_and_immutable() -> None:
         FontChoice.LEGACY_3X7,
         FontChoice.LEGACY_5X7,
         FontChoice.COMPACT_3X5,
+        FontChoice.NATIVE_4X9,
+        FontChoice.NATIVE_5X9,
+        FontChoice.NATIVE_5X10,
     )
     assert tuple(item.font_id for item in first.definitions) == expected
     assert first.definitions == second.definitions
@@ -273,6 +282,67 @@ def test_compact_3x5_has_complete_exact_checked_in_fixture() -> None:
     assert definition.glyphs["."].width == 1
     assert definition.glyphs[":"].width == 1
     assert definition.glyphs["A"].width == 3
+
+
+@pytest.mark.parametrize(
+    ("font_id", "rows", "width", "height", "fixture_hash"),
+    [
+        (
+            FontChoice.NATIVE_4X9,
+            NATIVE_4X9_ROWS,
+            4,
+            9,
+            "6676524eed29938ce199d8165dd8ffb1f8fe6a5f96ad0d2e83738ae9b7455c1e",
+        ),
+        (
+            FontChoice.NATIVE_5X9,
+            NATIVE_5X9_ROWS,
+            5,
+            9,
+            "70449262b1a2ee5202bbf96a0d1c451a64aa34f62073ac0e411856a6f0f57700",
+        ),
+        (
+            FontChoice.NATIVE_5X10,
+            NATIVE_5X10_ROWS,
+            5,
+            10,
+            "15d9dddd2a6d849959c895f2ebb6880fadbf2f187a745dfead30fe32fa24631d",
+        ),
+    ],
+)
+def test_larger_native_fonts_are_exact_complete_immutable_fixtures(
+    font_id: FontChoice,
+    rows: MappingProxyType,
+    width: int,
+    height: int,
+    fixture_hash: str,
+) -> None:
+    required = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-_:!?/%")
+    definition = create_builtin_font_registry().resolve(font_id)
+    encoded = json.dumps(
+        dict(rows), sort_keys=True, separators=(",", ":")
+    ).encode("ascii")
+    assert hashlib.sha256(encoded).hexdigest() == fixture_hash
+    assert definition.supported_characters == required
+    assert all(glyph.height == height for glyph in definition.glyphs.values())
+    assert max(glyph.width for glyph in definition.glyphs.values()) == width
+    assert {
+        character: glyph.to_strings()
+        for character, glyph in definition.glyphs.items()
+    } == dict(rows)
+    assert isinstance(rows, MappingProxyType)
+    assert not (set("abcdefghijklmnopqrstuvwxyz") & set(rows))
+
+
+def test_auto_font_priority_is_explicit_and_largest_first() -> None:
+    assert AUTO_FONT_PRIORITY == (
+        FontChoice.NATIVE_5X10,
+        FontChoice.NATIVE_5X9,
+        FontChoice.NATIVE_4X9,
+        FontChoice.LEGACY_5X7,
+        FontChoice.LEGACY_3X7,
+        FontChoice.COMPACT_3X5,
+    )
 
 
 def test_ascii_only_normalization_does_not_expand_unicode() -> None:
@@ -357,6 +427,34 @@ def test_auto_resolution_may_ignore_width_for_clipping_callers() -> None:
 
 
 @pytest.mark.parametrize(
+    ("content", "width", "height", "expected"),
+    [
+        ("A", 5, 10, FontChoice.NATIVE_5X10),
+        ("12:34", 25, 10, FontChoice.NATIVE_5X10),
+        ("12:34", 24, 10, FontChoice.NATIVE_4X9),
+        ("A", 5, 9, FontChoice.NATIVE_5X9),
+        ("A", 4, 9, FontChoice.NATIVE_4X9),
+    ],
+)
+def test_auto_resolution_selects_largest_fitting_native_font(
+    content: str,
+    width: int,
+    height: int,
+    expected: FontChoice,
+) -> None:
+    resolved = resolve_font(
+        create_builtin_font_registry(),
+        FontChoice.AUTO,
+        content,
+        uppercase=True,
+        region_width=width,
+        region_height=height,
+        require_complete_width=True,
+    )
+    assert resolved.font.font_id is expected
+
+
+@pytest.mark.parametrize(
     "choice,text,width,height,category",
     [
         (FontChoice.LEGACY_3X7, "A", 10, 7, "unsupported_glyph"),
@@ -411,5 +509,8 @@ def test_builtin_row_fixture_views_are_read_only() -> None:
     assert isinstance(LEGACY_3X7_ROWS, MappingProxyType)
     assert isinstance(LEGACY_5X7_ROWS, MappingProxyType)
     assert isinstance(COMPACT_3X5_ROWS, MappingProxyType)
+    assert isinstance(NATIVE_4X9_ROWS, MappingProxyType)
+    assert isinstance(NATIVE_5X9_ROWS, MappingProxyType)
+    assert isinstance(NATIVE_5X10_ROWS, MappingProxyType)
     with pytest.raises(TypeError):
         COMPACT_3X5_ROWS["a"] = ("1",) * 5  # type: ignore[index]

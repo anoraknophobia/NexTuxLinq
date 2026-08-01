@@ -40,7 +40,6 @@
   const PROFILE_ID = /^[A-Za-z0-9_-]{1,32}$/;
   const COLOR = /^#[0-9A-Fa-f]{6}$/;
   const TIME_ZONE = /^[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)*$/;
-  const FONTS = new Set(["auto", "3x5", "3x7", "5x7"]);
   const HORIZONTAL = new Set(["start", "center", "end"]);
   const VERTICAL = new Set(["top", "center", "bottom"]);
   const OVERFLOW = new Set(["error", "truncate", "clip"]);
@@ -144,6 +143,12 @@
   }
 
   function validationExplanation(error, profile = null) {
+    const affectedRegion = profile?.regions?.find(
+      (region) => region.id === error?.region_id,
+    );
+    const selectedFont = affectedRegion?.widget?.settings?.font;
+    const explicitFont = selectedFont && selectedFont !== "auto"
+      ? selectedFont.replace("x", "×") : null;
     const actualWidth = Number.isInteger(error?.actual_width)
       ? error.actual_width : null;
     const actualHeight = Number.isInteger(error?.actual_height)
@@ -157,7 +162,9 @@
     const heightFails = minimumHeight !== null && actualHeight !== null
       && actualHeight < minimumHeight;
     if (widthFails && heightFails) {
-      return `Minimum size ${minimumWidth} × ${minimumHeight} px`;
+      return explicitFont
+        ? `${explicitFont} needs minimum size ${minimumWidth} × ${minimumHeight} px`
+        : `Minimum size ${minimumWidth} × ${minimumHeight} px`;
     }
     if (error?.category === "out_of_bounds") return "Outside canvas";
     if (error?.category === "overlap") {
@@ -170,12 +177,18 @@
     if (heightFails || error?.category === "content_too_tall") {
       return minimumHeight === null
         ? "Text is too tall"
-        : `Too short · minimum height ${minimumHeight} px`;
+        : explicitFont
+          ? `${explicitFont} needs minimum height ${minimumHeight} px`
+          : `Too short · minimum height ${minimumHeight} px`;
     }
     if (widthFails || error?.category === "content_too_wide") {
       return minimumWidth === null
         ? "Text does not fit"
-        : `Too narrow · minimum width ${minimumWidth} px`;
+        : explicitFont
+          ? `${affectedRegion.widget.type === "clock" ? "Clock with " : ""}${
+            explicitFont
+          } needs minimum width ${minimumWidth} px`
+          : `Too narrow · minimum width ${minimumWidth} px`;
     }
     return {
       invalid_dimensions: "Invalid region size",
@@ -196,6 +209,40 @@
       .sort((left, right) => (
         validationPriority(left) - validationPriority(right)
       ));
+  }
+
+  function fontOptionReason(status) {
+    if (!status || status.available) return "";
+    if (status.category === "content_too_tall"
+        && Number.isInteger(status.minimum_height)) {
+      return `Needs height ${status.minimum_height} px`;
+    }
+    if (status.category === "content_too_wide"
+        && Number.isInteger(status.minimum_width)) {
+      return `Needs width ${status.minimum_width} px`;
+    }
+    if (status.category === "unsupported_glyph") {
+      return "Unsupported characters";
+    }
+    return "Not available for this widget";
+  }
+
+  function resolvedFontExplanation(
+    selectedFont, resolvedFont, definitions, validationState,
+  ) {
+    const selected = (definitions || []).find(
+      (item) => item.id === (
+        selectedFont === "auto" ? resolvedFont : selectedFont
+      ),
+    );
+    if (selectedFont !== "auto") {
+      return `Selected font: ${
+        selected?.label || String(selectedFont).replace("x", "×")
+      }`;
+    }
+    if (selected) return `Resolved font: ${selected.label}`;
+    return validationState === "invalid"
+      ? "Resolved font: unavailable" : "Resolved font: validating…";
   }
 
   function totalRegionCount(configuration) {
@@ -220,7 +267,10 @@
       if (fingerprint(actual) !== fingerprint(expected)) return "settings";
     }
     const settings = widget.settings;
-    const fontValid = () => FONTS.has(settings.font);
+    const fontIds = new Set(
+      (metadata.font_definitions || []).map((item) => item.id),
+    );
+    const fontValid = () => fontIds.has(settings.font);
     const colorValid = () => COLOR.test(settings.color || "");
     const verticalValid = () => VERTICAL.has(settings.vertical_alignment);
     const horizontalValid = () => HORIZONTAL.has(
@@ -802,6 +852,8 @@
       localValidation: null,
       serverValidation: "idle",
       serverErrors: [],
+      resolvedFonts: {},
+      fontOptions: {},
       conflict: false,
       submitting: false,
       lastValidPreview: null,
@@ -942,6 +994,8 @@
       mutator(candidate);
       state.draft = candidate;
       state.serverErrors = [];
+      state.resolvedFonts = {};
+      state.fontOptions = {};
       state.inputErrors.clear();
       if (!state.conflict) setMessage("");
       updateDerivedState();
@@ -1151,6 +1205,31 @@
         panel.hidden = panel.dataset.widgetPanel !== region.widget.type;
       }
       const settings = region.widget.settings;
+      const optionStatuses = new Map(
+        (state.fontOptions[region.id] || []).map((item) => [item.id, item]),
+      );
+      for (const select of elements.settings.querySelectorAll(
+        "[data-font-select]"
+      )) {
+        if (select.closest("[data-widget-panel]").dataset.widgetPanel
+            !== region.widget.type) continue;
+        const options = (state.metadata.font_definitions || []).map(
+          (definition) => {
+            const option = documentObject.createElement("option");
+            option.value = definition.id;
+            const status = optionStatuses.get(definition.id);
+            const reason = fontOptionReason(status);
+            option.textContent = reason
+              ? `${definition.label} — ${reason}` : definition.label;
+            option.title = reason;
+            option.disabled = Boolean(
+              reason && definition.id !== settings.font
+            );
+            return option;
+          },
+        );
+        select.replaceChildren(...options);
+      }
       for (const select of elements.settings.querySelectorAll(
         "[data-metric-select]"
       )) {
@@ -1181,6 +1260,20 @@
         synchronizeColorControl(
           control,
           settings[control.dataset.colorSetting],
+        );
+      }
+      const widgetPanel = elements.settings.querySelector?.(
+        `[data-widget-panel="${region.widget.type}"]`,
+      );
+      const resolvedLabel = widgetPanel?.querySelector?.(
+        "[data-resolved-font]",
+      );
+      if (resolvedLabel) {
+        resolvedLabel.textContent = resolvedFontExplanation(
+          settings.font,
+          state.resolvedFonts[region.id],
+          state.metadata.font_definitions,
+          state.serverValidation,
         );
       }
       const metricPanel = elements.settings.querySelector?.(
@@ -1528,6 +1621,9 @@
           state.migrationPending = Boolean(result.migration_pending);
           state.pendingRemote = null;
           state.conflict = false;
+          state.serverErrors = [];
+          state.resolvedFonts = {};
+          state.fontOptions = {};
           state.selectedRegionId = selectionForProfile(
             selectedRegionId,
             activeProfile(),
@@ -1587,6 +1683,8 @@
         if (token !== state.validationToken) return false;
         state.serverValidation = "valid";
         state.serverErrors = [];
+        state.resolvedFonts = result.resolved_fonts || {};
+        state.fontOptions = result.font_options || {};
         state.inputErrors.clear();
         state.lastValidPreview = result.framebuffer_base64;
         state.previewPolicy = result.update_policy;
@@ -1742,6 +1840,8 @@
       );
       state.conflict = false;
       state.serverErrors = [];
+      state.resolvedFonts = {};
+      state.fontOptions = {};
       updateDerivedState();
       state.serverValidation = "idle";
       render();
@@ -1945,6 +2045,8 @@
       state.draft = clone(configuration);
       state.selectedRegionId = null;
       state.serverErrors = [];
+      state.resolvedFonts = {};
+      state.fontOptions = {};
       state.inputErrors.clear();
       state.pendingFullImportBackup = fullImport;
       state.conflict = false;
@@ -2004,6 +2106,8 @@
         state.selectedRegionId = null;
         state.draft = candidate;
         state.serverErrors = [];
+        state.resolvedFonts = {};
+        state.fontOptions = {};
         state.inputErrors.clear();
         updateDerivedState();
         state.serverValidation = "idle";
@@ -2468,6 +2572,8 @@
           activeProfile(),
         );
         state.serverErrors = [];
+        state.resolvedFonts = {};
+        state.fontOptions = {};
         state.inputErrors.clear();
         state.pendingRemote = null;
         state.pendingFullImportBackup = false;
@@ -2569,6 +2675,8 @@
     validationPriority,
     validationExplanation,
     regionValidationErrors,
+    fontOptionReason,
+    resolvedFontExplanation,
     validateLocalCandidate,
     validateWidgetSettings,
     nextStableId,

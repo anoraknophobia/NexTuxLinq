@@ -33,6 +33,7 @@ from nextuxlinq.api_models import (
     ConfigurationModel,
     DomainValidationError,
     ErrorResponse,
+    FontEditorDefinition,
     FreeLayoutMetadataResponse,
     PreviewRegion,
     PreviewResponse,
@@ -745,6 +746,25 @@ def create_app(
                 )
                 for definition in service.get_widget_definitions()
             ],
+            font_definitions=[
+                FontEditorDefinition(
+                    id="auto",
+                    label="Auto — largest fitting",
+                    glyph_height=None,
+                    maximum_glyph_width=None,
+                ),
+                *(
+                    FontEditorDefinition(
+                        id=definition.font_id.value,
+                        label=definition.font_id.value.replace("x", "×"),
+                        glyph_height=definition.glyph_height,
+                        maximum_glyph_width=max(
+                            glyph.width for glyph in definition.glyphs.values()
+                        ),
+                    )
+                    for definition in service.get_font_definitions()
+                ),
+            ],
             metric_definitions=[
                 MetricEditorDefinition(
                     id=metric_id.value,
@@ -983,8 +1003,10 @@ def create_app(
     async def validate_candidate(
         request: CanonicalValidateRequest,
     ) -> CanonicalValidateResponse:
-        result = service.validate_configuration(
-            request.configuration.to_domain()
+        configuration = request.configuration.to_domain()
+        result = service.validate_configuration(configuration)
+        resolved_fonts, font_options = service.get_font_validation(
+            configuration.active
         )
         return CanonicalValidateResponse(
             valid=True,
@@ -993,6 +1015,8 @@ def create_app(
             framebuffer_base64=base64.b64encode(
                 result.logical_framebuffer
             ).decode("ascii"),
+            resolved_fonts=resolved_fonts,
+            font_options=font_options,
         )
 
     @app.post(

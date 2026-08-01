@@ -103,6 +103,10 @@ sources and formatting are documented in
 below the physical display preview so the editor and preview remain the primary
 workflow.
 
+Text widgets use immutable native 3×5, 3×7, 5×7, 4×9, 5×9, and 5×10 bitmap
+fonts. Auto selects the largest fitting native fixture from backend metadata;
+a 25×10 `HH:MM` Clock resolves to the true 5×10 font without scaling.
+
 Live telemetry includes CPU, memory, uptime, load, fixed-root storage, network
 rates, and generic kernel-exposed GPU, VRAM, and temperature data. Sensor
 availability varies by hardware and driver; no vendor utility, shell command,

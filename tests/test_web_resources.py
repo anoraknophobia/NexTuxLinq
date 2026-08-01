@@ -283,6 +283,27 @@ def test_visual_editor_exposes_only_canonical_widget_controls() -> None:
     assert "documentObject.hidden" in editor
 
 
+def test_font_controls_are_backend_driven_and_show_resolved_auto_font() -> None:
+    page, _, css = _frontend_source()
+    editor = _editor_source()
+    inspector = page.split('id="fl-region-inspector"', 1)[1].split(
+        "</aside>", 1
+    )[0]
+
+    assert inspector.count("data-font-select") == 5
+    assert inspector.count("data-resolved-font") == 5
+    assert "Auto — largest fitting" not in inspector
+    for font_id in ("3x5", "3x7", "5x7", "4x9", "5x9", "5x10"):
+        assert f'<option value="{font_id}"' not in inspector
+    assert "state.metadata.font_definitions" in editor
+    assert "state.resolvedFonts[region.id]" in editor
+    assert "fontOptionReason(status)" in editor
+    assert "option.disabled" in editor
+    assert "Resolved font:" in editor
+    assert ".font-field [data-resolved-font]" in css
+    assert "AUTO_FONT_PRIORITY" not in editor
+
+
 def test_primary_section_order_places_profile_after_physical_preview() -> None:
     page, _, _ = _frontend_source()
     editor = _editor_source()

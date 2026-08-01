@@ -13,6 +13,16 @@ const widgetMetadata = {
   max_profiles: 32,
   max_regions_per_profile: 32,
   max_regions_per_document: 128,
+  font_definitions: [
+    {id: "auto", label: "Auto — largest fitting", glyph_height: null,
+      maximum_glyph_width: null},
+    {id: "5x10", label: "5×10", glyph_height: 10, maximum_glyph_width: 5},
+    {id: "5x9", label: "5×9", glyph_height: 9, maximum_glyph_width: 5},
+    {id: "4x9", label: "4×9", glyph_height: 9, maximum_glyph_width: 4},
+    {id: "5x7", label: "5×7", glyph_height: 7, maximum_glyph_width: 5},
+    {id: "3x7", label: "3×7", glyph_height: 7, maximum_glyph_width: 3},
+    {id: "3x5", label: "3×5", glyph_height: 5, maximum_glyph_width: 3},
+  ],
   widget_definitions: [
     {
       type: "blank", label: "Nothing / Gap", default_settings: {},
@@ -299,6 +309,8 @@ function freeEditorFixture({
         update_policy: "static",
         animated_content: false,
         framebuffer_base64: validationFrame,
+        resolved_fonts: {},
+        font_options: {},
       });
     }
     if (url.endsWith("/config") && options.method === "PUT") {
@@ -2030,6 +2042,41 @@ test("region validation explanations expose exact safe geometry guidance", () =>
     category: "time_zone_unavailable",
     message: "PRIVATE/TIMEZONE",
   }), "Invalid time zone");
+  const explicitClock = freeRegion({
+    width: 24,
+    widget: {type: "clock", settings: {
+      ...widgetMetadata.widget_definitions.find(
+        (definition) => definition.type === "clock"
+      ).default_settings,
+      font: "5x10",
+    }},
+  });
+  assert.equal(freeLayout.validationExplanation({
+    category: "content_too_wide", region_id: explicitClock.id,
+    actual_width: 24, actual_height: 10,
+    minimum_width: 25, minimum_height: 10,
+  }, freeProfile([explicitClock])), "Clock with 5×10 needs minimum width 25 px");
+});
+
+test("font option reasons and resolved labels use backend metadata", () => {
+  assert.equal(freeLayout.fontOptionReason({
+    available: false, category: "content_too_tall", minimum_height: 10,
+  }), "Needs height 10 px");
+  assert.equal(freeLayout.fontOptionReason({
+    available: false, category: "content_too_wide", minimum_width: 25,
+  }), "Needs width 25 px");
+  assert.equal(freeLayout.fontOptionReason({
+    available: false, category: "unsupported_glyph",
+  }), "Unsupported characters");
+  assert.equal(freeLayout.resolvedFontExplanation(
+    "auto", "5x10", widgetMetadata.font_definitions, "valid",
+  ), "Resolved font: 5×10");
+  assert.equal(freeLayout.resolvedFontExplanation(
+    "5x9", null, widgetMetadata.font_definitions, "invalid",
+  ), "Selected font: 5×9");
+  assert.equal(freeLayout.resolvedFontExplanation(
+    "auto", null, widgetMetadata.font_definitions, "invalid",
+  ), "Resolved font: unavailable");
 });
 
 test("region validation priority and overlap explanations are deterministic", () => {

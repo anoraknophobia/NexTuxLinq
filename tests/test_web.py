@@ -317,6 +317,24 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
         "metric_bar",
     ]
     assert definitions[0]["default_settings"] == {}
+    assert body["font_definitions"] == [
+        {
+            "id": "auto", "label": "Auto — largest fitting",
+            "glyph_height": None, "maximum_glyph_width": None,
+        },
+        {"id": "5x10", "label": "5×10", "glyph_height": 10,
+         "maximum_glyph_width": 5},
+        {"id": "5x9", "label": "5×9", "glyph_height": 9,
+         "maximum_glyph_width": 5},
+        {"id": "4x9", "label": "4×9", "glyph_height": 9,
+         "maximum_glyph_width": 4},
+        {"id": "5x7", "label": "5×7", "glyph_height": 7,
+         "maximum_glyph_width": 5},
+        {"id": "3x7", "label": "3×7", "glyph_height": 7,
+         "maximum_glyph_width": 3},
+        {"id": "3x5", "label": "3×5", "glyph_height": 5,
+         "maximum_glyph_width": 3},
+    ]
     assert body["bar_metric_ids"] == [
         "cpu_usage", "memory_usage", "cpu_temperature", "storage_usage",
         "gpu_usage", "gpu_temperature", "gpu_memory_usage",
@@ -485,6 +503,73 @@ def test_canonical_validation_uses_real_compositor_without_side_effects(
     assert worker.frames == []
 
 
+def test_clock_validation_reports_largest_resolved_font_and_option_reasons(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    candidate = legacy_equivalent_configuration_v2().to_dict()
+    clock = candidate["profiles"]["default"]["regions"][0]
+    clock["x"] = 0
+    clock["width"] = 25
+    clock["widget"]["settings"]["font"] = "auto"
+    candidate["profiles"]["default"]["regions"] = [clock]
+
+    fitting = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+
+    assert fitting.status_code == 200
+    assert fitting.json()["resolved_fonts"] == {"legacy-front-clock": "5x10"}
+    statuses = {
+        item["id"]: item
+        for item in fitting.json()["font_options"]["legacy-front-clock"]
+    }
+    assert statuses["5x10"]["available"] is True
+
+    clock["width"] = 24
+    narrower = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+
+    assert narrower.status_code == 200
+    assert narrower.json()["resolved_fonts"] == {"legacy-front-clock": "4x9"}
+    statuses = {
+        item["id"]: item
+        for item in narrower.json()["font_options"]["legacy-front-clock"]
+    }
+    assert statuses["5x10"] == {
+        "id": "5x10",
+        "available": False,
+        "category": "content_too_wide",
+        "minimum_width": 25,
+        "minimum_height": 10,
+    }
+
+    clock["widget"]["settings"]["font"] = "5x10"
+    explicit_failure = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+    assert explicit_failure.status_code == 422
+    assert explicit_failure.json()["field_errors"][0] == {
+        "field": "regions.legacy-front-clock.content",
+        "message": "The widget settings cannot be rendered.",
+        "region_id": "legacy-front-clock",
+        "widget_type": "clock",
+        "category": "content_too_wide",
+        "renderer_field": "content",
+        "actual_width": 24,
+        "actual_height": 10,
+        "minimum_width": 25,
+        "minimum_height": 10,
+    }
+    assert service.snapshot().active_configuration_revision == 1
+    assert store.saved == []
+    assert worker.frames == []
+
+
 def test_canonical_validation_rejects_geometry_and_renderer_errors(
     api_client,
 ) -> None:
@@ -630,7 +715,9 @@ def test_candidate_error_exposes_only_safe_authoritative_geometry_metadata(
         "enabled": True, "background_color": None,
         "widget": {
             "type": "system_metric",
-            "settings": SystemMetricSettings().to_dict(),
+            "settings": SystemMetricSettings(
+                font="5x10",  # type: ignore[arg-type]
+            ).to_dict(),
         },
     }]
 
@@ -651,7 +738,7 @@ def test_candidate_error_exposes_only_safe_authoritative_geometry_metadata(
         "actual_width": 34,
         "actual_height": 10,
         "minimum_width": 35,
-        "minimum_height": 5,
+        "minimum_height": 10,
     }
     serialized = json.dumps(response.json())
     assert "/proc" not in serialized
@@ -677,7 +764,9 @@ def test_candidate_validation_reports_each_invalid_renderer_region(
     provider = Provider()
     service._metrics_provider = provider
     candidate = legacy_equivalent_configuration_v2().to_dict()
-    settings = SystemMetricSettings().to_dict()
+    settings = SystemMetricSettings(
+        font="5x10",  # type: ignore[arg-type]
+    ).to_dict()
     candidate["profiles"]["default"]["regions"] = [
         {
             "id": region_id, "name": None,

@@ -122,6 +122,9 @@ class FontChoice(StrEnum):
     COMPACT_3X5 = "3x5"
     LEGACY_3X7 = "3x7"
     LEGACY_5X7 = "5x7"
+    NATIVE_4X9 = "4x9"
+    NATIVE_5X9 = "5x9"
+    NATIVE_5X10 = "5x10"
 
 
 class TextOverflow(StrEnum):

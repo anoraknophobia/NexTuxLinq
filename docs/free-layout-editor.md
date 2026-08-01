@@ -23,6 +23,14 @@ values normalize to uppercase. An incomplete or malformed hexadecimal value
 remains visible as an invalid local draft; it disables Apply and Save and
 keeps the last valid preview instead of silently substituting black.
 
+Font dropdowns are populated from canonical backend metadata. **Auto — largest
+fitting** chooses among the native 5×10, 5×9, 4×9, 5×7, 3×7, and 3×5 fixtures
+using the configured widget's real content, geometry, and overflow rules. The
+inspector shows the currently resolved Auto font. Concrete fonts remain visible;
+an unavailable choice is disabled where practical with a concise height, width,
+or character-coverage reason. An explicit saved choice is retained while its
+draft geometry is invalid rather than silently replaced.
+
 The primary page order is Device status, Free-layout editor, Physical display
 preview, Profile, then Validate, Apply, and Save. The full-width region
 inspector remains below the canvas. Moving Profile below the preview changes no

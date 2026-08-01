@@ -10,13 +10,17 @@ from pathlib import Path
 import pytest
 
 from nextuxlinq.rendering_v2.registry import RenderContext
-from nextuxlinq.rendering_v2.fonts import FontTextError
+from nextuxlinq.rendering_v2.fonts import (
+    FontTextError,
+    create_builtin_font_registry,
+)
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.widgets import date as date_module
 from nextuxlinq.rendering_v2.widgets.date import (
     GERMAN_WEEKDAY_ABBREVIATIONS,
     format_date,
     render_date,
+    resolve_date_font,
 )
 from nextuxlinq.rendering_v2.widgets.errors import WidgetRenderingError
 from nextuxlinq.widget_models import (
@@ -290,7 +294,13 @@ def test_formatting_is_independent_of_process_locale(
 
 @pytest.mark.parametrize(
     "font",
-    [FontChoice.COMPACT_3X5, FontChoice.LEGACY_5X7],
+    [
+        FontChoice.COMPACT_3X5,
+        FontChoice.LEGACY_5X7,
+        FontChoice.NATIVE_4X9,
+        FontChoice.NATIVE_5X9,
+        FontChoice.NATIVE_5X10,
+    ],
 )
 def test_supported_explicit_fonts(font: FontChoice) -> None:
     assert colored_pixels(render(font=font))
@@ -304,10 +314,16 @@ def test_unsupported_explicit_font_is_controlled() -> None:
     assert raised.value.field == "font"
 
 
-def test_auto_font_uses_phase3a_priority() -> None:
+def test_auto_font_uses_largest_fitting_native_font() -> None:
     assert render(font=FontChoice.AUTO).to_bytes() == render(
-        font=FontChoice.LEGACY_5X7
+        font=FontChoice.NATIVE_5X10
     ).to_bytes()
+    assert resolve_date_font(
+        create_builtin_font_registry(),
+        settings(font=FontChoice.AUTO),
+        region_width=90,
+        region_height=10,
+    ).font_id is FontChoice.NATIVE_5X10
 
 
 def test_five_pixel_row_supports_day_and_month_when_width_permits() -> None:
@@ -453,9 +469,15 @@ def test_vertical_alignments(
     alignment: VerticalAlignment, expected_shift: int
 ) -> None:
     top = colored_pixels(
-        render(vertical_alignment=VerticalAlignment.TOP)
+        render(
+            vertical_alignment=VerticalAlignment.TOP,
+            font=FontChoice.LEGACY_5X7,
+        )
     )
-    actual = colored_pixels(render(vertical_alignment=alignment))
+    actual = colored_pixels(render(
+        vertical_alignment=alignment,
+        font=FontChoice.LEGACY_5X7,
+    ))
 
     assert actual == frozenset(
         (x, y + expected_shift) for x, y in top

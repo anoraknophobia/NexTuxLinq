@@ -318,6 +318,21 @@ def test_width_never_shrinks_automatic_font_selection() -> None:
         )
         assert automatic.to_bytes() == explicit.to_bytes()
 
+    for width, phase in ((1, 1), (90, 90)):
+        automatic = render(
+            width=width,
+            height=10,
+            animation_time=phase,
+            font=FontChoice.AUTO,
+        )
+        explicit = render(
+            width=width,
+            height=10,
+            animation_time=phase,
+            font=FontChoice.NATIVE_5X10,
+        )
+        assert automatic.to_bytes() == explicit.to_bytes()
+
 
 def test_five_pixel_regions_use_compact_font() -> None:
     automatic = render(

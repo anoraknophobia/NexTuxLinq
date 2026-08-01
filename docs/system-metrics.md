@@ -37,8 +37,10 @@ one day onward. Network rates automatically use uppercase `KB/S`, `MB/S`, or
 `GB/S`. Temperatures use the font-safe ASCII suffix `C`.
 
 System Metric font selection is snapshot-independent. An explicit font stays
-authoritative. Auto uses `5x7` in a ten-pixel-high region when that font covers
-the configured text; width never causes a fallback to `3x5`. For bounded
+authoritative. Auto uses the largest native font whose stable configured
+format envelope fits the region; a ten-pixel-high region can therefore use
+`5x10`. Horizontal fit may choose another native font for that region, but a
+sampled value never changes that choice. For bounded
 integer metrics, validation checks the compact fixed two-digit `0`–`99`
 layout, the unavailable text, and the effective label. A hypothetical `100`
 does not invalidate an otherwise usable region. The deterministic envelopes

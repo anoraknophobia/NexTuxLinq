@@ -114,8 +114,9 @@ orientation. Complete byte comparisons prove that migrated schema-v1 logical
 and device framebuffers remain equivalent to the compatibility renderer. The
 service now uses this compositor for preview and DeviceWorker candidates.
 
-The [free-layout font foundation](free-layout-fonts.md) adds immutable
-3×5, legacy-compatible 3×7, and legacy-compatible 5×7 bitmap fonts plus local
+The [free-layout font foundation](free-layout-fonts.md) provides immutable
+3×5, legacy-compatible 3×7 and 5×7, and native 4×9, 5×9, and 5×10 bitmap
+fonts plus local
 measurement, alignment, clipping, and overflow primitives. All text-producing
 widgets use those primitives in the canonical renderer. See
 [Phase 4 backend activation](phase4-backend.md) for persistence, API,

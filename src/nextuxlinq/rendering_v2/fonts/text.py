@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from nextuxlinq.rendering_v2.fonts.builtin import AUTO_FONT_PRIORITY
 from nextuxlinq.rendering_v2.fonts.models import (
     DrawTextResult,
     FontDefinition,
@@ -20,11 +21,6 @@ from nextuxlinq.widget_models import (
 
 _ASCII_UPPERCASE = str.maketrans(
     "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-)
-_AUTO_PRIORITY = (
-    FontChoice.LEGACY_5X7,
-    FontChoice.LEGACY_3X7,
-    FontChoice.COMPACT_3X5,
 )
 
 
@@ -122,7 +118,7 @@ def resolve_font(
 
     supported_but_tall = False
     supported_and_vertical = False
-    for font_id in _AUTO_PRIORITY:
+    for font_id in AUTO_FONT_PRIORITY:
         try:
             font = registry.resolve(font_id)
         except FontTextError:

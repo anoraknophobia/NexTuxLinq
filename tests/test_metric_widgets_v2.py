@@ -166,7 +166,10 @@ def test_system_metric_rejects_unsupported_glyph_without_leaking_details() -> No
     assert raised.value.__cause__ is None
 
 
-@pytest.mark.parametrize("font,height", [("auto", 10), ("3x5", 5), ("3x7", 7), ("5x7", 7)])
+@pytest.mark.parametrize("font,height", [
+    ("auto", 10), ("3x5", 5), ("3x7", 7), ("5x7", 7),
+    ("4x9", 9), ("5x9", 9), ("5x10", 10),
+])
 def test_system_metric_supports_automatic_and_explicit_fonts(font: str, height: int) -> None:
     surface = RegionSurface(40, height, RgbColor(1, 2, 3))
     render_system_metric(
@@ -185,7 +188,7 @@ def test_system_metric_supports_automatic_and_explicit_fonts(font: str, height: 
             ),
             region_width=40,
             region_height=10,
-        ).font_id.value == "5x7"
+        ).font_id.value == "5x10"
 
 
 @pytest.mark.parametrize(
@@ -212,8 +215,8 @@ def test_percentage_auto_font_is_stable_for_one_two_and_three_digits(
         )
         for value in (5.0, 14.0, 99.0, 100.0)
     ]
-    assert [layout.font_id.value for layout in layouts] == ["5x7"] * 4
-    assert [layout.glyph_height for layout in layouts] == [7] * 4
+    assert [layout.font_id.value for layout in layouts] == ["5x10"] * 4
+    assert [layout.glyph_height for layout in layouts] == [10] * 4
     assert metric_text(
         settings, context(90, 10, snapshot(**{metric: 5.0}))
     ) == f"{label} 5%"
@@ -270,7 +273,10 @@ def test_percentage_auto_font_is_stable_for_one_two_and_three_digits(
     payload = surface.to_bytes()
     assert all(
         payload[((y * 90 + x) * 3):][:3] == background.to_bytes()
-        for y in range(hidden.origin_y, hidden.origin_y + 7)
+        for y in range(
+            hidden.origin_y,
+            hidden.origin_y + layouts[0].glyph_height,
+        )
         for x in range(hidden.origin_x, hidden.origin_x + hidden.advance)
     )
 
@@ -300,8 +306,8 @@ def test_temperature_auto_font_is_snapshot_independent(
         )
         for value in values
     ]
-    assert {layout.font_id.value for layout in layouts} == {"5x7"}
-    assert {layout.glyph_height for layout in layouts} == {7}
+    assert {layout.font_id.value for layout in layouts} == {"5x10"}
+    assert {layout.glyph_height for layout in layouts} == {10}
     if values[0] >= 0 and values[0] < 10:
         assert any(
             placement.role == "digit" and not placement.visible
@@ -340,10 +346,10 @@ def test_unavailable_and_available_snapshots_use_the_same_auto_font(
         region_height=10,
     )
     assert unavailable.font_id is available.font_id
-    assert unavailable.glyph_height == available.glyph_height == 7
+    assert unavailable.glyph_height == available.glyph_height == 10
 
 
-@pytest.mark.parametrize("font", ["3x5", "5x7"])
+@pytest.mark.parametrize("font", ["3x5", "5x7", "4x9", "5x9", "5x10"])
 def test_explicit_system_metric_font_never_changes(
     font: str,
 ) -> None:
@@ -392,7 +398,7 @@ def test_normal_metric_width_ignores_hypothetical_100_but_actual_100_obeys_overf
             region_width=36,
             region_height=10,
         )
-        assert layout.font_id.value == "5x7"
+        assert layout.font_id.value == "5x10"
         assert layout.measured_width == 35
     with pytest.raises(WidgetRenderingError) as raised:
         render_system_metric(
@@ -411,7 +417,7 @@ def test_normal_metric_width_ignores_hypothetical_100_but_actual_100_obeys_overf
             region_width=36,
             region_height=10,
         )
-        assert layout.font_id.value == "5x7"
+        assert layout.font_id.value == "5x10"
         render_system_metric(
             RegionSurface(36, 10),
             overflow_settings,
@@ -425,9 +431,9 @@ def test_error_mode_still_rejects_a_genuinely_too_narrow_two_digit_layout() -> N
     )
     with pytest.raises(WidgetRenderingError) as raised:
         render_system_metric(
-            RegionSurface(34, 10),
+            RegionSurface(22, 10),
             settings,
-            context(34, 10, snapshot(cpu_usage=5)),
+            context(22, 10, snapshot(cpu_usage=5)),
         )
     assert raised.value.category == "content_too_wide"
 

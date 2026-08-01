@@ -11,7 +11,12 @@ import pytest
 from nextuxlinq.defaults import default_configuration
 from nextuxlinq.migration import migrate_configuration_v1_to_v2
 from nextuxlinq.rendering import render_profile_frame
-from nextuxlinq.rendering_v2.fonts import FontRegistry, FontTextError
+from nextuxlinq.rendering_v2.fonts import (
+    FontRegistry,
+    FontTextError,
+    create_builtin_font_registry,
+    measure_normalized_text,
+)
 from nextuxlinq.rendering_v2.registry import RenderContext
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.widgets import clock as clock_module
@@ -20,6 +25,7 @@ from nextuxlinq.rendering_v2.widgets.clock import (
     clock_separator_is_visible,
     format_clock,
     render_clock,
+    resolve_clock_font,
 )
 from nextuxlinq.rendering_v2.widgets.errors import WidgetRenderingError
 from nextuxlinq.rendering_v2.widgets.timezone import resolve_wall_clock
@@ -351,6 +357,9 @@ def test_vertical_alignment(
         (FontChoice.COMPACT_3X5, 5),
         (FontChoice.LEGACY_3X7, 7),
         (FontChoice.LEGACY_5X7, 7),
+        (FontChoice.NATIVE_4X9, 9),
+        (FontChoice.NATIVE_5X9, 9),
+        (FontChoice.NATIVE_5X10, 10),
     ],
 )
 def test_explicit_fonts_render_at_intrinsic_height(
@@ -368,11 +377,55 @@ def test_explicit_fonts_render_at_intrinsic_height(
     assert max(y for _, y in pixels) == height - 1
 
 
-def test_auto_font_uses_phase3a_priority() -> None:
+def test_auto_font_uses_largest_native_font() -> None:
     automatic = render(font=FontChoice.AUTO)
-    explicit = render(font=FontChoice.LEGACY_5X7)
+    explicit = render(font=FontChoice.NATIVE_5X10)
 
     assert automatic.to_bytes() == explicit.to_bytes()
+
+
+def test_25_by_10_clock_resolves_true_5x10_without_clipping() -> None:
+    chosen = resolve_clock_font(
+        create_builtin_font_registry(),
+        settings(font=FontChoice.AUTO),
+        region_width=25,
+        region_height=10,
+    )
+    surface = render(width=25, height=10, font=FontChoice.AUTO)
+    assert chosen.font_id is FontChoice.NATIVE_5X10
+    assert chosen.glyph_height == 10
+    assert measure_normalized_text(chosen, "23:59").width == 25
+    assert max(y for _, y in colored_pixels(surface)) == 9
+    assert colored_pixels(surface) == colored_pixels(render(
+        width=25, height=10, font=FontChoice.NATIVE_5X10,
+    ))
+
+
+def test_24_by_10_clock_uses_largest_font_that_fully_fits() -> None:
+    chosen = resolve_clock_font(
+        create_builtin_font_registry(),
+        settings(font=FontChoice.AUTO),
+        region_width=24,
+        region_height=10,
+    )
+    assert chosen.font_id is FontChoice.NATIVE_4X9
+
+
+def test_explicit_5x10_clock_seconds_require_39_pixels() -> None:
+    with pytest.raises(WidgetRenderingError) as raised:
+        render(
+            width=38,
+            height=10,
+            font=FontChoice.NATIVE_5X10,
+            show_seconds=True,
+        )
+    assert raised.value.category == "content_too_wide"
+    render(
+        width=39,
+        height=10,
+        font=FontChoice.NATIVE_5X10,
+        show_seconds=True,
+    )
 
 
 def test_auto_font_uses_widest_configured_output_not_current_12h_time() -> None:

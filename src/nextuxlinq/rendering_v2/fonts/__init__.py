@@ -5,9 +5,13 @@ No font registry is constructed at import time. Call
 """
 
 from nextuxlinq.rendering_v2.fonts.builtin import (
+    AUTO_FONT_PRIORITY,
     COMPACT_3X5_ROWS,
     LEGACY_3X7_ROWS,
     LEGACY_5X7_ROWS,
+    NATIVE_4X9_ROWS,
+    NATIVE_5X9_ROWS,
+    NATIVE_5X10_ROWS,
     create_builtin_font_registry,
 )
 from nextuxlinq.rendering_v2.fonts.models import (
@@ -32,9 +36,13 @@ from nextuxlinq.rendering_v2.fonts.text import (
 )
 
 __all__ = (
+    "AUTO_FONT_PRIORITY",
     "COMPACT_3X5_ROWS",
     "LEGACY_3X7_ROWS",
     "LEGACY_5X7_ROWS",
+    "NATIVE_4X9_ROWS",
+    "NATIVE_5X9_ROWS",
+    "NATIVE_5X10_ROWS",
     "DrawTextResult",
     "FontDefinition",
     "FontRegistry",

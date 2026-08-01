@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from nextuxlinq.rendering_v2.fonts import (
+    AUTO_FONT_PRIORITY,
     FontDefinition,
     FontRegistry,
     FontTextError,
@@ -28,11 +29,6 @@ GERMAN_WEEKDAY_ABBREVIATIONS = (
     "SO.",
 )
 
-_AUTO_PRIORITY = (
-    FontChoice.LEGACY_5X7,
-    FontChoice.LEGACY_3X7,
-    FontChoice.COMPACT_3X5,
-)
 _NUMERIC_DATE_CHARACTERS = frozenset("0123456789")
 
 
@@ -116,7 +112,7 @@ def _font_fits(
     return True
 
 
-def _resolve_date_font(
+def resolve_date_font(
     registry: FontRegistry,
     settings: DateSettings,
     *,
@@ -150,7 +146,7 @@ def _resolve_date_font(
     required_characters = (
         _NUMERIC_DATE_CHARACTERS | frozenset("".join(candidates))
     )
-    for font_id in _AUTO_PRIORITY:
+    for font_id in AUTO_FONT_PRIORITY:
         try:
             font = registry.resolve(font_id)
         except FontTextError:
@@ -212,7 +208,7 @@ def render_date(
         value = resolve_wall_clock(context.wall_clock, settings.time_zone)
         text = format_date(value, settings.format)
         registry = create_builtin_font_registry()
-        font = _resolve_date_font(
+        font = resolve_date_font(
             registry,
             settings,
             region_width=surface.width,

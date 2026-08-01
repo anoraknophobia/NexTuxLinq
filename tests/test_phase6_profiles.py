@@ -155,6 +155,36 @@ def test_metric_widgets_round_trip_through_profile_transfer(preset_id: str) -> N
     assert imported.profile.to_dict() == profile.to_dict()
 
 
+def test_larger_native_font_round_trips_through_transfer_and_backup(
+    tmp_path: Path,
+) -> None:
+    raw = legacy_equivalent_configuration_v2().to_dict()
+    region = raw["profiles"]["default"]["regions"][0]
+    region["x"] = 0
+    region["width"] = 25
+    region["widget"]["settings"]["font"] = "5x10"
+    raw["profiles"]["default"]["regions"] = [region]
+    document = ConfigurationDocumentV2.from_dict(raw)
+
+    envelope = export_profile("large-font", document.active)
+    imported = import_profile(
+        parse_json_bytes(deterministic_json(envelope)),
+        (),
+    )
+    assert imported.profile.regions[0].widget.settings.font.value == "5x10"
+    assert imported.profile.to_dict() == document.active.to_dict()
+
+    store = ConfigStore(
+        tmp_path / "nextuxlinq" / "config.json",
+        backup_id_factory=lambda: "2" * 32,
+        backup_clock=lambda: datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    backup = store.create_backup("Large native font", document)
+    restored = store.restore_backup(backup.id)
+    assert restored.to_dict() == document.to_dict()
+    assert restored.active.regions[0].widget.settings.font.value == "5x10"
+
+
 @pytest.mark.parametrize(
     ("raw", "code"),
     [
