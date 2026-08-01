@@ -2410,7 +2410,7 @@ def test_service_cli_exit_codes_without_hid_lock(
         ("useful output",),
         None if success else "sanitized failure",
     )
-    manager.install = lambda *, force: result
+    manager.install = lambda *, force, enable, start, skip_identical: result
     manager.uninstall = lambda: result
     manager.control = lambda action: result
     manager.openlinkhub_restart = lambda action: result
@@ -2431,7 +2431,7 @@ def test_service_cli_exit_codes_without_hid_lock(
             patch(
                 "nextuxlinq.cli.ServiceManager",
                 return_value=SimpleNamespace(
-                    install=lambda *, force: (
+                    install=lambda *, force, enable, start, skip_identical: (
                         ServiceOperationResult(force == expected_force)
                     )
                 ),
@@ -2464,7 +2464,9 @@ def test_service_template_has_no_repository_specific_paths() -> None:
 def test_service_operations_leave_codex_directory_untouched(
     tmp_path: Path,
 ) -> None:
-    codex = REPOSITORY / ".codex"
+    codex = tmp_path / ".codex"
+    codex.mkdir()
+    (codex / "sentinel").write_bytes(b"private")
     before = sorted(
         (path.relative_to(codex), path.stat().st_size)
         for path in codex.rglob("*")
@@ -2481,3 +2483,44 @@ def test_service_operations_leave_codex_directory_untouched(
         if path.is_file()
     )
     assert after == before
+
+
+def test_install_can_leave_service_disabled_and_stopped(tmp_path: Path) -> None:
+    runner = RecordingRunner(lambda arguments: completed())
+    manager, runner = manager_for(tmp_path, runner=runner)
+
+    result = manager.install(enable=False, start=False)
+
+    assert result.success
+    assert "not started" in " ".join(result.output)
+    assert runner.calls == [["systemctl", "--user", "daemon-reload"]]
+
+
+def test_install_can_enable_without_starting(tmp_path: Path) -> None:
+    runner = RecordingRunner(lambda arguments: completed())
+    manager, runner = manager_for(tmp_path, runner=runner)
+
+    result = manager.install(enable=True, start=False)
+
+    assert result.success
+    assert runner.calls == [
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "enable", SERVICE_NAME],
+    ]
+
+
+def test_if_changed_install_does_not_create_redundant_backup(
+    tmp_path: Path,
+) -> None:
+    runner = RecordingRunner(lambda arguments: completed())
+    manager, _ = manager_for(tmp_path, runner=runner)
+    manager._write_unit_atomically(force=False)
+
+    result = manager.install(
+        enable=False,
+        start=False,
+        skip_identical=True,
+    )
+
+    assert result.success
+    assert list(manager.unit_directory.glob("*.bak")) == []

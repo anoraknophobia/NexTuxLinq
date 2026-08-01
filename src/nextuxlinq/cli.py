@@ -199,6 +199,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Replace an existing foreign unit after safety validation.",
     )
+    install_parser.add_argument(
+        "--no-enable",
+        action="store_true",
+        help="Install the unit without enabling it.",
+    )
+    install_parser.add_argument(
+        "--no-start",
+        action="store_true",
+        help="Install the unit without starting it.",
+    )
+    install_parser.add_argument(
+        "--if-changed",
+        action="store_true",
+        help="Avoid retaining a backup when the managed unit is already exact.",
+    )
     service_actions.add_parser(
         "uninstall",
         help="Stop, disable, and remove the managed unit.",
@@ -572,7 +587,12 @@ def manage_service(arguments: argparse.Namespace) -> int:
         print(str(error), file=sys.stderr)
         return 1
     if arguments.service_action == "install":
-        result = manager.install(force=arguments.force)
+        result = manager.install(
+            force=arguments.force,
+            enable=not arguments.no_enable,
+            start=not arguments.no_start,
+            skip_identical=arguments.if_changed,
+        )
     elif arguments.service_action == "uninstall":
         result = manager.uninstall()
     elif arguments.service_action == "openlinkhub-restart":

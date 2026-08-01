@@ -60,6 +60,21 @@ Phanteks.
 
 ## Current Linux control support
 
+### Installation
+
+Automated per-user installation is supported for Arch Linux, CachyOS, and
+other pacman-based Arch derivatives:
+
+```console
+git clone https://github.com/anoraknophobia/NexTuxLinq.git
+cd NexTuxLinq
+./install.sh
+```
+
+See the [installation, update, rollback, and removal guide](docs/installation.md)
+for prerequisites, security behavior, manual installation on other Linux
+distributions, `./update.sh`, and configuration-preserving `./uninstall.sh`.
+
 The Linux implementation can currently:
 
 - Detect connected Phanteks Matrix900 devices through `hidraw`.
@@ -174,9 +189,8 @@ disabled-unit backup, and does not re-enable legacy helpers:
 nextuxlinqctl service uninstall
 ```
 
-See [`docs/systemd.md`](docs/systemd.md) for installation safety and migration
-details. This is a user-service integration, not a distro package or public
-installer.
+See [`docs/systemd.md`](docs/systemd.md) for service-management safety and
+migration details.
 
 Frontend state tests use the built-in `node:test` runner and require Node.js
 20 or newer when running the development test suite. Node.js is not a runtime

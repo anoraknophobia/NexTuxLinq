@@ -106,6 +106,7 @@ class _UnitInspection:
     state: str
     identity: tuple[int, int] | None = None
     mode: int | None = None
+    contents: bytes | None = None
 
 
 class ServiceManagerError(RuntimeError):
@@ -599,6 +600,7 @@ class ServiceManager:
                 state,
                 (details.st_dev, details.st_ino),
                 stat.S_IMODE(details.st_mode),
+                contents,
             )
         finally:
             if not ServiceManager._close_once(descriptor):
@@ -958,6 +960,7 @@ class ServiceManager:
         directory_descriptor: int,
         *,
         force: bool,
+        skip_identical: bool = False,
     ) -> str | None:
         temporary_name: str | None = None
         quarantine_name: str | None = None
@@ -965,9 +968,21 @@ class ServiceManager:
         backup_descriptor: int | None = None
         committed = False
         try:
+            expected_unit = generate_unit(self.executable)
+            if skip_identical:
+                existing = self._inspect_named_unit(
+                    directory_descriptor,
+                    SERVICE_NAME,
+                    allow_absent=True,
+                )
+                if (
+                    existing.state == "managed"
+                    and existing.contents == expected_unit.encode("utf-8")
+                ):
+                    return None
             temporary_name = self._create_temporary_unit(
                 directory_descriptor,
-                generate_unit(self.executable),
+                expected_unit,
             )
             try:
                 os.link(
@@ -1510,6 +1525,9 @@ class ServiceManager:
         directory_descriptor: int,
         *,
         force: bool,
+        enable: bool,
+        start: bool,
+        skip_identical: bool,
     ) -> ServiceOperationResult:
         """Install and activate while the manager-wide lock is held."""
         backup_name: str | None = None
@@ -1517,6 +1535,7 @@ class ServiceManager:
             backup_name = self._write_unit_locked(
                 directory_descriptor,
                 force=force,
+                skip_identical=skip_identical,
             )
         except UnitInstallError as error:
             return ServiceOperationResult(
@@ -1554,7 +1573,7 @@ class ServiceManager:
                 "the service was not enabled.",
             )
 
-        for helper in HELPER_SERVICES:
+        for helper in HELPER_SERVICES if start else ():
             result = self._run("disable", "--now", helper)
             if result is None:
                 return ServiceOperationResult(
@@ -1571,15 +1590,32 @@ class ServiceManager:
                     "be disabled; nextuxlinqd was not enabled.",
                 )
 
-        enable_result = self._run("enable", "--now", SERVICE_NAME)
-        if enable_result is None or enable_result.returncode != 0:
+        activation: tuple[str, ...]
+        if enable and start:
+            activation = ("enable", "--now", SERVICE_NAME)
+        elif enable:
+            activation = ("enable", SERVICE_NAME)
+        elif start:
+            activation = ("start", SERVICE_NAME)
+        else:
+            activation = ()
+        enable_result = self._run(*activation) if activation else None
+        if activation and (enable_result is None or enable_result.returncode != 0):
             return ServiceOperationResult(
                 False,
                 installed,
-                "The unit was installed and legacy helpers were disabled, but "
-                "systemctl could not complete enabling and starting "
-                "nextuxlinqd; it may be partially active.",
+                "The unit was installed, but systemctl could not complete the "
+                "requested enable/start operation; nextuxlinqd may be partially "
+                "active.",
             )
+
+        if not start:
+            output = (
+                "NexTuxLinq user-service unit installed successfully.",
+                "Service was not started.",
+                f"GUI after startup: {GUI_ADDRESS}",
+            )
+            return ServiceOperationResult(True, output)
 
         state_result = self._run("is-active", SERVICE_NAME)
         state = self._state(state_result)
@@ -1616,7 +1652,14 @@ class ServiceManager:
         )
         return ServiceOperationResult(False, result.output, error)
 
-    def install(self, *, force: bool = False) -> ServiceOperationResult:
+    def install(
+        self,
+        *,
+        force: bool = False,
+        enable: bool = True,
+        start: bool = True,
+        skip_identical: bool = False,
+    ) -> ServiceOperationResult:
         """Install under one manager-wide lock, then release every descriptor."""
         directory_descriptor: int | None = None
         lock_descriptor: int | None = None
@@ -1627,6 +1670,9 @@ class ServiceManager:
             result = self._install_locked_operation(
                 directory_descriptor,
                 force=force,
+                enable=enable,
+                start=start,
+                skip_identical=skip_identical,
             )
         except ServiceManagerError as error:
             result = ServiceOperationResult(False, error=str(error))

@@ -34,3 +34,7 @@ artifacts = [
     "src/nextuxlinq/static/*.css",
     "src/nextuxlinq/static/*.js",
 ]
+
+[tool.hatch.build.targets.wheel.force-include]
+"systemd/nextuxlinqd.service" = "nextuxlinq/installer_assets/nextuxlinqd.service"
+"udev/70-nextuxlinq.rules" = "nextuxlinq/installer_assets/70-nextuxlinq.rules"
