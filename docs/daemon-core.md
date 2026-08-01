@@ -19,6 +19,13 @@ authentication because it is local-only, but other processes running as the
 same machine user can still connect to loopback. Do not treat loopback as a
 security boundary between local processes.
 
+Startup waits for one complete sanitized render before starting the HTTP
+server lifespan. If that initial render fails, no partial framebuffer is
+submitted, the renderer's generic status remains observable, worker cleanup is
+awaited, and the HTTP lifespan is never started. A later renderer failure asks
+the HTTP server to shut down and consumes expected background-task
+cancellation so it cannot obscure the original sanitized rendering status.
+
 The service keeps canonical schema-v2 configuration in memory. Valid schema-v1
 files migrate deterministically in memory without an automatic rewrite. The
 GUI's **Apply** action changes only the running configuration. **Save applied

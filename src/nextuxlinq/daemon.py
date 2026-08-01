@@ -197,6 +197,15 @@ async def run_service(
         if worker_failure_task in done:
             await worker_failure_task
             raise RuntimeError("The Matrix900 device worker stopped.")
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
+        if service.snapshot().rendering_state == "failed":
+            logging.error("NexTuxLinq Matrix900 rendering failed.")
+        else:
+            logging.error("NexTuxLinq Matrix900 service failed.")
+        exit_code = 1
     except WriterLockHeldError as error:
         logging.error("%s", error)
         exit_code = 1
@@ -212,6 +221,11 @@ async def run_service(
         if server_task is not None and not server_task.done():
             try:
                 await server_task
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+                exit_code = 1
             except (Exception, SystemExit):
                 exit_code = 1
         if stop_task is not None and not stop_task.done():

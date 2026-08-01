@@ -16,7 +16,7 @@ from nextuxlinq.daemon import (
 )
 from nextuxlinq.defaults import default_configuration
 from nextuxlinq.device_worker import DeviceWorker
-from nextuxlinq.service import NexTuxLinqService
+from nextuxlinq.service import CandidateValidationError, NexTuxLinqService
 from nextuxlinq.state import DaemonSnapshot
 from nextuxlinq.writer_lock import WriterLock
 
@@ -141,6 +141,115 @@ def test_run_service_renderer_failure_cleans_up_and_returns_nonzero(
     messages = [record.getMessage() for record in caplog.records]
     assert "NexTuxLinq Matrix900 rendering failed." in messages
     assert all("/private/renderer/detail" not in message for message in messages)
+
+
+def test_initial_render_failure_never_starts_http_lifespan(caplog) -> None:
+    class Service:
+        render_task = None
+
+        async def start(self) -> None:
+            raise CandidateValidationError(
+                "content_too_wide",
+                region_id="metric",
+                field="content",
+            )
+
+        def snapshot(self) -> DaemonSnapshot:
+            return DaemonSnapshot(
+                lifecycle_state="failed",
+                rendering_state="failed",
+                last_display_error="Matrix900 rendering failed.",
+            )
+
+        @property
+        def owns_resources(self) -> bool:
+            return False
+
+    server_created = False
+
+    def create_server(app, host, port):
+        nonlocal server_created
+        server_created = True
+        raise AssertionError("HTTP lifespan must not start")
+
+    result = asyncio.run(run_service(
+        service_factory=Service,  # type: ignore[arg-type]
+        stop_requested=asyncio.Event(),
+        server_factory=create_server,
+    ))
+    assert result == 1
+    assert not server_created
+    messages = [record.getMessage() for record in caplog.records]
+    assert "NexTuxLinq Matrix900 rendering failed." in messages
+
+
+def test_renderer_failure_suppresses_server_cleanup_cancellation(caplog) -> None:
+    async def scenario() -> tuple[int, bool]:
+        server_started = asyncio.Event()
+
+        class Service:
+            render_task = None
+            failed = False
+            stopped = False
+
+            async def start(self) -> None:
+                async def render() -> None:
+                    await server_started.wait()
+                    self.failed = True
+                    raise RuntimeError("private renderer failure")
+
+                self.render_task = asyncio.create_task(render())
+
+            async def wait_for_worker_failure(self) -> None:
+                await asyncio.Future()
+
+            def snapshot(self) -> DaemonSnapshot:
+                return DaemonSnapshot(
+                    lifecycle_state="failed" if self.failed else "running",
+                    rendering_state="failed" if self.failed else "rendering",
+                    last_display_error=(
+                        "Matrix900 rendering failed." if self.failed else None
+                    ),
+                )
+
+            @property
+            def owns_resources(self) -> bool:
+                return self.render_task is not None
+
+            async def stop(self) -> None:
+                self.stopped = True
+                if self.render_task is not None and not self.render_task.done():
+                    self.render_task.cancel()
+                    try:
+                        await self.render_task
+                    except asyncio.CancelledError:
+                        pass
+                self.render_task = None
+
+        service = Service()
+
+        class CancellingServer:
+            should_exit = False
+
+            async def serve(self) -> None:
+                server_started.set()
+                while not self.should_exit:
+                    await asyncio.sleep(0)
+                raise asyncio.CancelledError
+
+        result = await run_service(
+            service_factory=lambda: service,  # type: ignore[arg-type]
+            stop_requested=asyncio.Event(),
+            server_factory=lambda app, host, port: CancellingServer(),
+        )
+        return result, service.stopped
+
+    result, stopped = asyncio.run(scenario())
+    assert result == 1
+    assert stopped
+    messages = [record.getMessage() for record in caplog.records]
+    assert "NexTuxLinq Matrix900 rendering failed." in messages
+    assert all("private renderer failure" not in message for message in messages)
 
 
 def test_http_startup_failure_stops_service_and_releases_lock(

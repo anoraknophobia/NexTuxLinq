@@ -26,10 +26,11 @@ Font selection never depends on the current sample. In a ten-pixel-high region,
 Auto keeps `5x7` whenever its glyph coverage is valid and never shrinks merely
 to fit a wider value. Percentages below ten and non-negative integer
 temperatures below ten reserve an invisible leading digit cell with no drawn
-zero pixels. Thus one- and two-digit values retain the same label and suffix
-positions. Explicit fonts remain authoritative. An Error-overflow candidate
-whose stable envelope does not fit fails with `content_too_wide`; Clip and
-Truncate retain their configured behavior.
+zero pixels. A compact token gap replaces the ordinary space glyph between the
+label and number. Thus one- and two-digit values retain the same label and
+suffix positions. Validation uses this two-digit layout rather than rejecting
+a region for a hypothetical three-digit value. An actual `100` retains the
+font and follows Error, Clip, or Truncate. Explicit fonts remain authoritative.
 
 ## Metric Bar
 

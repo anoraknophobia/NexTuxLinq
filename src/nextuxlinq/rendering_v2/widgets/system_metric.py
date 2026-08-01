@@ -120,8 +120,12 @@ class _GlyphSlot:
     character: str
     advance: int
     glyph_offset: int
+    gap_before: int
     visible: bool
     role: str
+
+
+_COMPACT_METRIC_GAP = 1
 
 
 def _ordinary_slots(
@@ -129,10 +133,18 @@ def _ordinary_slots(
     content: str,
     *,
     role: str,
+    initial_gap: int = 0,
 ) -> tuple[_GlyphSlot, ...]:
     return tuple(
-        _GlyphSlot(character, font.glyphs[character].width, 0, True, role)
-        for character in content
+        _GlyphSlot(
+            character,
+            font.glyphs[character].width,
+            0,
+            initial_gap if index == 0 else font.character_spacing,
+            True,
+            role,
+        )
+        for index, character in enumerate(content)
     )
 
 
@@ -141,6 +153,7 @@ def _digit_slots(
     digits: str,
     *,
     hidden_leading_zero: bool,
+    initial_gap: int,
 ) -> tuple[_GlyphSlot, ...]:
     cell_width = max(font.glyphs[str(digit)].width for digit in range(10))
     characters = f"0{digits}" if hidden_leading_zero else digits
@@ -149,6 +162,7 @@ def _digit_slots(
             character,
             cell_width,
             (cell_width - font.glyphs[character].width) // 2,
+            initial_gap if index == 0 else _COMPACT_METRIC_GAP,
             not (hidden_leading_zero and index == 0),
             "digit",
         )
@@ -160,6 +174,8 @@ def _fixed_value_slots(
     font: FontDefinition,
     settings: SystemMetricSettings,
     value_text: str,
+    *,
+    initial_gap: int,
 ) -> tuple[_GlyphSlot, ...] | None:
     definition = METRIC_DEFINITIONS[settings.metric]
     if definition.value_type is MetricValueType.PERCENTAGE:
@@ -173,13 +189,27 @@ def _fixed_value_slots(
             font,
             integer,
             hidden_leading_zero=len(integer) == 1,
+            initial_gap=initial_gap,
         ))
         if separator:
-            slots.extend(_ordinary_slots(font, separator, role="decimal"))
-            slots.extend(_digit_slots(
-                font, fraction, hidden_leading_zero=False
+            slots.extend(_ordinary_slots(
+                font,
+                separator,
+                role="decimal",
+                initial_gap=_COMPACT_METRIC_GAP,
             ))
-        slots.extend(_ordinary_slots(font, "%", role="suffix"))
+            slots.extend(_digit_slots(
+                font,
+                fraction,
+                hidden_leading_zero=False,
+                initial_gap=_COMPACT_METRIC_GAP,
+            ))
+        slots.extend(_ordinary_slots(
+            font,
+            "%",
+            role="suffix",
+            initial_gap=_COMPACT_METRIC_GAP,
+        ))
         return tuple(slots)
     if (
         definition.value_type is MetricValueType.TEMPERATURE
@@ -193,8 +223,14 @@ def _fixed_value_slots(
                 font,
                 integer,
                 hidden_leading_zero=len(integer) == 1,
+                initial_gap=initial_gap,
             ),
-            *_ordinary_slots(font, "C", role="suffix"),
+            *_ordinary_slots(
+                font,
+                "C",
+                role="suffix",
+                initial_gap=_COMPACT_METRIC_GAP,
+            ),
         )
     return None
 
@@ -206,24 +242,36 @@ def _metric_slots(
     *,
     available: bool,
 ) -> tuple[_GlyphSlot, ...]:
-    prefix = (
-        f"{settings.label} "
-        if settings.display_mode is MetricDisplayMode.LABEL_AND_VALUE
-        else ""
-    )
+    has_label = settings.display_mode is MetricDisplayMode.LABEL_AND_VALUE
+    prefix = f"{settings.label} " if has_label else ""
     content = f"{prefix}{value_text}"
     measure_normalized_text(font, content)
     value_slots = (
-        _fixed_value_slots(font, settings, value_text)
+        _fixed_value_slots(
+            font,
+            settings,
+            value_text,
+            initial_gap=_COMPACT_METRIC_GAP if has_label else 0,
+        )
         if available
         else None
     )
+    if value_slots is not None:
+        label_slots = (
+            _ordinary_slots(font, settings.label, role="label")
+            if has_label else ()
+        )
+        return (
+            *label_slots,
+            *value_slots,
+        )
     return (
         *_ordinary_slots(font, prefix, role="label"),
-        *(
-            value_slots
-            if value_slots is not None
-            else _ordinary_slots(font, value_text, role="value")
+        *_ordinary_slots(
+            font,
+            value_text,
+            role="value",
+            initial_gap=font.character_spacing if prefix else 0,
         ),
     )
 
@@ -231,10 +279,7 @@ def _metric_slots(
 def _slots_width(font: FontDefinition, slots: tuple[_GlyphSlot, ...]) -> int:
     if not slots:
         return 0
-    return (
-        sum(slot.advance for slot in slots)
-        + font.character_spacing * (len(slots) - 1)
-    )
+    return sum(slot.gap_before + slot.advance for slot in slots)
 
 
 def _font_envelope_widths(
@@ -354,7 +399,7 @@ def _layout_system_metric_text(
         for slot in slots:
             candidate_width = (
                 retained_width
-                + (font.character_spacing if retained else 0)
+                + slot.gap_before
                 + slot.advance
             )
             if candidate_width > region_width:
@@ -372,7 +417,8 @@ def _layout_system_metric_text(
     )
     placements: list[SystemMetricGlyphPlacement] = []
     cursor_x = origin_x
-    for index, slot in enumerate(slots):
+    for slot in slots:
+        cursor_x += slot.gap_before
         placements.append(SystemMetricGlyphPlacement(
             character=slot.character,
             origin_x=cursor_x + slot.glyph_offset,
@@ -382,8 +428,6 @@ def _layout_system_metric_text(
             role=slot.role,
         ))
         cursor_x += slot.advance
-        if index + 1 < len(slots):
-            cursor_x += font.character_spacing
     return SystemMetricTextLayout(
         font_id=font.font_id,
         glyph_height=font.glyph_height,

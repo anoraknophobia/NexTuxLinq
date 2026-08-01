@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from nextuxlinq.models_v2 import ProfileConfigV2
+from nextuxlinq.rendering_v2.compositor import Compositor
 from nextuxlinq.rendering_v2.registry import RenderContext, create_widget_registry
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.widgets.errors import WidgetRenderingError
@@ -380,26 +382,52 @@ def test_auto_font_and_alignment_are_stable_across_repeated_snapshots() -> None:
     assert surfaces[0] != surfaces[1]
 
 
-def test_stable_auto_envelope_fails_before_current_short_value_can_fit() -> None:
+def test_normal_metric_width_ignores_hypothetical_100_but_actual_100_obeys_overflow() -> None:
     settings = SystemMetricSettings(metric="cpu_usage", label="CPU")  # type: ignore[arg-type]
-    assert metric_text(
-        settings, context(42, 10, snapshot(cpu_usage=5))
-    ) == "CPU 5%"
-    assert "CPU 100%" in metric_text_format_envelope(settings)
-    clip_settings = SystemMetricSettings(
-        **{**settings.to_dict(), "overflow": "clip"}
-    )
-    assert layout_system_metric_text(
-        clip_settings,
-        context(42, 10, snapshot(cpu_usage=5)),
-        region_width=42,
-        region_height=10,
-    ).measured_width == 39
+    assert metric_text_format_envelope(settings) == ("CPU 99%", "CPU --")
+    for value in (5.0, 14.0, 99.0):
+        layout = layout_system_metric_text(
+            settings,
+            context(36, 10, snapshot(cpu_usage=value)),
+            region_width=36,
+            region_height=10,
+        )
+        assert layout.font_id.value == "5x7"
+        assert layout.measured_width == 35
     with pytest.raises(WidgetRenderingError) as raised:
         render_system_metric(
-            RegionSurface(42, 10),
+            RegionSurface(36, 10),
             settings,
-            context(42, 10, snapshot(cpu_usage=5)),
+            context(36, 10, snapshot(cpu_usage=100)),
+        )
+    assert raised.value.category == "content_too_wide"
+    for overflow in ("clip", "truncate"):
+        overflow_settings = SystemMetricSettings(
+            **{**settings.to_dict(), "overflow": overflow}
+        )
+        layout = layout_system_metric_text(
+            overflow_settings,
+            context(36, 10, snapshot(cpu_usage=100)),
+            region_width=36,
+            region_height=10,
+        )
+        assert layout.font_id.value == "5x7"
+        render_system_metric(
+            RegionSurface(36, 10),
+            overflow_settings,
+            context(36, 10, snapshot(cpu_usage=100)),
+        )
+
+
+def test_error_mode_still_rejects_a_genuinely_too_narrow_two_digit_layout() -> None:
+    settings = SystemMetricSettings(
+        metric="cpu_usage", label="CPU"  # type: ignore[arg-type]
+    )
+    with pytest.raises(WidgetRenderingError) as raised:
+        render_system_metric(
+            RegionSurface(34, 10),
+            settings,
+            context(34, 10, snapshot(cpu_usage=5)),
         )
     assert raised.value.category == "content_too_wide"
 
@@ -409,7 +437,50 @@ def test_value_only_envelope_excludes_label_and_includes_unavailable_text() -> N
         metric="cpu_usage", display_mode="value_only",  # type: ignore[arg-type]
         precision=2, unavailable_text="UNAVAILABLE",
     )
-    assert metric_text_format_envelope(settings) == ("100.00%", "UNAVAILABLE")
+    assert metric_text_format_envelope(settings) == ("99.00%", "UNAVAILABLE")
+
+
+def test_diagnosed_saved_profile_geometry_dry_renders_without_mutation() -> None:
+    clock_settings = {
+        "format": "24h", "show_seconds": False, "blink_separator": False,
+        "time_zone": "local", "color": "#FFFFFF",
+        "horizontal_alignment": "center", "vertical_alignment": "center",
+        "font": "auto",
+    }
+    metric_settings = SystemMetricSettings().to_dict()
+    profile = ProfileConfigV2.from_dict({
+        "brightness": None,
+        "canvas": {"width": 90, "height": 10, "background_color": "#000000"},
+        "regions": [
+            {
+                "id": "legacy-front-clock", "name": "Front Clock",
+                "x": 0, "y": 0, "width": 24, "height": 10,
+                "enabled": True, "background_color": None,
+                "widget": {"type": "clock", "settings": clock_settings},
+            },
+            {
+                "id": "legacy-scrolling-text", "name": "System Metric",
+                "x": 28, "y": 0, "width": 36, "height": 10,
+                "enabled": True, "background_color": None,
+                "widget": {"type": "system_metric", "settings": metric_settings},
+            },
+            {
+                "id": "legacy-rear-clock", "name": "Rear Clock",
+                "x": 64, "y": 0, "width": 26, "height": 10,
+                "enabled": True, "background_color": None,
+                "widget": {"type": "clock", "settings": clock_settings},
+            },
+        ],
+    })
+    before = profile.to_dict()
+    result = Compositor(create_widget_registry()).render(
+        profile,
+        generation_time=NOW,
+        animation_time=0.0,
+        metrics_snapshot=snapshot(),
+    )
+    assert len(result.logical_framebuffer) == 90 * 10 * 3
+    assert profile.to_dict() == before
 
 
 @pytest.mark.parametrize("horizontal", ["start", "center", "end"])

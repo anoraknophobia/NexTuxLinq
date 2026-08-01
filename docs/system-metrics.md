@@ -38,22 +38,26 @@ one day onward. Network rates automatically use uppercase `KB/S`, `MB/S`, or
 
 System Metric font selection is snapshot-independent. An explicit font stays
 authoritative. Auto uses `5x7` in a ten-pixel-high region when that font covers
-the configured text; width never causes a fallback to `3x5`. Auto checks the
-widest configured percentage (`100%`), the complete `-20C` to `150C`
-temperature range, the unavailable text, and the effective label. Precision
-is included in every envelope. The deterministic envelopes for intrinsically
-unbounded text are `9999.00` for load average, `9999.00GB/S` for network rates,
-and `999999D 23H` for uptime (shown here at two-decimal numeric precision).
-Values beyond those display ceilings retain the ceiling representation.
+the configured text; width never causes a fallback to `3x5`. For bounded
+integer metrics, validation checks the compact fixed two-digit `0`–`99`
+layout, the unavailable text, and the effective label. A hypothetical `100`
+does not invalidate an otherwise usable region. The deterministic envelopes
+for intrinsically unbounded text are `9999.00` for load average,
+`9999.00GB/S` for network rates, and `999999D 23H` for uptime (shown here at
+two-decimal numeric precision). Values beyond those display ceilings retain
+the ceiling representation.
 
-Integer percentages from zero through 99 use two fixed-width digit cells. A
+Integer percentages from zero through 99 use two fixed-width digit cells. The
+label-to-number gap and the gaps between digits and the suffix are compact,
+deterministic advances rather than a normal space glyph. A
 single-digit value reserves the leading zero cell without drawing its pixels,
 so `5%` remains visibly `5%` while its label, value field, and percent suffix
 stay anchored like a two-digit value. Non-negative integer temperatures below
 ten use the same rule. The digit-cell width is derived from the widest digit in
 the selected bitmap font; uptime, rates, and free decimal text do not receive
-hidden slots. With `overflow=error`, the complete stable layout must fit or
-validation reports `content_too_wide`; Clip and Truncate keep their configured
+hidden slots. An actual three-digit value retains the same font and follows
+the configured overflow policy. With `overflow=error`, a too-wide current
+value reports `content_too_wide`; Clip and Truncate keep their configured
 behavior.
 
 Generic GPU selection first prefers one DRM device marked as the primary VGA

@@ -212,6 +212,7 @@ class NexTuxLinqService:
         self._configuration: ConfigurationDocumentV2 | None = None
         self._render_task: asyncio.Task[None] | None = None
         self._render_wakeup: asyncio.Event | None = None
+        self._initial_render_ready: asyncio.Event | None = None
         self._started_at = 0.0
         self._last_worker_uploads = 0
         self._worker_started = False
@@ -330,6 +331,7 @@ class NexTuxLinqService:
             self._event_loop = asyncio.get_running_loop()
             self._worker_failure_event = asyncio.Event()
             self._render_wakeup = asyncio.Event()
+            self._initial_render_ready = asyncio.Event()
             self._worker_exit_observed.clear()
             loaded = self.config_store.load()
             configuration = _canonical_configuration(loaded.configuration)
@@ -371,25 +373,71 @@ class NexTuxLinqService:
                     raise RuntimeError(
                         "The Matrix900 device worker stopped during startup."
                     )
-                self.state.update(
-                    lifecycle_state="running",
-                    rendering_state="rendering",
-                )
                 if self._worker_exit_observed.is_set():
                     raise RuntimeError(
                         "The Matrix900 device worker stopped during startup."
                     )
+            await self._await_initial_render()
+            with self._coordination_lock:
+                worker_snapshot = self.device_worker.snapshot()
+                if (
+                    not worker_snapshot.running
+                    or self.snapshot().lifecycle_state != "starting"
+                    or self._worker_exit_observed.is_set()
+                ):
+                    raise RuntimeError(
+                        "The Matrix900 device worker stopped during startup."
+                    )
+                self.state.update(
+                    lifecycle_state="running",
+                    rendering_state="rendering",
+                )
+                if (
+                    self._worker_exit_observed.is_set()
+                    or not self.device_worker.snapshot().running
+                ):
+                    raise RuntimeError(
+                        "The Matrix900 device worker stopped during startup."
+                    )
         except BaseException:
+            failure = self.snapshot()
+            display_error = (
+                failure.last_display_error
+                if failure.rendering_state == "failed"
+                and failure.last_display_error == "Matrix900 rendering failed."
+                else "NexTuxLinq service startup failed."
+            )
             try:
                 await self._cleanup_resources()
-            except Exception:
+            except BaseException:
                 pass
             self.state.update(
                 lifecycle_state="failed",
                 rendering_state="failed",
-                last_display_error="NexTuxLinq service startup failed.",
+                last_display_error=display_error,
             )
             raise
+
+    async def _await_initial_render(self) -> None:
+        task = self._render_task
+        ready = self._initial_render_ready
+        if task is None or ready is None:
+            raise RuntimeError("The render scheduler is unavailable.")
+        ready_task = asyncio.create_task(ready.wait())
+        try:
+            done, _ = await asyncio.wait(
+                (task, ready_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if task in done:
+                await task
+                raise RuntimeError(
+                    "The render scheduler stopped during startup."
+                )
+        finally:
+            if not ready_task.done():
+                ready_task.cancel()
+            await asyncio.gather(ready_task, return_exceptions=True)
 
     async def stop(self) -> None:
         self.state.update(lifecycle_state="stopping", rendering_state="idle")
@@ -423,6 +471,7 @@ class NexTuxLinqService:
         if self._worker_started:
             self.device_worker.stop(timeout=self._worker_stop_timeout)
             self._worker_started = False
+        self._initial_render_ready = None
 
     async def wait_for_worker_failure(self) -> None:
         event = self._worker_failure_event
@@ -507,6 +556,8 @@ class NexTuxLinqService:
                         last_frame_generation_time=generated_at,
                         update_policy=result.update_policy.value,
                     )
+                    if reason == "initial" and self._initial_render_ready is not None:
+                        self._initial_render_ready.set()
                 wakeup = self._render_wakeup
                 if wakeup is None:
                     raise RuntimeError("The render scheduler is unavailable.")

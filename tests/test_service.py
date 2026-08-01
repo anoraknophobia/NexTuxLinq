@@ -33,6 +33,7 @@ from nextuxlinq.system_metrics import (
     MetricId,
     SystemMetricsSnapshot,
 )
+from nextuxlinq.widget_models import SystemMetricSettings
 from nextuxlinq.writer_lock import WriterLock
 
 
@@ -81,6 +82,30 @@ class Monotonic:
 
     def __call__(self) -> float:
         return next(self.values)
+
+
+def metric_configuration(width: int) -> ConfigurationDocumentV2:
+    return ConfigurationDocumentV2.from_dict({
+        "schema_version": 2,
+        "active_profile": "default",
+        "profiles": {
+            "default": {
+                "brightness": None,
+                "canvas": {
+                    "width": 90, "height": 10, "background_color": "#000000",
+                },
+                "regions": [{
+                    "id": "metric", "name": "Metric",
+                    "x": 0, "y": 0, "width": width, "height": 10,
+                    "enabled": True, "background_color": None,
+                    "widget": {
+                        "type": "system_metric",
+                        "settings": SystemMetricSettings().to_dict(),
+                    },
+                }],
+            },
+        },
+    })
 
 
 def test_metric_profiles_sample_once_per_frame_and_nonmetric_profiles_do_not() -> None:
@@ -367,6 +392,43 @@ def test_render_failure_updates_service_state() -> None:
         assert snapshot.rendering_state == "failed"
         assert snapshot.last_display_error == "Matrix900 rendering failed."
         await service.stop()
+
+    asyncio.run(scenario())
+
+
+def test_initial_controlled_render_failure_is_observable_and_fully_cleaned_up() -> None:
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+
+    class Provider:
+        def sample(self) -> SystemMetricsSnapshot:
+            return SystemMetricsSnapshot.unavailable(0.0, now)
+
+    async def scenario() -> None:
+        worker = FakeWorker()
+        store = FakeStore(metric_configuration(34))  # type: ignore[arg-type]
+        service = NexTuxLinqService(
+            config_store=store,  # type: ignore[arg-type]
+            device_worker=worker,  # type: ignore[arg-type]
+            monotonic=lambda: 0.0,
+            wall_clock=lambda: now,
+            metrics_provider=Provider(),
+        )
+        with pytest.raises(CandidateValidationError) as raised:
+            await service.start()
+        assert raised.value.category == "content_too_wide"
+        assert raised.value.region_id == "metric"
+        assert raised.value.widget_type.value == "system_metric"
+        assert raised.value.field == "content"
+        assert raised.value.__context__ is None
+        assert raised.value.__cause__ is None
+        state = service.snapshot()
+        assert state.lifecycle_state == "failed"
+        assert state.rendering_state == "failed"
+        assert state.last_display_error == "Matrix900 rendering failed."
+        assert worker.frames == []
+        assert worker.stopped
+        assert not service.owns_resources
+        assert store.saved == []
 
     asyncio.run(scenario())
 

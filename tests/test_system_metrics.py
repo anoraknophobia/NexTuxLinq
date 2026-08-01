@@ -111,13 +111,13 @@ def test_memory_uptime_and_impossible_values_are_isolated() -> None:
 
 
 def test_metric_value_format_envelopes_are_deterministic_and_include_precision() -> None:
-    assert metric_value_format_envelope(MetricId.CPU_USAGE, 0) == ("100%",)
-    assert metric_value_format_envelope(MetricId.GPU_USAGE, 2) == ("100.00%",)
+    assert metric_value_format_envelope(MetricId.CPU_USAGE, 0) == ("99%",)
+    assert metric_value_format_envelope(MetricId.GPU_USAGE, 2) == ("99.00%",)
     assert metric_value_format_envelope(MetricId.CPU_TEMPERATURE, 1) == (
-        "-20.0C", "150.0C",
+        "99.0C",
     )
     assert metric_value_format_envelope(MetricId.CPU_TEMPERATURE, 0) == (
-        "-20C", "150C", "5C",
+        "99C",
     )
     assert metric_value_format_envelope(MetricId.LOAD_AVERAGE_1M, 2) == (
         "9999.00",
