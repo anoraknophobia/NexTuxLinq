@@ -42,6 +42,7 @@ from nextuxlinq.api_models import (
     SaveResponse,
     StatusResponse,
     WidgetEditorDefinition,
+    MetricEditorDefinition,
     BackupCreateRequest,
     BackupListResponse,
     BackupMetadataResponse,
@@ -87,6 +88,7 @@ from nextuxlinq.service import (
     RevisionConflictError,
     ServiceUnavailableError,
 )
+from nextuxlinq.system_metrics import BAR_METRICS, METRIC_DEFINITIONS, MetricId
 from nextuxlinq.legacy_compat import LegacyEditorUnsupportedError
 
 LOGGER = logging.getLogger(__name__)
@@ -331,6 +333,13 @@ def create_app(
                 "region_limit_reached": "The imported profile exceeds the region limit.",
                 "profile_limit_reached": "The imported configuration exceeds the profile limit.",
                 "wrong_widget_settings": "Imported widget settings are invalid.",
+                "unknown_metric": "The metric identifier is not supported.",
+                "unsupported_metric_for_bar": "The selected metric does not support a bar.",
+                "invalid_precision": "Metric precision must be between zero and two.",
+                "invalid_custom_label": "The custom metric label is invalid.",
+                "invalid_bar_range": "The metric bar maximum must exceed its minimum.",
+                "invalid_bar_orientation": "The metric bar orientation is invalid.",
+                "invalid_bar_direction": "The metric bar direction is invalid.",
                 "invalid_configuration": "The imported configuration is invalid.",
                 "profile_not_found": "The selected profile was not found.",
             }
@@ -376,11 +385,20 @@ def create_app(
                 "The NexTuxLinq service is stopping or unavailable.",
             )
         except DomainValidationError as error:
+            messages = {
+                "unknown_metric": "The metric identifier is not supported.",
+                "unsupported_metric_for_bar": "The selected metric does not support a bar.",
+                "invalid_precision": "Metric precision must be between zero and two.",
+                "invalid_custom_label": "The custom metric label is invalid.",
+                "invalid_bar_range": "The metric bar maximum must exceed its minimum.",
+                "invalid_bar_orientation": "The metric bar orientation is invalid.",
+                "invalid_bar_direction": "The metric bar direction is invalid.",
+            }
             return _error(
                 request,
                 422,
-                "validation_failed",
-                str(error),
+                error.category,
+                messages.get(error.category, str(error)),
                 field_errors=[
                     {
                         "field": error.field,
@@ -713,6 +731,24 @@ def create_app(
                     minimum_height=definition.minimum_height,
                 )
                 for definition in service.get_widget_definitions()
+            ],
+            metric_definitions=[
+                MetricEditorDefinition(
+                    id=metric_id.value,
+                    label=definition.label,
+                    value_type=definition.value_type.value,
+                    unit=definition.unit,
+                    default_precision=definition.default_precision,
+                    supports_bar=definition.supports_bar,
+                    default_minimum=definition.bar_minimum,
+                    default_maximum=definition.bar_maximum,
+                    availability=service.get_metric_status()[metric_id.value],
+                )
+                for metric_id, definition in METRIC_DEFINITIONS.items()
+            ],
+            bar_metric_ids=[
+                metric_id.value for metric_id in MetricId
+                if metric_id in BAR_METRICS
             ],
         )
 

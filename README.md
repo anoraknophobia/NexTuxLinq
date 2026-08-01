@@ -89,14 +89,19 @@ writer.
 
 The GUI provides a visual 90×10 free-layout editor for canonical schema-v2
 profiles. Regions can be added, moved, resized, reordered, and assigned one of
-the five widgets. **Apply** validates and updates the running profile, while
+seven widgets, including live System Metric text and Metric Bars. **Apply**
+validates and updates the running profile, while
 **Save applied configuration** persists only the already-applied state.
 Browser drafts and revision conflicts remain explicit. The editor and preview
 use viewer perspective (Rear left, Front right), while stored integer
 coordinates and glyph pixels remain logical and unmirrored. See
 [`docs/free-layout-editor.md`](docs/free-layout-editor.md). Profile presets,
 JSON import/export, and managed backups are documented in
-[`docs/profile-management.md`](docs/profile-management.md).
+[`docs/profile-management.md`](docs/profile-management.md). Linux metric
+sources and formatting are documented in
+[`docs/system-metrics.md`](docs/system-metrics.md). The Profile section appears
+below the physical display preview so the editor and preview remain the primary
+workflow.
 
 Install and uninstall operations use a private, non-blocking manager lock.
 Replaced or uninstalled managed units are retained as private `.bak` files

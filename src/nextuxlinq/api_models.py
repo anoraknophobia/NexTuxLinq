@@ -13,19 +13,40 @@ from nextuxlinq.models_v2 import ConfigurationDocumentV2, ProfileConfigV2
 class DomainValidationError(ValueError):
     """Field-safe validation failure raised at the HTTP/domain boundary."""
 
-    def __init__(self, *, field: str) -> None:
+    def __init__(self, *, field: str, category: str = "validation_failed") -> None:
         self.field = field
+        self.category = category
         super().__init__("The request contains invalid configuration data.")
 
 
+def _domain_failure(message: str, default_field: str) -> tuple[str, str]:
+    normalized = message.lower()
+    mappings = (
+        ("metric must be one of", "unknown_metric", "metric"),
+        ("metric does not support a bar", "unsupported_metric_for_bar", "metric"),
+        ("precision must", "invalid_precision", "precision"),
+        ("label must", "invalid_custom_label", "label"),
+        ("maximum must be greater", "invalid_bar_range", "maximum"),
+        ("minimum must be finite", "invalid_bar_range", "minimum"),
+        ("maximum must be finite", "invalid_bar_range", "maximum"),
+        ("orientation must be one of", "invalid_bar_orientation", "orientation"),
+        ("direction must be one of", "invalid_bar_direction", "direction"),
+    )
+    for marker, category, setting in mappings:
+        if marker in normalized:
+            return category, f"{default_field}.widget.settings.{setting}"
+    return "validation_failed", default_field
+
+
 def _convert_domain(factory, value, *, field: str = "configuration"):
-    failed = False
+    failure: tuple[str, str] | None = None
     try:
         return factory(value)
-    except (TypeError, ValueError):
-        failed = True
-    if failed:
-        raise DomainValidationError(field=field)
+    except (TypeError, ValueError) as error:
+        failure = _domain_failure(str(error), field)
+    if failure is not None:
+        category, safe_field = failure
+        raise DomainValidationError(field=safe_field, category=category)
     raise AssertionError("Unreachable domain conversion state.")
 
 
@@ -234,6 +255,18 @@ class WidgetEditorDefinition(StrictModel):
     minimum_height: int | None
 
 
+class MetricEditorDefinition(StrictModel):
+    id: str
+    label: str
+    value_type: str
+    unit: str
+    default_precision: int
+    supports_bar: bool
+    default_minimum: float | None
+    default_maximum: float | None
+    availability: str
+
+
 class FreeLayoutMetadataResponse(StrictModel):
     canvas_width: int
     canvas_height: int
@@ -242,6 +275,8 @@ class FreeLayoutMetadataResponse(StrictModel):
     max_regions_per_document: int
     max_import_bytes: int
     widget_definitions: list[WidgetEditorDefinition]
+    metric_definitions: list[MetricEditorDefinition]
+    bar_metric_ids: list[str]
 
 
 class ImportFileRequest(StrictModel):

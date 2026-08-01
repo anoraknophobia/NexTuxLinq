@@ -1,13 +1,35 @@
 # Free-layout widget renderers
 
 Phase 3B implemented Clock and Date, Phase 3C implemented Static Text and
-Scrolling Text, and Phase 3D integrated all five widget types into one
+Scrolling Text, and Phase 3D integrated the original five widget types into one
 canonical registry and compositor. Phase 4 activates that registry through
 the canonical schema-v2 service. DeviceWorker, Creator reports, and physical
 orientation remain unchanged.
 
 The active visual editor provides exactly one widget dropdown per region and
 shows only settings belonging to the selected widget.
+
+## System Metric
+
+System Metric formats one immutable render-cycle snapshot as value-only or
+label-and-value text. Stable metrics are CPU usage, memory usage, CPU
+temperature, and uptime. Percentage values use `%`; temperature uses the
+font-safe ASCII suffix `C`; unavailable values use configurable safe text,
+defaulting to `--`. Uptime is `MM:SS` below one hour, `HH:MM` below one day,
+and `<days>D <hours>H` from one day onward, with a two-digit hour. Precision is zero to two decimals for numeric
+values. Existing intrinsic fonts, alignments, and overflow modes apply, and
+five-pixel rows can use `3x5`.
+
+## Metric Bar
+
+Metric Bar supports CPU usage, memory usage, and CPU temperature. It clamps a
+numeric value to the configured minimum and maximum and rounds the resulting
+fill extent to the nearest integer pixel, with exact halves rounded upward.
+Horizontal start-to-end is left to right. Vertical start-to-end is bottom to
+top; the reverse direction is top to bottom. The opaque fill and empty colors
+are region-local, with no antialiasing, alpha, or fractional pixels. An
+unavailable metric is empty. A border is drawn only when both dimensions can
+retain a nonempty one-pixel inset.
 
 ## Clock
 
@@ -125,7 +147,7 @@ pixels preserve the region's existing background.
 
 Each call to the canonical registry factory returns a fresh immutable
 registry in stable order: Nothing / Gap, Clock, Static Text, Scrolling Text,
-and Date. Every definition binds exactly one canonical settings model, one
+Date, System Metric, and Metric Bar. Every definition binds exactly one canonical settings model, one
 renderer, validated defaults, broad minimum-size editor guidance, and an
 immutable settings-aware update-policy resolver. No registry instance is
 created during package import.
@@ -135,6 +157,7 @@ Update policies describe service scheduling needs:
 - `continuous` for Scrolling Text;
 - `half_second` for a Clock with blinking separators;
 - `second_boundary` for a non-blinking Clock with seconds;
+- `second_boundary` for System Metric and Metric Bar;
 - `minute_boundary` for a plain Clock;
 - `day_boundary` for Date;
 - `static` for Blank and Static Text.

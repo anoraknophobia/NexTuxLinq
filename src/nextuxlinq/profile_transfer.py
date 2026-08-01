@@ -142,6 +142,20 @@ def _mapping(raw: object) -> Mapping[str, object]:
 def _profile_error_code(error: BaseException) -> str:
     """Classify a domain error while discarding all underlying details."""
     message = str(error).lower()
+    if "metric must be one of" in message:
+        return "unknown_metric"
+    if "metric does not support a bar" in message:
+        return "unsupported_metric_for_bar"
+    if "precision must" in message:
+        return "invalid_precision"
+    if "label must" in message:
+        return "invalid_custom_label"
+    if "maximum must be greater" in message:
+        return "invalid_bar_range"
+    if "orientation must be one of" in message:
+        return "invalid_bar_orientation"
+    if "direction must be one of" in message:
+        return "invalid_bar_direction"
     if "duplicated" in message and "region id" in message:
         return "duplicate_region_id"
     if "region id" in message:

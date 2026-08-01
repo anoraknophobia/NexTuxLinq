@@ -34,6 +34,7 @@ from nextuxlinq.rendering_v2.update_policy import (
     policy_has_animated_content,
 )
 from nextuxlinq.widget_models import WidgetType
+from nextuxlinq.system_metrics import SystemMetricsSnapshot
 
 
 class PixelFormat(StrEnum):
@@ -402,9 +403,14 @@ class Compositor:
         *,
         generation_time: datetime,
         animation_time: float,
+        metrics_snapshot: SystemMetricsSnapshot | None = None,
     ) -> RenderResult:
         if not isinstance(profile, ProfileConfigV2):
             raise TypeError("profile must be a ProfileConfigV2.")
+        if metrics_snapshot is not None and type(
+            metrics_snapshot
+        ) is not SystemMetricsSnapshot:
+            raise CompositorError(CompositorFailure.INVALID_CONTEXT)
         try:
             validated_generation = _validate_aware_datetime(
                 generation_time
@@ -488,6 +494,7 @@ class Compositor:
                     region_id=region.id,
                     region_width=region.width,
                     region_height=region.height,
+                    metrics_snapshot=metrics_snapshot,
                 )
                 returned = definition.renderer(
                     surface,

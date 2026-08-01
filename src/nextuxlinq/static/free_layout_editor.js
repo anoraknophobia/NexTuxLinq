@@ -33,6 +33,8 @@
     "static_text",
     "scrolling_text",
     "date",
+    "system_metric",
+    "metric_bar",
   ]);
   const REGION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
   const PROFILE_ID = /^[A-Za-z0-9_-]{1,32}$/;
@@ -134,6 +136,46 @@
       && settings.content.length <= 64
     );
     if (widget.type === "blank") return Object.keys(settings).length ? "settings" : null;
+    if (widget.type === "system_metric") {
+      const metricIds = new Set(
+        (metadata.metric_definitions || []).map((item) => item.id),
+      );
+      const textValid = (value) => (
+        typeof value === "string" && value.length >= 1 && value.length <= 64
+      );
+      if (metricIds.size > 0 && !metricIds.has(settings.metric)) return "metric";
+      if (!new Set(["value_only", "label_and_value"]).has(settings.display_mode)) {
+        return "display_mode";
+      }
+      if (!textValid(settings.label)) return "label";
+      if (!textValid(settings.unavailable_text)) return "unavailable_text";
+      if (!Number.isInteger(settings.precision)
+          || settings.precision < 0 || settings.precision > 2) return "precision";
+      if (!fontValid()) return "font";
+      if (!colorValid()) return "color";
+      if (!verticalValid()) return "vertical_alignment";
+      if (!horizontalValid()) return "horizontal_alignment";
+      return OVERFLOW.has(settings.overflow) ? null : "overflow";
+    }
+    if (widget.type === "metric_bar") {
+      const metricIds = new Set(metadata.bar_metric_ids || [
+        "cpu_usage", "memory_usage", "cpu_temperature",
+      ]);
+      if (!metricIds.has(settings.metric)) return "metric";
+      if (!Number.isFinite(settings.minimum)) return "minimum";
+      if (!Number.isFinite(settings.maximum)
+          || settings.maximum <= settings.minimum) return "maximum";
+      if (!new Set(["horizontal", "vertical"]).has(settings.orientation)) {
+        return "orientation";
+      }
+      if (!new Set(["start_to_end", "end_to_start"]).has(settings.direction)) {
+        return "direction";
+      }
+      if (!COLOR.test(settings.fill_color || "")) return "fill_color";
+      if (!COLOR.test(settings.empty_color || "")) return "empty_color";
+      if (typeof settings.border_enabled !== "boolean") return "border_enabled";
+      return COLOR.test(settings.border_color || "") ? null : "border_color";
+    }
     if (!fontValid() || !colorValid() || !verticalValid()) return "settings";
     if (widget.type === "clock") {
       return (
@@ -898,12 +940,52 @@
         panel.hidden = panel.dataset.widgetPanel !== region.widget.type;
       }
       const settings = region.widget.settings;
+      for (const select of elements.settings.querySelectorAll(
+        "[data-metric-select]"
+      )) {
+        const barOnly = select.dataset.metricSelect === "bar";
+        const allowed = new Set(state.metadata.bar_metric_ids || []);
+        const options = (state.metadata.metric_definitions || [])
+          .filter((metric) => !barOnly || allowed.has(metric.id))
+          .map((metric) => {
+            const option = documentObject.createElement("option");
+            option.value = metric.id;
+            option.textContent = metric.label;
+            return option;
+          });
+        select.replaceChildren(...options);
+      }
       for (const control of elements.settings.querySelectorAll("[data-setting]")) {
         if (control.closest("[data-widget-panel]").dataset.widgetPanel
             !== region.widget.type) continue;
         const value = settings[control.dataset.setting];
         if (control.type === "checkbox") control.checked = Boolean(value);
         else control.value = value === null || value === undefined ? "" : String(value);
+      }
+      const metricPanel = elements.settings.querySelector?.(
+        '[data-widget-panel="system_metric"]',
+      );
+      if (metricPanel && region.widget.type === "system_metric") {
+        const labelVisible = settings.display_mode === "label_and_value";
+        metricPanel.querySelector("[data-metric-label-field]")
+          ?.toggleAttribute("hidden", !labelVisible);
+        const metricDefinition = state.metadata.metric_definitions?.find(
+          (item) => item.id === settings.metric,
+        );
+        metricPanel.querySelector("[data-metric-precision-field]")
+          ?.toggleAttribute("hidden", metricDefinition?.value_type === "duration");
+      }
+      const direction = elements.settings.querySelector?.("[data-bar-direction]");
+      if (direction && region.widget.type === "metric_bar") {
+        const vertical = settings.orientation === "vertical";
+        const labels = vertical
+          ? ["Bottom to top", "Top to bottom"]
+          : ["Left to right", "Right to left"];
+        Array.from(direction.options).forEach((option, index) => {
+          option.textContent = labels[index];
+        });
+        elements.settings.querySelector?.("[data-bar-border-color-field]")
+          ?.toggleAttribute("hidden", !settings.border_enabled);
       }
     }
 
@@ -1406,6 +1488,19 @@
             region.widget.settings[key] = Number(control.value);
           } else {
             region.widget.settings[key] = control.value;
+          }
+          if (key === "metric") {
+            const definition = state.metadata.metric_definitions?.find(
+              (item) => item.id === control.value,
+            );
+            if (region.widget.type === "system_metric" && definition) {
+              region.widget.settings.label = definition.label;
+              region.widget.settings.precision = definition.default_precision;
+            }
+            if (region.widget.type === "metric_bar" && definition) {
+              region.widget.settings.minimum = definition.default_minimum;
+              region.widget.settings.maximum = definition.default_maximum;
+            }
           }
         });
       }

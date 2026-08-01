@@ -11,6 +11,7 @@ from typing import Mapping, TypeAlias
 
 from nextuxlinq.models import MAX_SCROLL_SPEED, MAX_TEXT_LENGTH, MIN_SCROLL_SPEED
 from nextuxlinq.models import normalize_color
+from nextuxlinq.system_metrics import BAR_METRICS, MetricId
 
 MAX_TIME_ZONE_LENGTH = 128
 MAX_TRAILING_GAP = 90
@@ -95,6 +96,8 @@ class WidgetType(StrEnum):
     STATIC_TEXT = "static_text"
     SCROLLING_TEXT = "scrolling_text"
     DATE = "date"
+    SYSTEM_METRIC = "system_metric"
+    METRIC_BAR = "metric_bar"
 
 
 class ClockFormat(StrEnum):
@@ -137,6 +140,21 @@ class DateFormat(StrEnum):
     DAY_MONTH_SHORT_YEAR = "day_month_short_year"
     DAY_MONTH = "day_month"
     WEEKDAY_DAY_MONTH = "weekday_day_month"
+
+
+class MetricDisplayMode(StrEnum):
+    VALUE_ONLY = "value_only"
+    LABEL_AND_VALUE = "label_and_value"
+
+
+class BarOrientation(StrEnum):
+    HORIZONTAL = "horizontal"
+    VERTICAL = "vertical"
+
+
+class BarDirection(StrEnum):
+    START_TO_END = "start_to_end"
+    END_TO_START = "end_to_start"
 
 
 @dataclass(frozen=True, slots=True)
@@ -476,12 +494,144 @@ class DateSettings:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class SystemMetricSettings:
+    metric: MetricId = MetricId.CPU_USAGE
+    display_mode: MetricDisplayMode = MetricDisplayMode.LABEL_AND_VALUE
+    label: str = "CPU"
+    color: str = "#FFFFFF"
+    font: FontChoice = FontChoice.AUTO
+    horizontal_alignment: HorizontalAlignment = HorizontalAlignment.CENTER
+    vertical_alignment: VerticalAlignment = VerticalAlignment.CENTER
+    overflow: TextOverflow = TextOverflow.ERROR
+    precision: int = 0
+    unavailable_text: str = "--"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "metric", _enum(MetricId, self.metric, "metric"))
+        object.__setattr__(
+            self, "display_mode", _enum(MetricDisplayMode, self.display_mode, "display_mode")
+        )
+        object.__setattr__(self, "label", _content(self.label, "label"))
+        object.__setattr__(self, "color", normalize_color(self.color, "color"))
+        object.__setattr__(self, "font", _enum(FontChoice, self.font, "font"))
+        object.__setattr__(
+            self,
+            "horizontal_alignment",
+            _enum(HorizontalAlignment, self.horizontal_alignment, "horizontal_alignment"),
+        )
+        object.__setattr__(
+            self,
+            "vertical_alignment",
+            _enum(VerticalAlignment, self.vertical_alignment, "vertical_alignment"),
+        )
+        object.__setattr__(self, "overflow", _enum(TextOverflow, self.overflow, "overflow"))
+        precision = _strict_integer(self.precision, "precision")
+        if not 0 <= precision <= 2:
+            raise ValueError("precision must be between 0 and 2.")
+        object.__setattr__(
+            self, "unavailable_text", _content(self.unavailable_text, "unavailable_text")
+        )
+
+    @classmethod
+    def from_dict(cls, raw: object) -> SystemMetricSettings:
+        values = _mapping(raw, "system_metric settings")
+        allowed = {
+            "metric", "display_mode", "label", "color", "font",
+            "horizontal_alignment", "vertical_alignment", "overflow",
+            "precision", "unavailable_text",
+        }
+        _fields(values, allowed, "system_metric settings")
+        return cls(**{key: values[key] for key in allowed})  # type: ignore[arg-type]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "metric": self.metric.value,
+            "display_mode": self.display_mode.value,
+            "label": self.label,
+            "color": self.color,
+            "font": self.font.value,
+            "horizontal_alignment": self.horizontal_alignment.value,
+            "vertical_alignment": self.vertical_alignment.value,
+            "overflow": self.overflow.value,
+            "precision": self.precision,
+            "unavailable_text": self.unavailable_text,
+        }
+
+
+def _finite_number(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be a number.")
+    normalized = float(value)
+    if not math.isfinite(normalized):
+        raise ValueError(f"{name} must be finite.")
+    return normalized
+
+
+@dataclass(frozen=True, slots=True)
+class MetricBarSettings:
+    metric: MetricId = MetricId.CPU_USAGE
+    minimum: float = 0.0
+    maximum: float = 100.0
+    orientation: BarOrientation = BarOrientation.HORIZONTAL
+    direction: BarDirection = BarDirection.START_TO_END
+    fill_color: str = "#00D4C7"
+    empty_color: str = "#000000"
+    border_enabled: bool = False
+    border_color: str = "#FFFFFF"
+
+    def __post_init__(self) -> None:
+        metric = _enum(MetricId, self.metric, "metric")
+        if metric not in BAR_METRICS:
+            raise ValueError("metric does not support a bar.")
+        object.__setattr__(self, "metric", metric)
+        minimum = _finite_number(self.minimum, "minimum")
+        maximum = _finite_number(self.maximum, "maximum")
+        if maximum <= minimum:
+            raise ValueError("maximum must be greater than minimum.")
+        object.__setattr__(self, "minimum", minimum)
+        object.__setattr__(self, "maximum", maximum)
+        object.__setattr__(
+            self, "orientation", _enum(BarOrientation, self.orientation, "orientation")
+        )
+        object.__setattr__(self, "direction", _enum(BarDirection, self.direction, "direction"))
+        object.__setattr__(self, "fill_color", normalize_color(self.fill_color, "fill_color"))
+        object.__setattr__(self, "empty_color", normalize_color(self.empty_color, "empty_color"))
+        object.__setattr__(self, "border_enabled", _strict_bool(self.border_enabled, "border_enabled"))
+        object.__setattr__(self, "border_color", normalize_color(self.border_color, "border_color"))
+
+    @classmethod
+    def from_dict(cls, raw: object) -> MetricBarSettings:
+        values = _mapping(raw, "metric_bar settings")
+        allowed = {
+            "metric", "minimum", "maximum", "orientation", "direction",
+            "fill_color", "empty_color", "border_enabled", "border_color",
+        }
+        _fields(values, allowed, "metric_bar settings")
+        return cls(**{key: values[key] for key in allowed})  # type: ignore[arg-type]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "metric": self.metric.value,
+            "minimum": self.minimum,
+            "maximum": self.maximum,
+            "orientation": self.orientation.value,
+            "direction": self.direction.value,
+            "fill_color": self.fill_color,
+            "empty_color": self.empty_color,
+            "border_enabled": self.border_enabled,
+            "border_color": self.border_color,
+        }
+
+
 WidgetSettings: TypeAlias = (
     BlankSettings
     | ClockSettings
     | StaticTextSettings
     | ScrollingTextSettings
     | DateSettings
+    | SystemMetricSettings
+    | MetricBarSettings
 )
 
 CANONICAL_WIDGET_SETTINGS_MODELS: Mapping[
@@ -493,6 +643,8 @@ CANONICAL_WIDGET_SETTINGS_MODELS: Mapping[
         WidgetType.STATIC_TEXT: StaticTextSettings,
         WidgetType.SCROLLING_TEXT: ScrollingTextSettings,
         WidgetType.DATE: DateSettings,
+        WidgetType.SYSTEM_METRIC: SystemMetricSettings,
+        WidgetType.METRIC_BAR: MetricBarSettings,
     }
 )
 """Immutable discriminator-to-settings-model mapping used by schema v2."""

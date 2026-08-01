@@ -37,8 +37,10 @@ from nextuxlinq.widget_models import (
     CANONICAL_WIDGET_SETTINGS_MODELS,
     ClockSettings,
     DateSettings,
+    MetricBarSettings,
     ScrollingTextSettings,
     StaticTextSettings,
+    SystemMetricSettings,
     WidgetConfig,
     WidgetType,
 )
@@ -104,6 +106,8 @@ def canonical_defaults() -> dict[WidgetType, object]:
         WidgetType.STATIC_TEXT: static_text_settings(),
         WidgetType.SCROLLING_TEXT: scrolling_text_settings(),
         WidgetType.DATE: date_settings(),
+        WidgetType.SYSTEM_METRIC: SystemMetricSettings(),
+        WidgetType.METRIC_BAR: MetricBarSettings(),
     }
 
 
@@ -154,16 +158,16 @@ def blank_definition(**changes: object) -> WidgetDefinition:
     return WidgetDefinition(**values)  # type: ignore[arg-type]
 
 
-def test_registry_contains_five_canonical_definitions_in_stable_order() -> None:
+def test_registry_contains_seven_canonical_definitions_in_stable_order() -> None:
     registry = create_widget_registry()
 
     assert tuple(
         definition.widget_type for definition in registry.definitions
     ) == tuple(WidgetType)
-    assert len(registry.definitions) == 5
+    assert len(registry.definitions) == 7
     assert len(
         {definition.widget_type for definition in registry.definitions}
-    ) == 5
+    ) == 7
     for definition in registry.definitions:
         assert definition.settings_model is (
             CANONICAL_WIDGET_SETTINGS_MODELS[definition.widget_type]
@@ -244,6 +248,29 @@ def test_canonical_defaults_serialize_exactly() -> None:
         "font": "auto",
         "overflow": "error",
     }
+    assert registry.resolve(WidgetType.SYSTEM_METRIC).default_settings.to_dict() == {
+        "metric": "cpu_usage",
+        "display_mode": "label_and_value",
+        "label": "CPU",
+        "color": "#FFFFFF",
+        "font": "auto",
+        "horizontal_alignment": "center",
+        "vertical_alignment": "center",
+        "overflow": "error",
+        "precision": 0,
+        "unavailable_text": "--",
+    }
+    assert registry.resolve(WidgetType.METRIC_BAR).default_settings.to_dict() == {
+        "metric": "cpu_usage",
+        "minimum": 0.0,
+        "maximum": 100.0,
+        "orientation": "horizontal",
+        "direction": "start_to_end",
+        "fill_color": "#00D4C7",
+        "empty_color": "#000000",
+        "border_enabled": False,
+        "border_color": "#FFFFFF",
+    }
     for definition in registry.definitions:
         reparsed = definition.settings_model.from_dict(
             definition.default_settings.to_dict()
@@ -267,6 +294,8 @@ def test_minimum_geometry_is_editor_guidance_only() -> None:
         WidgetType.STATIC_TEXT: (1, 5),
         WidgetType.SCROLLING_TEXT: (1, 5),
         WidgetType.DATE: (19, 5),
+        WidgetType.SYSTEM_METRIC: (1, 5),
+        WidgetType.METRIC_BAR: (1, 1),
     }
 
 
@@ -287,6 +316,12 @@ def test_settings_dependent_update_policies_and_exact_types() -> None:
     assert registry.resolve(WidgetType.DATE).resolve_update_policy(
         date_settings()
     ) is UpdatePolicy.DAY_BOUNDARY
+    assert registry.resolve(WidgetType.SYSTEM_METRIC).resolve_update_policy(
+        SystemMetricSettings()
+    ) is UpdatePolicy.SECOND_BOUNDARY
+    assert registry.resolve(WidgetType.METRIC_BAR).resolve_update_policy(
+        MetricBarSettings()
+    ) is UpdatePolicy.SECOND_BOUNDARY
 
     clock = registry.resolve(WidgetType.CLOCK)
     assert clock.resolve_update_policy(

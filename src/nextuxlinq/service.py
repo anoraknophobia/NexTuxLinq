@@ -42,6 +42,12 @@ from nextuxlinq.rendering_v2.registry import create_widget_registry
 from nextuxlinq.rendering_v2.update_policy import UpdatePolicy
 from nextuxlinq.scheduler import update_policy_delay
 from nextuxlinq.state import DaemonState, DaemonSnapshot
+from nextuxlinq.system_metrics import (
+    LinuxSystemMetricsProvider,
+    MetricAvailability,
+    MetricId,
+    SystemMetricsSnapshot,
+)
 from nextuxlinq.widget_models import WidgetType
 
 AsyncSleep = Callable[[float], Awaitable[None]]
@@ -178,6 +184,7 @@ class NexTuxLinqService:
         worker_stop_timeout: float | None = 5.0,
         task_factory: TaskFactory = _default_task_factory,
         mutation_gate: MutationGate = _open_mutation_gate,
+        metrics_provider: Any | None = None,
     ) -> None:
         if frame_rate <= 0:
             raise ValueError("frame_rate must be positive.")
@@ -191,6 +198,15 @@ class NexTuxLinqService:
         self._worker_stop_timeout = worker_stop_timeout
         self._task_factory = task_factory
         self._mutation_gate = mutation_gate
+        self._metrics_provider = (
+            LinuxSystemMetricsProvider(
+                monotonic=monotonic,
+                wall_clock=wall_clock,
+            )
+            if metrics_provider is None
+            else metrics_provider
+        )
+        self._last_metrics_snapshot: SystemMetricsSnapshot | None = None
         self._widget_registry = create_widget_registry()
         self._compositor = Compositor(self._widget_registry)
         self._configuration: ConfigurationDocumentV2 | None = None
@@ -234,6 +250,19 @@ class NexTuxLinqService:
     def get_widget_definitions(self) -> tuple[Any, ...]:
         """Return immutable canonical definitions for editor metadata."""
         return self._widget_registry.definitions
+
+    def get_metric_status(self) -> dict[str, str]:
+        """Return sanitized availability without triggering a sample."""
+        snapshot = self._last_metrics_snapshot
+        if snapshot is None:
+            return {
+                metric_id.value: MetricAvailability.UNAVAILABLE.value
+                for metric_id in MetricId
+            }
+        return {
+            metric_id.value: snapshot.availability[metric_id].value
+            for metric_id in MetricId
+        }
 
     def list_backups(self) -> tuple[ManagedBackup, ...]:
         """Return managed backup metadata without exposing paths."""
@@ -470,12 +499,36 @@ class NexTuxLinqService:
     ) -> tuple[RenderResult, float]:
         generated_at = self._monotonic()
         wall_clock = self._wall_clock()
+        metrics_snapshot: SystemMetricsSnapshot | None = None
+        if any(
+            region.enabled
+            and region.widget.type in {
+                WidgetType.SYSTEM_METRIC,
+                WidgetType.METRIC_BAR,
+            }
+            for region in profile.regions
+        ):
+            sample_failed = False
+            try:
+                candidate_snapshot = self._metrics_provider.sample()
+                if type(candidate_snapshot) is not SystemMetricsSnapshot:
+                    sample_failed = True
+            except Exception:
+                sample_failed = True
+                candidate_snapshot = None
+            metrics_snapshot = (
+                SystemMetricsSnapshot.unavailable(generated_at, wall_clock)
+                if sample_failed
+                else candidate_snapshot
+            )
+            self._last_metrics_snapshot = metrics_snapshot
         failure: tuple[str, str | None, WidgetType | None, str | None] | None
         try:
             result = self._compositor.render(
                 profile,
                 generation_time=wall_clock,
                 animation_time=max(0.0, generated_at - self._started_at),
+                metrics_snapshot=metrics_snapshot,
             )
         except CompositorError as error:
             failure = (

@@ -107,6 +107,65 @@ BUILTIN_PRESETS = (
             _region("scrolling-text", 0, 0, 90, 10, _settings(WidgetType.SCROLLING_TEXT, content="NEXTUXLINQ"), "Scrolling Text"),
         ),
     ),
+    BuiltinPreset(
+        "system-monitor",
+        "System Monitor",
+        "CPU, memory, and CPU temperature in a compact two-row layout.",
+        _profile(
+            _region(
+                "cpu-usage", 0, 0, 45, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="cpu_usage",
+                    label="CPU",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "CPU Usage",
+            ),
+            _region(
+                "memory-usage", 45, 0, 45, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="memory_usage",
+                    label="RAM",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "Memory Usage",
+            ),
+            _region(
+                "cpu-temperature", 0, 5, 90, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="cpu_temperature",
+                    label="CPU TEMP",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "CPU Temperature",
+            ),
+        ),
+    ),
+    BuiltinPreset(
+        "system-bars",
+        "System Bars",
+        "Separate CPU, memory, and CPU-temperature metric bars.",
+        _profile(
+            _region(
+                "cpu-bar", 0, 0, 90, 3,
+                _settings(WidgetType.METRIC_BAR, metric="cpu_usage"),
+                "CPU Bar",
+            ),
+            _region(
+                "memory-bar", 0, 3, 90, 3,
+                _settings(WidgetType.METRIC_BAR, metric="memory_usage"),
+                "Memory Bar",
+            ),
+            _region(
+                "temperature-bar", 0, 6, 90, 4,
+                _settings(WidgetType.METRIC_BAR, metric="cpu_temperature"),
+                "CPU Temperature Bar",
+            ),
+        ),
+    ),
 )
 
 

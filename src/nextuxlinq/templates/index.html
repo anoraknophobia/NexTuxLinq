@@ -44,70 +44,6 @@
     </section>
 
     <div id="free-layout-root">
-      <section aria-labelledby="profile-heading">
-        <div class="section-heading">
-          <div>
-            <h2 id="profile-heading">Profile</h2>
-            <p>Changes remain a local draft until Apply.</p>
-          </div>
-          <strong id="fl-editor-state" class="editor-state">Loading</strong>
-        </div>
-        <div class="compact-controls">
-          <label>Profile
-            <select id="fl-profile" aria-label="Active draft profile"></select>
-          </label>
-          <label>Canvas background
-            <input id="fl-canvas-background" type="color" value="#000000">
-          </label>
-          <label>Brightness
-            <select id="fl-brightness">
-              <option value="">Leave unchanged</option>
-              <option value="10">10%</option><option value="20">20%</option>
-              <option value="30">30%</option><option value="40">40%</option>
-              <option value="50">50%</option><option value="60">60%</option>
-              <option value="70">70%</option><option value="80">80%</option>
-              <option value="90">90%</option><option value="100">100%</option>
-            </select>
-          </label>
-          <div class="profile-actions" aria-label="Profile actions">
-            <button type="button" data-profile-action="create">New</button>
-            <button type="button" data-profile-action="duplicate">Duplicate</button>
-            <button type="button" data-profile-action="rename">Rename</button>
-            <button type="button" data-profile-action="delete">Delete</button>
-            <button id="fl-presets" type="button">Presets</button>
-            <button id="fl-import-profile" type="button">Import</button>
-            <button id="fl-export-profile" type="button">Export</button>
-            <input id="fl-profile-file" type="file" accept="application/json,.json" hidden>
-          </div>
-        </div>
-        <div id="fl-preset-browser" class="preset-browser" hidden
-             aria-labelledby="fl-preset-heading">
-          <h3 id="fl-preset-heading">Built-in presets</h3>
-          <div id="fl-preset-list" class="preset-list" role="listbox"
-               aria-label="Built-in profile presets"></div>
-          <div class="actions">
-            <button id="fl-create-preset" type="button">Create profile from preset</button>
-            <button id="fl-preview-preset" type="button">Preview preset</button>
-            <button id="fl-cancel-preset" type="button">Cancel</button>
-          </div>
-        </div>
-        <details class="profile-advanced">
-          <summary>Configuration import, export, and backups</summary>
-          <div class="advanced-actions">
-            <button id="fl-export-config" type="button">Export full configuration</button>
-            <button id="fl-import-config" type="button">Import full configuration</button>
-            <input id="fl-config-file" type="file" accept="application/json,.json" hidden>
-            <button id="fl-create-backup" type="button">Create backup</button>
-            <label>Managed backup
-              <select id="fl-backup-select" aria-label="Managed backup"></select>
-            </label>
-            <button id="fl-restore-backup" type="button">Restore backup</button>
-            <button id="fl-delete-backup" type="button">Delete backup</button>
-          </div>
-          <p class="field-help">Imports and restores become local drafts. Apply and Save remain separate.</p>
-        </details>
-      </section>
-
       <section aria-labelledby="editor-heading">
         <div class="section-heading">
           <div>
@@ -157,6 +93,8 @@
                     <option value="static_text">Static Text</option>
                     <option value="scrolling_text">Scrolling Text</option>
                     <option value="date">Date</option>
+                    <option value="system_metric">System Metric</option>
+                    <option value="metric_bar">Metric Bar</option>
                   </select>
                 </label>
                 <label class="checkbox-label">
@@ -323,6 +261,72 @@
                   </div>
                   <p class="field-help">German weekdays: MO. DI. MI. DO. FR. SA. SO.</p>
                 </fieldset>
+
+                <fieldset data-widget-panel="system_metric" hidden>
+                  <legend>System Metric</legend>
+                  <div class="inspector-grid">
+                    <label>Metric <select data-setting="metric" data-metric-select="all"></select></label>
+                    <label>Display <select data-setting="display_mode">
+                      <option value="value_only">Value only</option>
+                      <option value="label_and_value">Label and value</option>
+                    </select></label>
+                    <label data-metric-label-field>Custom label
+                      <input data-setting="label" maxlength="64">
+                    </label>
+                    <label data-metric-precision-field>Precision
+                      <input data-setting="precision" data-kind="integer" type="number"
+                             min="0" max="2" step="1">
+                    </label>
+                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label>Font <select data-setting="font">
+                      <option value="auto">Auto</option><option value="3x5">3×5</option>
+                      <option value="3x7">3×7</option><option value="5x7">5×7</option>
+                    </select></label>
+                    <label>Horizontal <select data-setting="horizontal_alignment">
+                      <option value="start">Start</option><option value="center">Center</option>
+                      <option value="end">End</option>
+                    </select></label>
+                    <label>Vertical <select data-setting="vertical_alignment">
+                      <option value="top">Top</option><option value="center">Center</option>
+                      <option value="bottom">Bottom</option>
+                    </select></label>
+                    <label>Overflow <select data-setting="overflow">
+                      <option value="error">Error</option><option value="truncate">Truncate</option>
+                      <option value="clip">Clip</option>
+                    </select></label>
+                    <label>Unavailable text
+                      <input data-setting="unavailable_text" maxlength="64">
+                    </label>
+                  </div>
+                  <p class="field-help">CPU usage may show unavailable text until a second sample is available.</p>
+                </fieldset>
+
+                <fieldset data-widget-panel="metric_bar" hidden>
+                  <legend>Metric Bar</legend>
+                  <div class="inspector-grid">
+                    <label>Metric <select data-setting="metric" data-metric-select="bar"></select></label>
+                    <label>Minimum <input data-setting="minimum" data-kind="number"
+                      type="number" step="0.1"></label>
+                    <label>Maximum <input data-setting="maximum" data-kind="number"
+                      type="number" step="0.1"></label>
+                    <label>Orientation <select data-setting="orientation">
+                      <option value="horizontal">Horizontal</option>
+                      <option value="vertical">Vertical</option>
+                    </select></label>
+                    <label>Direction <select data-setting="direction" data-bar-direction>
+                      <option value="start_to_end">Left to right</option>
+                      <option value="end_to_start">Right to left</option>
+                    </select></label>
+                    <label>Fill color <input type="color" data-setting="fill_color"></label>
+                    <label>Empty color <input type="color" data-setting="empty_color"></label>
+                    <label class="checkbox-label"><input type="checkbox"
+                      data-setting="border_enabled"> Border</label>
+                    <label data-bar-border-color-field>Border color
+                      <input type="color" data-setting="border_color">
+                    </label>
+                  </div>
+                  <p class="field-help">Vertical start-to-end fills bottom to top. Values use nearest-pixel rounding.</p>
+                </fieldset>
               </div>
             </div>
           </aside>
@@ -342,6 +346,70 @@
             A 90 by 10 pixel viewer-perspective preview.
           </canvas>
         </div>
+      </section>
+
+      <section aria-labelledby="profile-heading">
+        <div class="section-heading">
+          <div>
+            <h2 id="profile-heading">Profile</h2>
+            <p>Changes remain a local draft until Apply.</p>
+          </div>
+          <strong id="fl-editor-state" class="editor-state">Loading</strong>
+        </div>
+        <div class="compact-controls">
+          <label>Profile
+            <select id="fl-profile" aria-label="Active draft profile"></select>
+          </label>
+          <label>Canvas background
+            <input id="fl-canvas-background" type="color" value="#000000">
+          </label>
+          <label>Brightness
+            <select id="fl-brightness">
+              <option value="">Leave unchanged</option>
+              <option value="10">10%</option><option value="20">20%</option>
+              <option value="30">30%</option><option value="40">40%</option>
+              <option value="50">50%</option><option value="60">60%</option>
+              <option value="70">70%</option><option value="80">80%</option>
+              <option value="90">90%</option><option value="100">100%</option>
+            </select>
+          </label>
+          <div class="profile-actions" aria-label="Profile actions">
+            <button type="button" data-profile-action="create">New</button>
+            <button type="button" data-profile-action="duplicate">Duplicate</button>
+            <button type="button" data-profile-action="rename">Rename</button>
+            <button type="button" data-profile-action="delete">Delete</button>
+            <button id="fl-presets" type="button">Presets</button>
+            <button id="fl-import-profile" type="button">Import</button>
+            <button id="fl-export-profile" type="button">Export</button>
+            <input id="fl-profile-file" type="file" accept="application/json,.json" hidden>
+          </div>
+        </div>
+        <div id="fl-preset-browser" class="preset-browser" hidden
+             aria-labelledby="fl-preset-heading">
+          <h3 id="fl-preset-heading">Built-in presets</h3>
+          <div id="fl-preset-list" class="preset-list" role="listbox"
+               aria-label="Built-in profile presets"></div>
+          <div class="actions">
+            <button id="fl-create-preset" type="button">Create profile from preset</button>
+            <button id="fl-preview-preset" type="button">Preview preset</button>
+            <button id="fl-cancel-preset" type="button">Cancel</button>
+          </div>
+        </div>
+        <details class="profile-advanced">
+          <summary>Configuration import, export, and backups</summary>
+          <div class="advanced-actions">
+            <button id="fl-export-config" type="button">Export full configuration</button>
+            <button id="fl-import-config" type="button">Import full configuration</button>
+            <input id="fl-config-file" type="file" accept="application/json,.json" hidden>
+            <button id="fl-create-backup" type="button">Create backup</button>
+            <label>Managed backup
+              <select id="fl-backup-select" aria-label="Managed backup"></select>
+            </label>
+            <button id="fl-restore-backup" type="button">Restore backup</button>
+            <button id="fl-delete-backup" type="button">Delete backup</button>
+          </div>
+          <p class="field-help">Imports and restores become local drafts. Apply and Save remain separate.</p>
+        </details>
       </section>
 
       <section aria-labelledby="validation-heading">

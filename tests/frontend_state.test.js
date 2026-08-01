@@ -55,7 +55,42 @@ const widgetMetadata = {
       },
       minimum_width: 19, minimum_height: 5,
     },
+    {
+      type: "system_metric", label: "System Metric",
+      default_settings: {
+        metric: "cpu_usage", display_mode: "label_and_value", label: "CPU",
+        color: "#FFFFFF", font: "auto", horizontal_alignment: "center",
+        vertical_alignment: "center", overflow: "error", precision: 0,
+        unavailable_text: "--",
+      },
+      minimum_width: 1, minimum_height: 5,
+    },
+    {
+      type: "metric_bar", label: "Metric Bar",
+      default_settings: {
+        metric: "cpu_usage", minimum: 0, maximum: 100,
+        orientation: "horizontal", direction: "start_to_end",
+        fill_color: "#00D4C7", empty_color: "#000000",
+        border_enabled: false, border_color: "#FFFFFF",
+      },
+      minimum_width: 1, minimum_height: 1,
+    },
   ],
+  metric_definitions: [
+    {id: "cpu_usage", label: "CPU", value_type: "percentage",
+      unit: "%", default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "memory_usage", label: "RAM", value_type: "percentage",
+      unit: "%", default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "cpu_temperature", label: "CPU TEMP", value_type: "temperature",
+      unit: "C", default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "uptime", label: "UPTIME", value_type: "duration", unit: "",
+      default_precision: 0, supports_bar: false,
+      default_minimum: null, default_maximum: null},
+  ],
+  bar_metric_ids: ["cpu_usage", "memory_usage", "cpu_temperature"],
 };
 
 function freeProfile(regions = []) {
@@ -1850,9 +1885,10 @@ test("local validation marks overlaps, bounds, dimensions, and duplicate IDs", (
   }
 });
 
-test("widget selection uses exactly five canonical defaults", () => {
+test("widget selection uses exactly seven canonical defaults", () => {
   assert.deepEqual(freeLayout.WIDGET_TYPES, [
     "blank", "clock", "static_text", "scrolling_text", "date",
+    "system_metric", "metric_bar",
   ]);
   const defaults = freeLayout.widgetDefaultMap(widgetMetadata);
   const source = freeRegion({
@@ -1935,6 +1971,22 @@ test("widget settings validate exact models and German date formats", () => {
     }, widgetMetadata),
     "settings",
   );
+});
+
+test("metric widget validation rejects unknown metrics and invalid bar ranges", () => {
+  const defaults = freeLayout.widgetDefaultMap(widgetMetadata);
+  assert.equal(freeLayout.validateWidgetSettings({
+    type: "system_metric",
+    settings: {...defaults.system_metric, metric: "gpu_usage"},
+  }, widgetMetadata), "metric");
+  assert.equal(freeLayout.validateWidgetSettings({
+    type: "metric_bar",
+    settings: {...defaults.metric_bar, metric: "uptime"},
+  }, widgetMetadata), "metric");
+  assert.equal(freeLayout.validateWidgetSettings({
+    type: "metric_bar",
+    settings: {...defaults.metric_bar, minimum: 10, maximum: 10},
+  }, widgetMetadata), "maximum");
 });
 
 test("profile actions keep canonical layouts and new profiles empty", () => {

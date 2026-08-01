@@ -29,6 +29,8 @@ The immutable preset library contains:
 - Two-row Information
 - Date + Static Text
 - Full-width Scrolling Text
+- System Monitor
+- System Bars
 
 Every preset is a normal schema-v2 profile and is validated and rendered by the
 same registry and compositor as user profiles. Selecting a preset previews it;
@@ -45,6 +47,9 @@ contains no revision, runtime, device, service, or filesystem data.
 Complete exports are canonical schema-v2 documents named
 `nextuxlinq-config-v2.json`. Canonical profile ordering, the active profile,
 brightness, canvas settings, regions, and widget settings are preserved.
+System Metric and Metric Bar settings use the existing transfer format version
+and round-trip exactly; unknown metric identifiers and invalid bar ranges fail
+strict validation. Managed backups preserve and validate them identically.
 
 Imports accept JSON files up to 256 KiB. The backend strictly decodes base64
 transport data, UTF-8 and JSON, rejects duplicate JSON keys, validates the
@@ -69,4 +74,3 @@ automatically deletes the one-time original schema-v1 migration backup.
 All transfer and backup content is JSON data only. NexTuxLinq does not use
 Python object serialization, executable content, dynamic imports, commands, or
 arbitrary filesystem paths for these operations.
-

@@ -16,6 +16,11 @@ from nextuxlinq.rendering_v2.registry import create_widget_registry
 from nextuxlinq.rendering_v2.update_policy import UpdatePolicy
 from nextuxlinq.scheduler import continuous_delay, update_policy_delay
 from nextuxlinq.service import NexTuxLinqService
+from nextuxlinq.system_metrics import (
+    MetricAvailability,
+    MetricId,
+    SystemMetricsSnapshot,
+)
 from nextuxlinq.widget_models import WidgetConfig, WidgetType
 
 NOW = datetime(2026, 7, 29, 16, 26, 37, 250000, tzinfo=timezone.utc)
@@ -123,6 +128,7 @@ def ready_service(
     configured: ProfileConfigV2,
     *,
     sleep,
+    metrics_provider=None,
 ) -> tuple[NexTuxLinqService, FakeWorker]:
     from nextuxlinq.models_v2 import ConfigurationDocumentV2
 
@@ -133,6 +139,7 @@ def ready_service(
         monotonic=lambda: 0.0,
         wall_clock=lambda: NOW,
         sleep=sleep,
+        metrics_provider=metrics_provider,
     )
     service._configuration = ConfigurationDocumentV2(
         2,
@@ -167,6 +174,61 @@ def test_static_scheduler_renders_immediately_then_waits_for_change() -> None:
         assert len(worker.frames) == 1
         assert sleep_calls == []
         assert service.snapshot().update_policy == "static"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+def test_metric_scheduler_renders_immediately_then_refreshes_at_second_boundary() -> None:
+    async def scenario() -> None:
+        entered_second_wait = asyncio.Event()
+        delays: list[float] = []
+
+        class Metrics:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def sample(self) -> SystemMetricsSnapshot:
+                self.calls += 1
+                available = self.calls > 1
+                return SystemMetricsSnapshot(
+                    float(self.calls), NOW,
+                    {MetricId.CPU_USAGE: 42.0} if available else {},
+                    {
+                        metric: (
+                            MetricAvailability.AVAILABLE
+                            if metric is MetricId.CPU_USAGE and available
+                            else MetricAvailability.AWAITING_INITIAL_CPU_DELTA
+                            if metric is MetricId.CPU_USAGE
+                            else MetricAvailability.UNAVAILABLE
+                        )
+                        for metric in MetricId
+                    },
+                    "partial",
+                )
+
+        async def sleep(delay: float) -> None:
+            delays.append(delay)
+            if len(delays) == 1:
+                return
+            entered_second_wait.set()
+            await asyncio.Future()
+
+        metrics = Metrics()
+        service, worker = ready_service(
+            profile(WidgetType.METRIC_BAR),
+            sleep=sleep,
+            metrics_provider=metrics,
+        )
+        task = asyncio.create_task(service._render_loop())
+        await asyncio.wait_for(entered_second_wait.wait(), 1)
+        assert len(worker.frames) == 2
+        assert metrics.calls == 2
+        assert service.snapshot().update_policy == "second_boundary"
+        assert delays == [pytest.approx(0.75), pytest.approx(0.75)]
+        assert service.get_metric_status()["cpu_usage"] == "available"
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task

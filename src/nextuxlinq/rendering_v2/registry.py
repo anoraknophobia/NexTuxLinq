@@ -16,7 +16,10 @@ from nextuxlinq.rendering_v2.update_policy import (
     UpdatePolicy,
     UpdatePolicyResolver,
 )
+from nextuxlinq.system_metrics import SystemMetricsSnapshot
 from nextuxlinq.widget_models import (
+    BarDirection,
+    BarOrientation,
     BlankSettings,
     CANONICAL_WIDGET_SETTINGS_MODELS,
     ClockFormat,
@@ -24,9 +27,12 @@ from nextuxlinq.widget_models import (
     DateSettings,
     FontChoice,
     HorizontalAlignment,
+    MetricBarSettings,
+    MetricDisplayMode,
     ScrollDirection,
     ScrollingTextSettings,
     StaticTextSettings,
+    SystemMetricSettings,
     TextOverflow,
     VerticalAlignment,
     WidgetSettings,
@@ -79,6 +85,7 @@ class RenderContext:
     region_id: str
     region_width: int
     region_height: int
+    metrics_snapshot: SystemMetricsSnapshot | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.wall_clock, datetime):
@@ -146,6 +153,12 @@ class RenderContext:
         ):
             raise RenderContextValidationError(
                 "region_id must be a validated region identifier."
+            )
+        if self.metrics_snapshot is not None and type(
+            self.metrics_snapshot
+        ) is not SystemMetricsSnapshot:
+            raise RenderContextValidationError(
+                "metrics_snapshot must be a SystemMetricsSnapshot or null."
             )
 
 
@@ -326,6 +339,11 @@ def create_widget_registry() -> WidgetRegistry:
     from nextuxlinq.rendering_v2.widgets.static_text import (
         render_static_text,
     )
+    from nextuxlinq.rendering_v2.widgets.system_metric import (
+        render_metric_bar,
+        render_system_metric,
+    )
+    from nextuxlinq.system_metrics import MetricId
 
     definitions = (
         WidgetDefinition(
@@ -412,6 +430,40 @@ def create_widget_registry() -> WidgetRegistry:
             ),
             minimum_width=19,
             minimum_height=5,
+        ),
+        WidgetDefinition(
+            widget_type=WidgetType.SYSTEM_METRIC,
+            display_label="System Metric",
+            settings_model=SystemMetricSettings,
+            default_settings=SystemMetricSettings(),
+            renderer=render_system_metric,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                SystemMetricSettings, UpdatePolicy.SECOND_BOUNDARY
+            ),
+            minimum_width=1,
+            minimum_height=5,
+        ),
+        WidgetDefinition(
+            widget_type=WidgetType.METRIC_BAR,
+            display_label="Metric Bar",
+            settings_model=MetricBarSettings,
+            default_settings=MetricBarSettings(
+                metric=MetricId.CPU_USAGE,
+                minimum=0.0,
+                maximum=100.0,
+                orientation=BarOrientation.HORIZONTAL,
+                direction=BarDirection.START_TO_END,
+                fill_color="#00D4C7",
+                empty_color="#000000",
+                border_enabled=False,
+                border_color="#FFFFFF",
+            ),
+            renderer=render_metric_bar,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                MetricBarSettings, UpdatePolicy.SECOND_BOUNDARY
+            ),
+            minimum_width=1,
+            minimum_height=1,
         ),
     )
     return WidgetRegistry(definitions)  # type: ignore[arg-type]

@@ -21,12 +21,18 @@ from nextuxlinq.models import ConfigurationDocument, ProfileConfig
 from nextuxlinq.models_v2 import ConfigurationDocumentV2
 from nextuxlinq.migration import migrate_configuration_v1_to_v2
 from nextuxlinq.rendering import render_profile_at_elapsed
+from nextuxlinq.profile_presets import get_builtin_presets
 from nextuxlinq.service import (
     CandidateValidationError,
     NexTuxLinqService,
     WorkerSubmissionError,
 )
 from nextuxlinq.state import DaemonState
+from nextuxlinq.system_metrics import (
+    MetricAvailability,
+    MetricId,
+    SystemMetricsSnapshot,
+)
 from nextuxlinq.writer_lock import WriterLock
 
 
@@ -75,6 +81,70 @@ class Monotonic:
 
     def __call__(self) -> float:
         return next(self.values)
+
+
+def test_metric_profiles_sample_once_per_frame_and_nonmetric_profiles_do_not() -> None:
+    class Provider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def sample(self) -> SystemMetricsSnapshot:
+            self.calls += 1
+            return SystemMetricsSnapshot(
+                5.0,
+                datetime(2026, 8, 1, tzinfo=timezone.utc),
+                {
+                    MetricId.CPU_USAGE: 40.0,
+                    MetricId.MEMORY_USAGE: 50.0,
+                    MetricId.CPU_TEMPERATURE: 60.0,
+                },
+                {
+                    metric: (
+                        MetricAvailability.UNAVAILABLE
+                        if metric is MetricId.UPTIME
+                        else MetricAvailability.AVAILABLE
+                    )
+                    for metric in MetricId
+                },
+                "partial",
+            )
+
+    metrics = Provider()
+    service = NexTuxLinqService(
+        config_store=object(),  # type: ignore[arg-type]
+        device_worker=object(),  # type: ignore[arg-type]
+        monotonic=lambda: 5.0,
+        wall_clock=lambda: datetime(2026, 8, 1, tzinfo=timezone.utc),
+        metrics_provider=metrics,
+    )
+    presets = {preset.id: preset.profile for preset in get_builtin_presets()}
+
+    result, _ = service._render_profile(presets["system-monitor"])
+    assert result.update_policy.value == "second_boundary"
+    assert metrics.calls == 1
+    service._render_profile(presets["empty-layout"])
+    assert metrics.calls == 1
+
+
+def test_unexpected_metric_provider_failure_uses_sanitized_fallback() -> None:
+    class BrokenProvider:
+        def sample(self):
+            raise RuntimeError("PRIVATE_SYSTEM_SOURCE")
+
+    service = NexTuxLinqService(
+        config_store=object(),  # type: ignore[arg-type]
+        device_worker=object(),  # type: ignore[arg-type]
+        monotonic=lambda: 5.0,
+        wall_clock=lambda: datetime(2026, 8, 1, tzinfo=timezone.utc),
+        metrics_provider=BrokenProvider(),
+    )
+    profile = next(
+        preset.profile for preset in get_builtin_presets()
+        if preset.id == "system-bars"
+    )
+    result, _ = service._render_profile(profile)
+    assert result.update_policy.value == "second_boundary"
+    assert service.get_metric_status()["cpu_usage"] == "unavailable"
 
 
 def configuration_with(**changes: object) -> ConfigurationDocument:

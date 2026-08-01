@@ -183,7 +183,7 @@ def test_visual_editor_layout_has_safe_responsive_sizing() -> None:
     assert 'class="editor-workspace"' in page
     assert 'class="region-inspector"' in page
     assert 'class="geometry-grid"' in page
-    assert page.count('data-widget-panel="') == 5
+    assert page.count('data-widget-panel="') == 7
     assert ".editor-workspace {" in css
     workspace = css.split(".editor-workspace {", 1)[1].split("}", 1)[0]
     assert "grid-template-columns: minmax(0, 1fr);" in workspace
@@ -232,6 +232,8 @@ def test_visual_editor_exposes_only_canonical_widget_controls() -> None:
         "static_text",
         "scrolling_text",
         "date",
+        "system_metric",
+        "metric_bar",
     ):
         assert inspector.count(
             f'data-widget-panel="{widget_type}"'
@@ -252,6 +254,15 @@ def test_visual_editor_exposes_only_canonical_widget_controls() -> None:
         "speed",
         "initial_alignment",
         "trailing_gap",
+        "metric",
+        "display_mode",
+        "precision",
+        "minimum",
+        "maximum",
+        "orientation",
+        "fill_color",
+        "empty_color",
+        "border_enabled",
     ):
         assert f'data-setting="{setting}"' in inspector
     for date_format in (
@@ -267,6 +278,24 @@ def test_visual_editor_exposes_only_canonical_widget_controls() -> None:
     assert "http://" not in editor
     assert "https://" not in editor
     assert "documentObject.hidden" in editor
+
+
+def test_primary_section_order_places_profile_after_physical_preview() -> None:
+    page, _, _ = _frontend_source()
+    editor = _editor_source()
+    positions = [
+        page.index('id="status-heading"'),
+        page.index('id="editor-heading"'),
+        page.index('id="preview-heading"'),
+        page.index('id="profile-heading"'),
+        page.index('id="validation-heading"'),
+    ]
+    assert positions == sorted(positions)
+    assert page.count('id="profile-heading"') == 1
+    assert 'data-widget-panel="system_metric"' in page
+    assert 'data-widget-panel="metric_bar"' in page
+    assert 'data-metric-select="bar"' in page
+    assert "Bottom to top" in editor
 
 
 def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:

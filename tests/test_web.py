@@ -22,6 +22,7 @@ from nextuxlinq.defaults import (
     legacy_equivalent_configuration_v2,
 )
 from nextuxlinq.models_v2 import ConfigurationDocumentV2
+from nextuxlinq.profile_presets import get_builtin_presets
 from nextuxlinq.service import NexTuxLinqService
 from nextuxlinq.service import RevisionConflictError
 from nextuxlinq.web import MAX_REQUEST_BODY, create_app
@@ -304,8 +305,17 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
         "static_text",
         "scrolling_text",
         "date",
+        "system_metric",
+        "metric_bar",
     ]
     assert definitions[0]["default_settings"] == {}
+    assert body["bar_metric_ids"] == [
+        "cpu_usage", "memory_usage", "cpu_temperature",
+    ]
+    assert [metric["id"] for metric in body["metric_definitions"]] == [
+        "cpu_usage", "memory_usage", "cpu_temperature", "uptime",
+    ]
+    assert all("path" not in metric for metric in body["metric_definitions"])
     assert definitions[1]["default_settings"] == {
         "format": "24h",
         "show_seconds": False,
@@ -325,6 +335,54 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
     )
     assert service.get_configuration() == before
     assert store.saved == []
+    assert worker.frames == []
+
+
+@pytest.mark.parametrize(
+    ("preset_id", "region_index", "setting", "value", "category", "field"),
+    [
+        ("system-monitor", 0, "metric", "gpu_usage", "unknown_metric", "metric"),
+        ("system-monitor", 0, "precision", 3, "invalid_precision", "precision"),
+        ("system-monitor", 0, "label", "", "invalid_custom_label", "label"),
+        ("system-bars", 0, "metric", "uptime", "unsupported_metric_for_bar", "metric"),
+        ("system-bars", 0, "maximum", 0, "invalid_bar_range", "maximum"),
+        ("system-bars", 0, "orientation", "diagonal", "invalid_bar_orientation", "orientation"),
+        ("system-bars", 0, "direction", "reverse", "invalid_bar_direction", "direction"),
+    ],
+)
+def test_metric_configuration_errors_are_sanitized_and_field_addressable(
+    api_client,
+    preset_id: str,
+    region_index: int,
+    setting: str,
+    value: object,
+    category: str,
+    field: str,
+) -> None:
+    client, service, store, worker = api_client
+    profile = next(
+        preset.profile.to_dict() for preset in get_builtin_presets()
+        if preset.id == preset_id
+    )
+    profile["regions"][region_index]["widget"]["settings"][setting] = value
+    response = client.post(
+        "/api/v1/free-layout/validate",
+        json={
+            "configuration": {
+                "schema_version": 2,
+                "active_profile": "metrics",
+                "profiles": {"metrics": profile},
+            }
+        },
+    )
+    body = response.json()
+    assert response.status_code == 422
+    assert body["code"] == category
+    assert body["field_errors"][0]["field"].endswith(field)
+    serialized = json.dumps(body)
+    assert "gpu_usage" not in serialized
+    assert "diagonal" not in serialized
+    assert "reverse" not in serialized
     assert worker.frames == []
 
 

@@ -10,11 +10,16 @@ reordered, enabled, disabled, or removed. New profiles start with the default
 canvas background and no regions.
 
 Each region has exactly one widget selection: Nothing / Gap, Clock, Static
-Text, Scrolling Text, or Date. The inspector displays only the canonical
+Text, Scrolling Text, Date, System Metric, or Metric Bar. The inspector displays only the canonical
 settings for that widget, including font, alignment, color, timezone, overflow,
 scroll direction, speed, and trailing gap where applicable. Geometry is always
 stored as integer `x`, `y`, `width`, and `height` pixels. Full/half canvas
 buttons are calculation helpers and do not persist percentages.
+
+The primary page order is Device status, Free-layout editor, Physical display
+preview, Profile, then Validate, Apply, and Save. The full-width region
+inspector remains below the canvas. Moving Profile below the preview changes no
+draft, applied, saved, transfer, preset, or backup state behavior.
 
 ## Coordinates and preview
 
