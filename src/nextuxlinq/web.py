@@ -43,6 +43,8 @@ from nextuxlinq.api_models import (
     StatusResponse,
     WidgetEditorDefinition,
     MetricEditorDefinition,
+    MetricDiagnostic,
+    MetricDiagnosticsResponse,
     BackupCreateRequest,
     BackupListResponse,
     BackupMetadataResponse,
@@ -715,6 +717,8 @@ def create_app(
         response_model=FreeLayoutMetadataResponse,
     )
     async def free_layout_metadata() -> FreeLayoutMetadataResponse:
+        diagnostics = service.get_metric_diagnostics()
+        metric_status = service.get_metric_status()
         return FreeLayoutMetadataResponse(
             canvas_width=MATRIX_WIDTH,
             canvas_height=MATRIX_HEIGHT,
@@ -742,7 +746,8 @@ def create_app(
                     supports_bar=definition.supports_bar,
                     default_minimum=definition.bar_minimum,
                     default_maximum=definition.bar_maximum,
-                    availability=service.get_metric_status()[metric_id.value],
+                    availability=metric_status[metric_id.value],
+                    availability_reason=diagnostics[metric_id.value][1],
                 )
                 for metric_id, definition in METRIC_DEFINITIONS.items()
             ],
@@ -751,6 +756,22 @@ def create_app(
                 if metric_id in BAR_METRICS
             ],
         )
+
+    @app.get(
+        f"{API_PREFIX}/free-layout/metrics",
+        response_model=MetricDiagnosticsResponse,
+    )
+    async def metric_diagnostics() -> MetricDiagnosticsResponse:
+        diagnostics = service.get_metric_diagnostics()
+        return MetricDiagnosticsResponse(metrics=[
+            MetricDiagnostic(
+                id=metric_id.value,
+                label=definition.label,
+                state=diagnostics[metric_id.value][0],
+                reason=diagnostics[metric_id.value][1],
+            )
+            for metric_id, definition in METRIC_DEFINITIONS.items()
+        ])
 
     def backup_response(backup: ManagedBackup) -> BackupMetadataResponse:
         return BackupMetadataResponse(

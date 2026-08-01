@@ -12,17 +12,21 @@ shows only settings belonging to the selected widget.
 ## System Metric
 
 System Metric formats one immutable render-cycle snapshot as value-only or
-label-and-value text. Stable metrics are CPU usage, memory usage, CPU
-temperature, and uptime. Percentage values use `%`; temperature uses the
-font-safe ASCII suffix `C`; unavailable values use configurable safe text,
-defaulting to `--`. Uptime is `MM:SS` below one hour, `HH:MM` below one day,
-and `<days>D <hours>H` from one day onward, with a two-digit hour. Precision is zero to two decimals for numeric
-values. Existing intrinsic fonts, alignments, and overflow modes apply, and
-five-pixel rows can use `3x5`.
+label-and-value text. It supports CPU, memory, load, fixed-root storage,
+network receive/transmit, generic GPU/VRAM, uptime, and available CPU, GPU, and
+storage temperatures. Percentage values use `%`; temperatures use the
+font-safe ASCII suffix `C`; network rates automatically use `KB/S`, `MB/S`, or
+`GB/S`. Unavailable values use configurable safe text, defaulting to `--`.
+Uptime is `MM:SS` below one hour, `HH:MM` below one day, and
+`<days>D <hours>H` from one day onward, with a two-digit hour. Precision is
+zero to two decimals for numeric values. Existing intrinsic fonts, alignments,
+and overflow modes apply, and five-pixel rows can use `3x5`.
 
 ## Metric Bar
 
-Metric Bar supports CPU usage, memory usage, and CPU temperature. It clamps a
+Metric Bar supports CPU, memory, fixed-root storage, GPU, and VRAM usage plus
+CPU, GPU, and storage temperatures. Load average and network rates remain text
+metrics because they have no canonical percentage range. The bar clamps a
 numeric value to the configured minimum and maximum and rounds the resulting
 fill extent to the nearest integer pixel, with exact halves rounded upward.
 Horizontal start-to-end is left to right. Vertical start-to-end is bottom to

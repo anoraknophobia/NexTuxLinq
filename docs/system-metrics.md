@@ -2,40 +2,65 @@
 
 NexTuxLinq samples read-only Linux system data for schema-v2 System Metric and
 Metric Bar widgets. It remains specific to the Phanteks Matrix900 and never
-uses these values to alter Creator, HID, protocol, transport, DeviceWorker, or
+uses telemetry to alter Creator, HID, protocol, transport, DeviceWorker, or
 physical orientation behavior.
 
-The stable metric identifiers are `cpu_usage`, `memory_usage`,
-`cpu_temperature`, and `uptime`. CPU and memory usage default to 0–100%; CPU
-temperature defaults to 0–100C and may be unavailable on systems without a
-suitable generic thermal source. GPU metrics are intentionally not supported.
+The stable metrics are:
 
-The Linux provider reads only the fixed procfs CPU, memory, and uptime
-interfaces and generic thermal/hwmon discovery roots. It accepts no paths,
-commands, expressions, format strings, imports, network services, or shell
-execution from configuration or API input. Source failures become sanitized
-availability states and never expose source paths, sensor names, file content,
-or exceptions.
+- `cpu_usage`, `memory_usage`, `cpu_temperature`, and `uptime`;
+- `load_average_1m` and fixed-root `storage_usage`;
+- `network_receive_rate` and `network_transmit_rate`;
+- `gpu_usage`, `gpu_temperature`, and `gpu_memory_usage`;
+- `storage_temperature`.
 
-CPU usage is calculated from consecutive aggregate counter deltas. The first
-sample therefore reports `awaiting_initial_cpu_delta`; no sleep is introduced
-to manufacture a delta. Invalid, reset, zero, or impossible deltas are
-unavailable. Memory uses total and available-memory semantics. Uptime is
-formatted as `MM:SS` under an hour, `HH:MM` under a day, and
-`<days>D <hours>H` at one day or more, with a two-digit hour. Temperature
-accepts plausible Celsius or millidegree-Celsius values
-and deterministically prefers generic CPU, package, core, Tctl, Tdie, or SoC
-labels while ignoring clearly unrelated sensors.
+The provider reads fixed Linux procfs interfaces, root-filesystem statistics,
+and generic DRM, thermal, and hwmon sysfs interfaces. It runs no shell command,
+subprocess, vendor utility, network request, D-Bus call, or dynamic import.
+Configuration and API input cannot supply paths. GPU and storage sensor support
+depends on what the running kernel driver exposes; GPU, VRAM, CPU temperature,
+GPU temperature, and storage temperature are not guaranteed to be available.
+NexTuxLinq does not use `nvidia-smi`, `sensors`, or other vendor tools and does
+not claim vendor-specific GPU support.
 
-The runtime samples at most once for a scheduled render of a profile containing
-metric widgets. Every metric region in that frame receives the same immutable
-snapshot through `RenderContext`. Profiles without metric widgets do not
-sample. Both widgets use the existing `second_boundary` scheduler policy; no
-second scheduler, per-region task, history, or queue is created. Provider
-failure leaves the configuration and scheduler alive and renders documented
-unavailable states.
+CPU usage is calculated from consecutive aggregate-counter samples. Network
+receive and transmit rates aggregate non-loopback interfaces shared by two
+consecutive samples and use their monotonic time delta. New interfaces begin
+contributing after their own baseline exists; disappeared interfaces are
+discarded. The first CPU and network samples are awaiting a delta. Counter
+resets, non-positive time deltas, malformed data, and impossible values become
+unavailable without sleeping or affecting another metric.
 
-Draft validation, preview, preset selection, import, export, and backup restore
-do not persist configuration or upload a physical frame. Viewer transformation
-remains frontend-only: Rear is left, Front is right, while bar fill, text,
-glyphs, and stored logical coordinates are never mirrored.
+Memory and storage usage use available-capacity semantics and report a clamped
+percentage. Load average is the finite, non-negative one-minute value. Uptime
+is `MM:SS` below one hour, `HH:MM` below one day, and `<days>D <hours>H` from
+one day onward. Network rates automatically use uppercase `KB/S`, `MB/S`, or
+`GB/S`. Temperatures use the font-safe ASCII suffix `C`.
+
+Generic GPU selection first prefers one DRM device marked as the primary VGA
+device, then one uniquely active device, then the sole discovered card. An
+otherwise ambiguous multi-GPU system reports sanitized unavailability. GPU
+temperature deterministically prefers associated `edge`, `gpu`, `junction`,
+then `hotspot` labels. VRAM usage is exposed only when reliable used and total
+counters are both present. Storage temperature deterministically prefers a
+valid composite reading from storage-associated hwmon data.
+
+The collapsed Technical details section shows Metric availability as
+Available, Awaiting sample, or Unavailable. The read-only diagnostics API uses
+only safe reason categories such as `source_not_present`,
+`awaiting_initial_sample`, `malformed_source`, `ambiguous_source`,
+`unsupported_source`, and `temporary_read_failure`. It never exposes procfs or
+sysfs paths, raw labels, PCI identifiers, serials, file contents, or exception
+details.
+
+The runtime samples at most once for each scheduled render containing metric
+widgets. Every metric region in that frame receives the same immutable
+snapshot through `RenderContext`; profiles without metric widgets do not
+sample. Both metric widgets retain the existing `second_boundary` scheduler
+policy. There is no second scheduler, per-metric task, unbounded history, or
+queue. Provider failure leaves the scheduler and configuration intact.
+
+Draft validation, preview, presets, imports, exports, and backup restore never
+persist configuration or upload a physical frame. Viewer transformation
+remains frontend-only: Rear is left and Front is right, while bars, text,
+glyphs, and stored logical coordinates are never mirrored. Fan telemetry and
+fan control, including OpenLinkHub control, remain outside this metrics model.

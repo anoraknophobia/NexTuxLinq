@@ -196,9 +196,7 @@
       return OVERFLOW.has(settings.overflow) ? null : "overflow";
     }
     if (widget.type === "metric_bar") {
-      const metricIds = new Set(metadata.bar_metric_ids || [
-        "cpu_usage", "memory_usage", "cpu_temperature",
-      ]);
+      const metricIds = new Set(metadata.bar_metric_ids || []);
       if (!metricIds.has(settings.metric)) return "metric";
       if (!Number.isFinite(settings.minimum)) return "minimum";
       if (!Number.isFinite(settings.maximum)
@@ -739,6 +737,39 @@
     let validationTimer = null;
     let animationTimer = null;
     let reconciliationTimer = null;
+    const metricAvailability = documentObject.querySelector(
+      "#metric-availability"
+    );
+    let renderedMetricAvailability = null;
+
+    function renderMetricAvailability() {
+      if (!metricAvailability || !state.metadata) return;
+      const labels = {
+        available: "Available",
+        awaiting_initial_delta: "Awaiting sample",
+        awaiting_initial_cpu_delta: "Awaiting sample",
+        unavailable: "Unavailable",
+      };
+      const signature = fingerprint(
+        (state.metadata.metric_definitions || []).map((metric) => ({
+          label: metric.label,
+          availability: metric.availability,
+        }))
+      );
+      if (signature === renderedMetricAvailability) return;
+      renderedMetricAvailability = signature;
+      const rows = (state.metadata.metric_definitions || []).map((metric) => {
+        const row = documentObject.createElement("div");
+        const term = documentObject.createElement("dt");
+        const status = documentObject.createElement("dd");
+        term.textContent = metric.label;
+        status.textContent = labels[metric.availability] || "Unavailable";
+        status.dataset.state = metric.availability;
+        row.append(term, status);
+        return row;
+      });
+      metricAvailability.replaceChildren(...rows);
+    }
 
     async function request(path, options = {}) {
       let response;
@@ -1234,6 +1265,7 @@
 
     function render() {
       if (!state.draft || !state.metadata) return;
+      renderMetricAvailability();
       renderProfileControls();
       renderCanvas();
       renderInspector();

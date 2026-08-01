@@ -265,6 +265,18 @@ class MetricEditorDefinition(StrictModel):
     default_minimum: float | None
     default_maximum: float | None
     availability: str
+    availability_reason: str | None
+
+
+class MetricDiagnostic(StrictModel):
+    id: str
+    label: str
+    state: str
+    reason: str | None
+
+
+class MetricDiagnosticsResponse(StrictModel):
+    metrics: list[MetricDiagnostic]
 
 
 class FreeLayoutMetadataResponse(StrictModel):

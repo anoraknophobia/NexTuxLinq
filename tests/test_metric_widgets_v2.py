@@ -86,6 +86,52 @@ def test_system_metric_formats_every_metric(metric: str, value: float, expected:
     }[metric])
 
 
+@pytest.mark.parametrize(
+    ("metric", "label", "value", "precision", "expected"),
+    [
+        ("load_average_1m", "LOAD", 1.24, 2, "LOAD 1.24"),
+        ("storage_usage", "DISK", 75.0, 0, "DISK 75%"),
+        ("network_receive_rate", "NET RX", 1536.0, 1, "NET RX 1.5KB/S"),
+        ("network_transmit_rate", "NET TX", 2 * 1024 ** 2, 1, "NET TX 2.0MB/S"),
+        ("gpu_usage", "GPU", 61.0, 0, "GPU 61%"),
+        ("gpu_temperature", "GPU TEMP", 54.0, 0, "GPU TEMP 54C"),
+        ("gpu_memory_usage", "VRAM", 40.0, 0, "VRAM 40%"),
+        ("storage_temperature", "DISK TEMP", 38.0, 0, "DISK TEMP 38C"),
+    ],
+)
+def test_system_metric_formats_every_extended_metric(
+    metric: str,
+    label: str,
+    value: float,
+    precision: int,
+    expected: str,
+) -> None:
+    settings = SystemMetricSettings(
+        metric=metric, label=label, precision=precision  # type: ignore[arg-type]
+    )
+    assert metric_text(
+        settings,
+        context(90, 10, snapshot(**{metric: value})),
+    ) == expected
+
+
+def test_network_metric_units_scale_deterministically() -> None:
+    settings = SystemMetricSettings(
+        metric="network_receive_rate",  # type: ignore[arg-type]
+        display_mode="value_only",  # type: ignore[arg-type]
+        precision=1,
+    )
+    for value, expected in (
+        (512.0, "0.5KB/S"),
+        (1024.0 ** 2, "1.0MB/S"),
+        (3 * 1024.0 ** 3, "3.0GB/S"),
+    ):
+        assert metric_text(
+            settings,
+            context(90, 10, snapshot(network_receive_rate=value)),
+        ) == expected
+
+
 def test_system_metric_unavailable_custom_label_fonts_and_background() -> None:
     settings = SystemMetricSettings(
         label="LOAD", unavailable_text="NA", font="3x5",  # type: ignore[arg-type]
@@ -234,3 +280,19 @@ def test_metric_bar_border_empty_and_registry_policy() -> None:
 def test_metric_bar_rejects_invalid_settings(changes: dict[str, object]) -> None:
     with pytest.raises((TypeError, ValueError)):
         MetricBarSettings(**changes)  # type: ignore[arg-type]
+
+
+def test_metric_bar_eligibility_matches_canonical_metric_definitions() -> None:
+    supported = {
+        "cpu_usage", "memory_usage", "cpu_temperature", "storage_usage",
+        "gpu_usage", "gpu_temperature", "gpu_memory_usage",
+        "storage_temperature",
+    }
+    for metric in supported:
+        assert MetricBarSettings(metric=metric).metric.value == metric  # type: ignore[arg-type]
+    for metric in (
+        "uptime", "load_average_1m", "network_receive_rate",
+        "network_transmit_rate",
+    ):
+        with pytest.raises(ValueError, match="does not support"):
+            MetricBarSettings(metric=metric)  # type: ignore[arg-type]

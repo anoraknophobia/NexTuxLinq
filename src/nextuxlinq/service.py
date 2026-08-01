@@ -264,6 +264,34 @@ class NexTuxLinqService:
             for metric_id in MetricId
         }
 
+    def get_metric_diagnostics(self) -> dict[str, tuple[str, str | None]]:
+        """Return normalized, path-free availability and reason categories."""
+        snapshot = self._last_metrics_snapshot
+        if snapshot is None:
+            return {
+                metric_id.value: ("unavailable", "source_not_present")
+                for metric_id in MetricId
+            }
+        diagnostics: dict[str, tuple[str, str | None]] = {}
+        for metric_id in MetricId:
+            availability = snapshot.availability[metric_id]
+            state = (
+                "available"
+                if availability is MetricAvailability.AVAILABLE
+                else "awaiting_initial_delta"
+                if availability in {
+                    MetricAvailability.AWAITING_INITIAL_CPU_DELTA,
+                    MetricAvailability.AWAITING_INITIAL_DELTA,
+                }
+                else "unavailable"
+            )
+            reason = snapshot.reasons[metric_id]
+            diagnostics[metric_id.value] = (
+                state,
+                None if reason is None else reason.value,
+            )
+        return diagnostics
+
     def list_backups(self) -> tuple[ManagedBackup, ...]:
         """Return managed backup metadata without exposing paths."""
         return self.config_store.list_backups()

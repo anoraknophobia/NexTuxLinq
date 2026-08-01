@@ -31,6 +31,8 @@ The immutable preset library contains:
 - Full-width Scrolling Text
 - System Monitor
 - System Bars
+- Extended System Monitor
+- Temperature Monitor
 
 Every preset is a normal schema-v2 profile and is validated and rendered by the
 same registry and compositor as user profiles. Selecting a preset previews it;

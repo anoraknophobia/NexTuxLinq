@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -17,18 +18,38 @@ class MetricId(StrEnum):
     MEMORY_USAGE = "memory_usage"
     CPU_TEMPERATURE = "cpu_temperature"
     UPTIME = "uptime"
+    LOAD_AVERAGE_1M = "load_average_1m"
+    STORAGE_USAGE = "storage_usage"
+    NETWORK_RECEIVE_RATE = "network_receive_rate"
+    NETWORK_TRANSMIT_RATE = "network_transmit_rate"
+    GPU_USAGE = "gpu_usage"
+    GPU_TEMPERATURE = "gpu_temperature"
+    GPU_MEMORY_USAGE = "gpu_memory_usage"
+    STORAGE_TEMPERATURE = "storage_temperature"
 
 
 class MetricValueType(StrEnum):
     PERCENTAGE = "percentage"
     TEMPERATURE = "temperature"
     DURATION = "duration"
+    NUMBER = "number"
+    RATE = "rate"
 
 
 class MetricAvailability(StrEnum):
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
     AWAITING_INITIAL_CPU_DELTA = "awaiting_initial_cpu_delta"
+    AWAITING_INITIAL_DELTA = "awaiting_initial_delta"
+
+
+class MetricReason(StrEnum):
+    SOURCE_NOT_PRESENT = "source_not_present"
+    AWAITING_INITIAL_SAMPLE = "awaiting_initial_sample"
+    MALFORMED_SOURCE = "malformed_source"
+    AMBIGUOUS_SOURCE = "ambiguous_source"
+    UNSUPPORTED_SOURCE = "unsupported_source"
+    TEMPORARY_READ_FAILURE = "temporary_read_failure"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +81,38 @@ METRIC_DEFINITIONS: Mapping[MetricId, MetricDefinition] = MappingProxyType({
         MetricId.UPTIME, "UPTIME", MetricValueType.DURATION,
         "", 0, False, None, None,
     ),
+    MetricId.LOAD_AVERAGE_1M: MetricDefinition(
+        MetricId.LOAD_AVERAGE_1M, "LOAD", MetricValueType.NUMBER,
+        "", 2, False, None, None,
+    ),
+    MetricId.STORAGE_USAGE: MetricDefinition(
+        MetricId.STORAGE_USAGE, "DISK", MetricValueType.PERCENTAGE,
+        "%", 0, True, 0.0, 100.0,
+    ),
+    MetricId.NETWORK_RECEIVE_RATE: MetricDefinition(
+        MetricId.NETWORK_RECEIVE_RATE, "NET RX", MetricValueType.RATE,
+        "B/S", 1, False, None, None,
+    ),
+    MetricId.NETWORK_TRANSMIT_RATE: MetricDefinition(
+        MetricId.NETWORK_TRANSMIT_RATE, "NET TX", MetricValueType.RATE,
+        "B/S", 1, False, None, None,
+    ),
+    MetricId.GPU_USAGE: MetricDefinition(
+        MetricId.GPU_USAGE, "GPU", MetricValueType.PERCENTAGE,
+        "%", 0, True, 0.0, 100.0,
+    ),
+    MetricId.GPU_TEMPERATURE: MetricDefinition(
+        MetricId.GPU_TEMPERATURE, "GPU TEMP", MetricValueType.TEMPERATURE,
+        "C", 0, True, 0.0, 100.0,
+    ),
+    MetricId.GPU_MEMORY_USAGE: MetricDefinition(
+        MetricId.GPU_MEMORY_USAGE, "VRAM", MetricValueType.PERCENTAGE,
+        "%", 0, True, 0.0, 100.0,
+    ),
+    MetricId.STORAGE_TEMPERATURE: MetricDefinition(
+        MetricId.STORAGE_TEMPERATURE, "DISK TEMP", MetricValueType.TEMPERATURE,
+        "C", 0, True, 0.0, 100.0,
+    ),
 })
 BAR_METRICS = frozenset(
     metric_id for metric_id, definition in METRIC_DEFINITIONS.items()
@@ -77,6 +130,7 @@ class SystemMetricsSnapshot:
     values: Mapping[MetricId, float]
     availability: Mapping[MetricId, MetricAvailability]
     source_status: str
+    reasons: Mapping[MetricId, MetricReason | None] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if (
@@ -102,7 +156,24 @@ class SystemMetricsSnapshot:
                 or not math.isfinite(float(raw_value))
             ):
                 raise ValueError("metric values must be finite numbers.")
-            values[metric_id] = float(raw_value)
+            normalized_value = float(raw_value)
+            value_type = METRIC_DEFINITIONS[metric_id].value_type
+            if (
+                value_type is MetricValueType.PERCENTAGE
+                and not 0.0 <= normalized_value <= 100.0
+            ) or (
+                value_type in {
+                    MetricValueType.DURATION,
+                    MetricValueType.NUMBER,
+                    MetricValueType.RATE,
+                }
+                and normalized_value < 0.0
+            ) or (
+                value_type is MetricValueType.TEMPERATURE
+                and not -20.0 <= normalized_value <= 150.0
+            ):
+                raise ValueError("metric value is outside its canonical range.")
+            values[metric_id] = normalized_value
         availability = {
             MetricId(raw_id): MetricAvailability(raw_state)
             for raw_id, raw_state in self.availability.items()
@@ -117,8 +188,20 @@ class SystemMetricsSnapshot:
             raise ValueError("available metrics must contain a value.")
         if self.source_status not in {"ok", "partial", "unavailable"}:
             raise ValueError("source_status is invalid.")
+        reasons: dict[MetricId, MetricReason | None] = {}
+        for metric_id in MetricId:
+            raw_reason = self.reasons.get(metric_id)
+            reasons[metric_id] = (
+                None if raw_reason is None else MetricReason(raw_reason)
+            )
+            if (
+                availability[metric_id] is not MetricAvailability.AVAILABLE
+                and reasons[metric_id] is None
+            ):
+                reasons[metric_id] = MetricReason.SOURCE_NOT_PRESENT
         object.__setattr__(self, "values", MappingProxyType(values))
         object.__setattr__(self, "availability", MappingProxyType(availability))
+        object.__setattr__(self, "reasons", MappingProxyType(reasons))
 
     def value(self, metric_id: MetricId) -> float | None:
         metric = MetricId(metric_id)
@@ -138,6 +221,10 @@ class SystemMetricsSnapshot:
             values={},
             availability={metric_id: MetricAvailability.UNAVAILABLE for metric_id in MetricId},
             source_status="unavailable",
+            reasons={
+                metric_id: MetricReason.TEMPORARY_READ_FAILURE
+                for metric_id in MetricId
+            },
         )
 
 
@@ -163,6 +250,16 @@ def format_metric_value(metric_id: MetricId, value: float, precision: int) -> st
         raise ValueError("precision must be between zero and two.")
     if metric is MetricId.UPTIME:
         return format_uptime(value)
+    if metric in {
+        MetricId.NETWORK_RECEIVE_RATE,
+        MetricId.NETWORK_TRANSMIT_RATE,
+    }:
+        divisor, suffix = (1024.0, "KB/S")
+        if value >= 1024.0 ** 3:
+            divisor, suffix = (1024.0 ** 3, "GB/S")
+        elif value >= 1024.0 ** 2:
+            divisor, suffix = (1024.0 ** 2, "MB/S")
+        return f"{value / divisor:.{precision}f}{suffix}"
     suffix = METRIC_DEFINITIONS[metric].unit
     return f"{value:.{precision}f}{suffix}"
 
@@ -174,6 +271,26 @@ class TemperatureReading:
     label: str
     value: str
     source_order: int
+    source_type: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class StorageUsageReading:
+    """Fixed root-filesystem capacity values returned by the reader."""
+
+    total_bytes: int
+    available_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class GpuTelemetryReading:
+    """Sanitized values from one deterministically selected DRM device."""
+
+    selection_reason: MetricReason | None
+    usage: str | None = None
+    memory_total: str | None = None
+    memory_used: str | None = None
+    temperatures: tuple[TemperatureReading, ...] = ()
 
 
 class LinuxMetricReader:
@@ -185,10 +302,18 @@ class LinuxMetricReader:
         proc_root: Path = Path("/proc"),
         thermal_root: Path = Path("/sys/class/thermal"),
         hwmon_root: Path = Path("/sys/class/hwmon"),
+        drm_root: Path = Path("/sys/class/drm"),
+        filesystem_stat: Callable[[], object] | None = None,
     ) -> None:
         self._proc_root = Path(proc_root)
         self._thermal_root = Path(thermal_root)
         self._hwmon_root = Path(hwmon_root)
+        self._drm_root = Path(drm_root)
+        self._filesystem_stat = (
+            (lambda: os.statvfs("/"))
+            if filesystem_stat is None
+            else filesystem_stat
+        )
 
     @staticmethod
     def _safe_read(path: Path) -> str | None:
@@ -209,6 +334,29 @@ class LinuxMetricReader:
     def uptime(self) -> str | None:
         return self._safe_read(self._proc_root / "uptime")
 
+    def loadavg(self) -> str | None:
+        return self._safe_read(self._proc_root / "loadavg")
+
+    def network_dev(self) -> str | None:
+        return self._safe_read(self._proc_root / "net" / "dev")
+
+    def storage_usage(self) -> StorageUsageReading | None:
+        try:
+            details = self._filesystem_stat()
+            blocks = int(getattr(details, "f_blocks"))
+            available = int(getattr(details, "f_bavail"))
+            fragment_size = int(
+                getattr(details, "f_frsize", 0) or getattr(details, "f_bsize")
+            )
+        except (AttributeError, OSError, TypeError, ValueError, OverflowError):
+            return None
+        if blocks <= 0 or fragment_size <= 0 or not 0 <= available <= blocks:
+            return None
+        return StorageUsageReading(
+            total_bytes=blocks * fragment_size,
+            available_bytes=available * fragment_size,
+        )
+
     def temperatures(self) -> tuple[TemperatureReading, ...]:
         readings: list[TemperatureReading] = []
         order = 0
@@ -220,7 +368,10 @@ class LinuxMetricReader:
             label = self._safe_read(entry / "type")
             value = self._safe_read(entry / "temp")
             if label is not None and value is not None:
-                readings.append(TemperatureReading(label.strip(), value.strip(), order))
+                normalized = label.strip()
+                readings.append(TemperatureReading(
+                    normalized, value.strip(), order, normalized,
+                ))
                 order += 1
         try:
             hwmon_entries = sorted(self._hwmon_root.glob("hwmon*"))
@@ -237,13 +388,96 @@ class LinuxMetricReader:
                 label = (self._safe_read(entry / f"{stem}_label") or device_name).strip()
                 value = self._safe_read(input_path)
                 if label and value is not None:
-                    readings.append(TemperatureReading(label, value.strip(), order))
+                    readings.append(TemperatureReading(
+                        label, value.strip(), order, device_name,
+                    ))
                     order += 1
         return tuple(readings)
 
+    @staticmethod
+    def _card_number(path: Path) -> int | None:
+        matched = re.fullmatch(r"card([0-9]+)", path.name)
+        return None if matched is None else int(matched.group(1))
+
+    def _gpu_cards(self) -> tuple[Path, ...]:
+        try:
+            candidates = tuple(self._drm_root.glob("card*"))
+        except OSError:
+            return ()
+        return tuple(sorted(
+            (path for path in candidates if self._card_number(path) is not None),
+            key=lambda path: self._card_number(path) or 0,
+        ))
+
+    def _select_gpu(self) -> tuple[Path | None, MetricReason | None]:
+        cards = self._gpu_cards()
+        if not cards:
+            return None, MetricReason.SOURCE_NOT_PRESENT
+        primary = [
+            card for card in cards
+            if (self._safe_read(card / "device" / "boot_vga") or "").strip() == "1"
+        ]
+        if len(primary) == 1:
+            return primary[0], None
+        if len(primary) > 1:
+            return None, MetricReason.AMBIGUOUS_SOURCE
+        active = [
+            card for card in cards
+            if (self._safe_read(card / "device" / "power" / "runtime_status") or "").strip()
+            == "active"
+        ]
+        if len(active) == 1:
+            return active[0], None
+        if len(cards) == 1:
+            return cards[0], None
+        return None, MetricReason.AMBIGUOUS_SOURCE
+
+    def gpu_telemetry(self) -> GpuTelemetryReading:
+        card, reason = self._select_gpu()
+        if card is None:
+            return GpuTelemetryReading(reason)
+        device = card / "device"
+        readings: list[TemperatureReading] = []
+        order = 0
+        try:
+            hwmon_entries = sorted((device / "hwmon").glob("hwmon*"))
+        except OSError:
+            hwmon_entries = []
+        for entry in hwmon_entries:
+            try:
+                inputs = sorted(entry.glob("temp*_input"))
+            except OSError:
+                inputs = []
+            for input_path in inputs:
+                stem = input_path.name.removesuffix("_input")
+                label = (self._safe_read(entry / f"{stem}_label") or "").strip()
+                value = self._safe_read(input_path)
+                if label and value is not None:
+                    readings.append(TemperatureReading(
+                        label, value.strip(), order, "gpu",
+                    ))
+                    order += 1
+        return GpuTelemetryReading(
+            selection_reason=None,
+            usage=self._safe_read(device / "gpu_busy_percent"),
+            memory_total=self._safe_read(device / "mem_info_vram_total"),
+            memory_used=self._safe_read(device / "mem_info_vram_used"),
+            temperatures=tuple(readings),
+        )
+
 
 _CPU_LABEL = re.compile(r"cpu|package|core|tctl|tdie|soc", re.IGNORECASE)
-_UNRELATED_LABEL = re.compile(r"gpu|nvme|battery|ambient|wifi", re.IGNORECASE)
+_UNRELATED_LABEL = re.compile(
+    r"gpu|nvme|drive|storage|ssd|battery|ambient|wifi",
+    re.IGNORECASE,
+)
+_STORAGE_LABEL = re.compile(r"nvme|drive|storage|ssd", re.IGNORECASE)
+_GPU_TEMPERATURE_PRIORITY = {
+    "edge": 0,
+    "gpu": 1,
+    "junction": 2,
+    "hotspot": 3,
+}
 
 
 class LinuxSystemMetricsProvider:
@@ -260,22 +494,29 @@ class LinuxSystemMetricsProvider:
         self._monotonic = monotonic
         self._wall_clock = wall_clock
         self._previous_cpu: tuple[int, int] | None = None
+        self._previous_network: tuple[
+            float, Mapping[str, tuple[int, int]]
+        ] | None = None
         self._last_snapshot: SystemMetricsSnapshot | None = None
+        self._read_failures: set[str] = set()
 
     @property
     def last_snapshot(self) -> SystemMetricsSnapshot | None:
         return self._last_snapshot
 
-    @staticmethod
-    def _read(reader: Callable[[], object]) -> object | None:
-        """Call one fixed reader while discarding all source exception data."""
-        failed = False
+    def _reader_value(self, name: str) -> object | None:
         try:
-            value = reader()
+            reader = getattr(self._reader, name)
+        except AttributeError:
+            return None
         except Exception:
-            failed = True
-            value = None
-        return None if failed else value
+            self._read_failures.add(name)
+            return None
+        try:
+            return reader()
+        except Exception:
+            self._read_failures.add(name)
+            return None
 
     def _sample_clock(self) -> tuple[float, datetime] | None:
         failed = False
@@ -353,6 +594,130 @@ class LinuxSystemMetricsProvider:
         return min(100.0, max(0.0, (total - available) / total * 100.0))
 
     @staticmethod
+    def _load_average(raw: str | None) -> float | None:
+        if raw is None:
+            return None
+        try:
+            value = float(raw.split()[0])
+        except (IndexError, ValueError, OverflowError):
+            return None
+        return value if math.isfinite(value) and value >= 0 else None
+
+    @staticmethod
+    def _storage_percentage(reading: object | None) -> float | None:
+        if type(reading) is not StorageUsageReading:
+            return None
+        total = reading.total_bytes
+        available = reading.available_bytes
+        if (
+            isinstance(total, bool)
+            or not isinstance(total, int)
+            or isinstance(available, bool)
+            or not isinstance(available, int)
+            or total <= 0
+            or not 0 <= available <= total
+        ):
+            return None
+        return min(100.0, max(0.0, (total - available) / total * 100.0))
+
+    @staticmethod
+    def _network_counters(raw: str | None) -> dict[str, tuple[int, int]] | None:
+        if raw is None:
+            return None
+        counters: dict[str, tuple[int, int]] = {}
+        malformed = False
+        for line in raw.splitlines():
+            if ":" not in line:
+                continue
+            name, payload = line.split(":", 1)
+            interface = name.strip()
+            if not interface or interface == "lo":
+                continue
+            fields = payload.split()
+            try:
+                received = int(fields[0])
+                transmitted = int(fields[8])
+            except (IndexError, ValueError):
+                malformed = True
+                continue
+            if received < 0 or transmitted < 0:
+                malformed = True
+                continue
+            counters[interface] = (received, transmitted)
+        if malformed:
+            return None
+        return counters
+
+    def _network_rates(
+        self,
+        raw: str | None,
+        sample_monotonic: float,
+    ) -> tuple[
+        tuple[float, float] | None,
+        MetricAvailability,
+        MetricReason,
+    ]:
+        current = self._network_counters(raw)
+        if current is None or not current:
+            self._previous_network = None
+            return (
+                None,
+                MetricAvailability.UNAVAILABLE,
+                MetricReason.SOURCE_NOT_PRESENT
+                if raw is None or current == {}
+                else MetricReason.MALFORMED_SOURCE,
+            )
+        previous = self._previous_network
+        self._previous_network = (sample_monotonic, MappingProxyType(dict(current)))
+        if previous is None:
+            return (
+                None,
+                MetricAvailability.AWAITING_INITIAL_DELTA,
+                MetricReason.AWAITING_INITIAL_SAMPLE,
+            )
+        elapsed = sample_monotonic - previous[0]
+        common = sorted(set(previous[1]).intersection(current))
+        if not math.isfinite(elapsed) or elapsed <= 0 or not common:
+            return (
+                None,
+                MetricAvailability.UNAVAILABLE,
+                MetricReason.MALFORMED_SOURCE,
+            )
+        receive_delta = 0
+        transmit_delta = 0
+        for interface in common:
+            receive = current[interface][0] - previous[1][interface][0]
+            transmit = current[interface][1] - previous[1][interface][1]
+            if receive < 0 or transmit < 0:
+                return (
+                    None,
+                    MetricAvailability.UNAVAILABLE,
+                    MetricReason.MALFORMED_SOURCE,
+                )
+            receive_delta += receive
+            transmit_delta += transmit
+        try:
+            receive_rate = receive_delta / elapsed
+            transmit_rate = transmit_delta / elapsed
+        except OverflowError:
+            return (
+                None,
+                MetricAvailability.UNAVAILABLE,
+                MetricReason.MALFORMED_SOURCE,
+            )
+        if not math.isfinite(receive_rate) or not math.isfinite(transmit_rate):
+            return (
+                None,
+                MetricAvailability.UNAVAILABLE,
+                MetricReason.MALFORMED_SOURCE,
+            )
+        return (
+            (receive_rate, transmit_rate),
+            MetricAvailability.AVAILABLE,
+            MetricReason.TEMPORARY_READ_FAILURE,
+        )
+
+    @staticmethod
     def _uptime_value(raw: str | None) -> float | None:
         if raw is None:
             return None
@@ -370,8 +735,18 @@ class LinuxSystemMetricsProvider:
     def _temperature(readings: tuple[TemperatureReading, ...]) -> float | None:
         candidates: list[tuple[int, int, float]] = []
         for reading in readings:
+            if (
+                not isinstance(reading, TemperatureReading)
+                or not isinstance(reading.label, str)
+                or not isinstance(reading.value, str)
+                or isinstance(reading.source_order, bool)
+                or not isinstance(reading.source_order, int)
+                or not isinstance(reading.source_type, str)
+            ):
+                continue
             label = reading.label[:128]
-            if _UNRELATED_LABEL.search(label):
+            identity = f"{reading.source_type} {label}"[:256]
+            if _UNRELATED_LABEL.search(identity):
                 continue
             failed = False
             try:
@@ -390,6 +765,101 @@ class LinuxSystemMetricsProvider:
             return None
         return min(candidates)[2]
 
+    @staticmethod
+    def _temperature_value(raw: str) -> float | None:
+        if not isinstance(raw, str):
+            return None
+        try:
+            raw_value = float(raw)
+        except (ValueError, OverflowError):
+            return None
+        if not math.isfinite(raw_value):
+            return None
+        value = raw_value / 1000.0 if abs(raw_value) > 200 else raw_value
+        return value if -20.0 <= value <= 150.0 else None
+
+    @classmethod
+    def _gpu_temperature(
+        cls,
+        readings: tuple[TemperatureReading, ...],
+    ) -> float | None:
+        candidates: list[tuple[int, int, float]] = []
+        for reading in readings:
+            if (
+                not isinstance(reading, TemperatureReading)
+                or not isinstance(reading.label, str)
+                or not isinstance(reading.value, str)
+                or isinstance(reading.source_order, bool)
+                or not isinstance(reading.source_order, int)
+            ):
+                continue
+            normalized = reading.label.strip().casefold()
+            priority = next(
+                (
+                    score for label, score in _GPU_TEMPERATURE_PRIORITY.items()
+                    if label in normalized
+                ),
+                None,
+            )
+            value = cls._temperature_value(reading.value)
+            if priority is not None and value is not None:
+                candidates.append((priority, reading.source_order, value))
+        return None if not candidates else min(candidates)[2]
+
+    @classmethod
+    def _storage_temperature(
+        cls,
+        readings: tuple[TemperatureReading, ...],
+    ) -> float | None:
+        candidates: list[tuple[int, int, float]] = []
+        for reading in readings:
+            if (
+                not isinstance(reading, TemperatureReading)
+                or not isinstance(reading.label, str)
+                or not isinstance(reading.value, str)
+                or isinstance(reading.source_order, bool)
+                or not isinstance(reading.source_order, int)
+                or not isinstance(reading.source_type, str)
+            ):
+                continue
+            identity = f"{reading.source_type} {reading.label}"[:256]
+            if not _STORAGE_LABEL.search(identity):
+                continue
+            value = cls._temperature_value(reading.value)
+            if value is None:
+                continue
+            preferred = 0 if "composite" in reading.label.casefold() else 1
+            candidates.append((preferred, reading.source_order, value))
+        return None if not candidates else min(candidates)[2]
+
+    @staticmethod
+    def _percentage_value(raw: str | None) -> float | None:
+        if not isinstance(raw, str):
+            return None
+        try:
+            value = float(raw.strip())
+        except (ValueError, OverflowError):
+            return None
+        if not math.isfinite(value) or not 0 <= value <= 100:
+            return None
+        return value
+
+    @staticmethod
+    def _gpu_memory_percentage(reading: GpuTelemetryReading) -> float | None:
+        if (
+            not isinstance(reading.memory_total, (str, type(None)))
+            or not isinstance(reading.memory_used, (str, type(None)))
+        ):
+            return None
+        try:
+            total = int((reading.memory_total or "").strip())
+            used = int((reading.memory_used or "").strip())
+        except (ValueError, OverflowError):
+            return None
+        if total <= 0 or not 0 <= used <= total:
+            return None
+        return min(100.0, max(0.0, used / total * 100.0))
+
     def sample(self) -> SystemMetricsSnapshot:
         """Return one complete sanitized snapshot; source failures never escape."""
         clock = self._sample_clock()
@@ -400,37 +870,193 @@ class LinuxSystemMetricsProvider:
             self._last_snapshot = snapshot
             return snapshot
         monotonic_value, wall_time = clock
+        self._read_failures.clear()
         values: dict[MetricId, float] = {}
         availability = {metric_id: MetricAvailability.UNAVAILABLE for metric_id in MetricId}
+        reasons: dict[MetricId, MetricReason | None] = {
+            metric_id: MetricReason.SOURCE_NOT_PRESENT for metric_id in MetricId
+        }
 
-        cpu_raw = self._read(self._reader.cpu_stat)
+        def available(metric_id: MetricId, value: float) -> None:
+            values[metric_id] = value
+            availability[metric_id] = MetricAvailability.AVAILABLE
+            reasons[metric_id] = None
+
+        cpu_raw = self._reader_value("cpu_stat")
         cpu, cpu_state = self._cpu_usage(cpu_raw if isinstance(cpu_raw, str) else None)
         availability[MetricId.CPU_USAGE] = cpu_state
+        reasons[MetricId.CPU_USAGE] = (
+            None if cpu_state is MetricAvailability.AVAILABLE
+            else MetricReason.AWAITING_INITIAL_SAMPLE
+            if cpu_state is MetricAvailability.AWAITING_INITIAL_CPU_DELTA
+            else MetricReason.SOURCE_NOT_PRESENT
+            if cpu_raw is None
+            else MetricReason.MALFORMED_SOURCE
+        )
         if cpu is not None:
-            values[MetricId.CPU_USAGE] = cpu
+            available(MetricId.CPU_USAGE, cpu)
 
-        memory_raw = self._read(self._reader.meminfo)
+        memory_raw = self._reader_value("meminfo")
         memory = self._memory_usage(memory_raw if isinstance(memory_raw, str) else None)
         if memory is not None:
-            values[MetricId.MEMORY_USAGE] = memory
-            availability[MetricId.MEMORY_USAGE] = MetricAvailability.AVAILABLE
+            available(MetricId.MEMORY_USAGE, memory)
+        elif memory_raw is not None:
+            reasons[MetricId.MEMORY_USAGE] = MetricReason.MALFORMED_SOURCE
 
-        uptime_raw = self._read(self._reader.uptime)
+        uptime_raw = self._reader_value("uptime")
         uptime = self._uptime_value(uptime_raw if isinstance(uptime_raw, str) else None)
         if uptime is not None:
-            values[MetricId.UPTIME] = uptime
-            availability[MetricId.UPTIME] = MetricAvailability.AVAILABLE
+            available(MetricId.UPTIME, uptime)
+        elif uptime_raw is not None:
+            reasons[MetricId.UPTIME] = MetricReason.MALFORMED_SOURCE
 
-        temperature_raw = self._read(self._reader.temperatures)
-        temperature = self._temperature(
+        load_raw = self._reader_value("loadavg")
+        load = self._load_average(load_raw if isinstance(load_raw, str) else None)
+        if load is not None:
+            available(MetricId.LOAD_AVERAGE_1M, load)
+        elif load_raw is not None:
+            reasons[MetricId.LOAD_AVERAGE_1M] = MetricReason.MALFORMED_SOURCE
+
+        storage_raw = self._reader_value("storage_usage")
+        storage = self._storage_percentage(storage_raw)
+        if storage is not None:
+            available(MetricId.STORAGE_USAGE, storage)
+        elif storage_raw is not None:
+            reasons[MetricId.STORAGE_USAGE] = MetricReason.MALFORMED_SOURCE
+
+        network_raw = self._reader_value("network_dev")
+        network, network_state, network_reason = self._network_rates(
+            network_raw if isinstance(network_raw, str) else None,
+            monotonic_value,
+        )
+        for metric_id in (
+            MetricId.NETWORK_RECEIVE_RATE,
+            MetricId.NETWORK_TRANSMIT_RATE,
+        ):
+            availability[metric_id] = network_state
+            reasons[metric_id] = network_reason
+        if network is not None:
+            available(MetricId.NETWORK_RECEIVE_RATE, network[0])
+            available(MetricId.NETWORK_TRANSMIT_RATE, network[1])
+
+        temperature_raw = self._reader_value("temperatures")
+        temperature_readings = (
             temperature_raw
             if isinstance(temperature_raw, tuple)
             and all(isinstance(item, TemperatureReading) for item in temperature_raw)
             else ()
         )
+        temperature = self._temperature(temperature_readings)
         if temperature is not None:
-            values[MetricId.CPU_TEMPERATURE] = temperature
-            availability[MetricId.CPU_TEMPERATURE] = MetricAvailability.AVAILABLE
+            available(MetricId.CPU_TEMPERATURE, temperature)
+        elif temperature_raw is not None:
+            reasons[MetricId.CPU_TEMPERATURE] = (
+                MetricReason.MALFORMED_SOURCE
+                if temperature_raw is not None
+                and (
+                    not isinstance(temperature_raw, tuple)
+                    or any(
+                        isinstance(item.label, str)
+                        and _CPU_LABEL.search(item.label)
+                        for item in temperature_readings
+                    )
+                )
+                else MetricReason.UNSUPPORTED_SOURCE
+            )
+
+        storage_temperature = self._storage_temperature(
+            temperature_readings
+        )
+        if storage_temperature is not None:
+            available(MetricId.STORAGE_TEMPERATURE, storage_temperature)
+        elif temperature_raw is not None:
+            reasons[MetricId.STORAGE_TEMPERATURE] = (
+                MetricReason.MALFORMED_SOURCE
+                if temperature_raw is not None
+                and (
+                    not isinstance(temperature_raw, tuple)
+                    or any(
+                        isinstance(item.source_type, str)
+                        and isinstance(item.label, str)
+                        and _STORAGE_LABEL.search(
+                            f"{item.source_type} {item.label}"
+                        )
+                        for item in temperature_readings
+                    )
+                )
+                else MetricReason.UNSUPPORTED_SOURCE
+            )
+
+        gpu_raw = self._reader_value("gpu_telemetry")
+        gpu = (
+            gpu_raw
+            if type(gpu_raw) is GpuTelemetryReading
+            and (
+                gpu_raw.selection_reason is None
+                or isinstance(gpu_raw.selection_reason, MetricReason)
+            )
+            and isinstance(gpu_raw.temperatures, tuple)
+            else GpuTelemetryReading(MetricReason.SOURCE_NOT_PRESENT)
+        )
+        gpu_metrics = (
+            MetricId.GPU_USAGE,
+            MetricId.GPU_TEMPERATURE,
+            MetricId.GPU_MEMORY_USAGE,
+        )
+        if gpu.selection_reason is not None:
+            for metric_id in gpu_metrics:
+                reasons[metric_id] = gpu.selection_reason
+        else:
+            gpu_usage = self._percentage_value(gpu.usage)
+            gpu_temperature = self._gpu_temperature(gpu.temperatures)
+            gpu_memory = self._gpu_memory_percentage(gpu)
+            if gpu_usage is not None:
+                available(MetricId.GPU_USAGE, gpu_usage)
+            else:
+                reasons[MetricId.GPU_USAGE] = (
+                    MetricReason.UNSUPPORTED_SOURCE
+                    if gpu.usage is None else MetricReason.MALFORMED_SOURCE
+                )
+            if gpu_temperature is not None:
+                available(MetricId.GPU_TEMPERATURE, gpu_temperature)
+            else:
+                reasons[MetricId.GPU_TEMPERATURE] = (
+                    MetricReason.MALFORMED_SOURCE
+                    if gpu.temperatures else MetricReason.UNSUPPORTED_SOURCE
+                )
+            if gpu_memory is not None:
+                available(MetricId.GPU_MEMORY_USAGE, gpu_memory)
+            else:
+                reasons[MetricId.GPU_MEMORY_USAGE] = (
+                    MetricReason.UNSUPPORTED_SOURCE
+                    if gpu.memory_total is None or gpu.memory_used is None
+                    else MetricReason.MALFORMED_SOURCE
+                )
+
+        failure_metrics = {
+            "cpu_stat": (MetricId.CPU_USAGE,),
+            "meminfo": (MetricId.MEMORY_USAGE,),
+            "uptime": (MetricId.UPTIME,),
+            "loadavg": (MetricId.LOAD_AVERAGE_1M,),
+            "storage_usage": (MetricId.STORAGE_USAGE,),
+            "network_dev": (
+                MetricId.NETWORK_RECEIVE_RATE,
+                MetricId.NETWORK_TRANSMIT_RATE,
+            ),
+            "temperatures": (
+                MetricId.CPU_TEMPERATURE,
+                MetricId.STORAGE_TEMPERATURE,
+            ),
+            "gpu_telemetry": (
+                MetricId.GPU_USAGE,
+                MetricId.GPU_TEMPERATURE,
+                MetricId.GPU_MEMORY_USAGE,
+            ),
+        }
+        for source in self._read_failures:
+            for metric_id in failure_metrics.get(source, ()):
+                if availability[metric_id] is not MetricAvailability.AVAILABLE:
+                    reasons[metric_id] = MetricReason.TEMPORARY_READ_FAILURE
 
         available_count = sum(
             state is MetricAvailability.AVAILABLE for state in availability.values()
@@ -444,6 +1070,7 @@ class LinuxSystemMetricsProvider:
             values,
             availability,
             status,
+            reasons,
         )
         self._last_snapshot = snapshot
         return snapshot

@@ -89,9 +89,44 @@ const widgetMetadata = {
     {id: "uptime", label: "UPTIME", value_type: "duration", unit: "",
       default_precision: 0, supports_bar: false,
       default_minimum: null, default_maximum: null},
+    {id: "load_average_1m", label: "LOAD", value_type: "number", unit: "",
+      default_precision: 2, supports_bar: false,
+      default_minimum: null, default_maximum: null},
+    {id: "storage_usage", label: "DISK", value_type: "percentage", unit: "%",
+      default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "network_receive_rate", label: "NET RX", value_type: "rate", unit: "B/S",
+      default_precision: 1, supports_bar: false,
+      default_minimum: null, default_maximum: null},
+    {id: "network_transmit_rate", label: "NET TX", value_type: "rate", unit: "B/S",
+      default_precision: 1, supports_bar: false,
+      default_minimum: null, default_maximum: null},
+    {id: "gpu_usage", label: "GPU", value_type: "percentage", unit: "%",
+      default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "gpu_temperature", label: "GPU TEMP", value_type: "temperature", unit: "C",
+      default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "gpu_memory_usage", label: "VRAM", value_type: "percentage", unit: "%",
+      default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "storage_temperature", label: "DISK TEMP", value_type: "temperature",
+      unit: "C", default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
   ],
-  bar_metric_ids: ["cpu_usage", "memory_usage", "cpu_temperature"],
+  bar_metric_ids: [
+    "cpu_usage", "memory_usage", "cpu_temperature", "storage_usage",
+    "gpu_usage", "gpu_temperature", "gpu_memory_usage", "storage_temperature",
+  ],
 };
+for (const metric of widgetMetadata.metric_definitions) {
+  metric.availability = metric.id === "cpu_usage"
+    ? "available" : metric.id === "network_receive_rate"
+      ? "awaiting_initial_delta" : "unavailable";
+  metric.availability_reason = metric.availability === "available"
+    ? null : metric.availability === "awaiting_initial_delta"
+      ? "awaiting_initial_sample" : "source_not_present";
+}
 
 function freeProfile(regions = []) {
   return {
@@ -197,6 +232,7 @@ function freeEditorFixture({
     elements.get("#fl-region-background"),
   );
   const root = new FakeElement();
+  const metricAvailability = new FakeElement();
   root.querySelector = (selector) => ({
     '[data-color-target="canvas_background"]': canvasColor.control,
     '[data-color-target="region_background"]': regionColor.control,
@@ -209,7 +245,9 @@ function freeEditorFixture({
   const document = {
     hidden: false,
     querySelector(selector) {
-      return selector === "#free-layout-root" ? root : null;
+      if (selector === "#free-layout-root") return root;
+      if (selector === "#metric-availability") return metricAvailability;
+      return null;
     },
     querySelectorAll() {
       return [];
@@ -304,6 +342,7 @@ function freeEditorFixture({
     elements,
     canvasColor,
     regionColor,
+    metricAvailability,
     windowListeners,
     documentListeners,
     calls,
@@ -2009,7 +2048,7 @@ test("metric widget validation rejects unknown metrics and invalid bar ranges", 
   const defaults = freeLayout.widgetDefaultMap(widgetMetadata);
   assert.equal(freeLayout.validateWidgetSettings({
     type: "system_metric",
-    settings: {...defaults.system_metric, metric: "gpu_usage"},
+    settings: {...defaults.system_metric, metric: "fan_usage"},
   }, widgetMetadata), "metric");
   assert.equal(freeLayout.validateWidgetSettings({
     type: "metric_bar",
@@ -2095,6 +2134,24 @@ test("reusable color state canonicalizes complete values without repairing inval
     freeLayout.colorControlState("#ABC", "#123456"),
     {valid: false, draft: "#ABC", picker: "#123456"},
   );
+});
+
+test("metric availability diagnostics render backend labels and sanitized states", async () => {
+  const fixture = freeEditorFixture();
+  await fixture.editor.initialize();
+
+  assert.equal(fixture.metricAvailability.children.length, 12);
+  const rows = Object.fromEntries(fixture.metricAvailability.children.map(
+    (row) => [row.children[0].textContent, row.children[1].textContent]
+  ));
+  assert.equal(rows.CPU, "Available");
+  assert.equal(rows["NET RX"], "Awaiting sample");
+  assert.equal(rows["GPU TEMP"], "Unavailable");
+  assert.equal(JSON.stringify(rows).includes("/sys"), false);
+  assert.equal(JSON.stringify(rows).includes("/proc"), false);
+  assert.equal(fixture.metricAvailability.replaceCalls, 1);
+  fixture.editor.render();
+  assert.equal(fixture.metricAvailability.replaceCalls, 1);
 });
 
 test("color picker and hex draft stay synchronized and invalid color blocks Apply", async () => {

@@ -133,6 +133,9 @@ def test_status_information_uses_compact_main_and_technical_sections() -> None:
         "status-saved-revision",
     ):
         assert f'id="{technical_id}"' in details
+    assert "Metric availability" in details
+    assert 'id="metric-availability"' in details
+    assert 'aria-live="polite"' in details
     assert "status-dirty" not in status_section
 
 
@@ -347,6 +350,29 @@ def test_region_background_toggle_and_widget_select_are_separate_controls() -> N
     assert 'class="checkbox-label"' in inspector
     assert ".inspector-grid .checkbox-label" in css
     assert "flex-wrap: nowrap" in css
+
+
+def test_metric_dropdowns_are_backend_driven_without_extended_id_duplication() -> None:
+    page, _, _ = _frontend_source()
+    editor = _editor_source()
+
+    assert 'data-metric-select="all"' in page
+    assert 'data-metric-select="bar"' in page
+    assert "state.metadata.metric_definitions" in editor
+    assert "state.metadata.bar_metric_ids" in editor
+    for metric_id in (
+        "load_average_1m",
+        "storage_usage",
+        "network_receive_rate",
+        "network_transmit_rate",
+        "gpu_usage",
+        "gpu_temperature",
+        "gpu_memory_usage",
+        "storage_temperature",
+    ):
+        assert metric_id not in editor
+    assert 'id="fl-region-inspector" class="region-inspector"' in page
+    assert page.index('id="preview-heading"') < page.index('id="profile-heading"')
 
 
 def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:

@@ -166,6 +166,91 @@ BUILTIN_PRESETS = (
             ),
         ),
     ),
+    BuiltinPreset(
+        "extended-system-monitor",
+        "Extended System Monitor",
+        "CPU, memory, GPU temperature, and network receive rate.",
+        _profile(
+            _region(
+                "extended-cpu", 0, 0, 45, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="cpu_usage",
+                    label="CPU",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "CPU Usage",
+            ),
+            _region(
+                "extended-memory", 45, 0, 45, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="memory_usage",
+                    label="RAM",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "Memory Usage",
+            ),
+            _region(
+                "extended-gpu-temperature", 0, 5, 45, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="gpu_temperature",
+                    label="GPU",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "GPU Temperature",
+            ),
+            _region(
+                "extended-network-receive", 45, 5, 45, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="network_receive_rate",
+                    label="RX",
+                    font=FontChoice.COMPACT_3X5.value,
+                    precision=1,
+                ),
+                "Network Receive Rate",
+            ),
+        ),
+    ),
+    BuiltinPreset(
+        "temperature-monitor",
+        "Temperature Monitor",
+        "CPU, GPU, and storage temperatures with safe unavailable text.",
+        _profile(
+            _region(
+                "temperature-cpu", 0, 0, 45, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="cpu_temperature",
+                    label="CPU TEMP",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "CPU Temperature",
+            ),
+            _region(
+                "temperature-gpu", 45, 0, 45, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="gpu_temperature",
+                    label="GPU TEMP",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "GPU Temperature",
+            ),
+            _region(
+                "temperature-storage", 0, 5, 90, 5,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="storage_temperature",
+                    label="DISK TEMP",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "Storage Temperature",
+            ),
+        ),
+    ),
 )
 
 

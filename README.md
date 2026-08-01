@@ -103,6 +103,13 @@ sources and formatting are documented in
 below the physical display preview so the editor and preview remain the primary
 workflow.
 
+Live telemetry includes CPU, memory, uptime, load, fixed-root storage, network
+rates, and generic kernel-exposed GPU, VRAM, and temperature data. Sensor
+availability varies by hardware and driver; no vendor utility, shell command,
+fan control, or OpenLinkHub control is used. Sanitized availability diagnostics
+are shown under Technical details. The preset library also includes Extended
+System Monitor and Temperature Monitor layouts.
+
 Install and uninstall operations use a private, non-blocking manager lock.
 Replaced or uninstalled managed units are retained as private `.bak` files
 beside the user unit; systemd does not recognize these backups, and NexTuxLinq

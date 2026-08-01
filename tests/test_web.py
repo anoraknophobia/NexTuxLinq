@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -25,6 +26,12 @@ from nextuxlinq.models_v2 import ConfigurationDocumentV2
 from nextuxlinq.profile_presets import get_builtin_presets
 from nextuxlinq.service import NexTuxLinqService
 from nextuxlinq.service import RevisionConflictError
+from nextuxlinq.system_metrics import (
+    MetricAvailability,
+    MetricId,
+    MetricReason,
+    SystemMetricsSnapshot,
+)
 from nextuxlinq.web import MAX_REQUEST_BODY, create_app
 
 
@@ -310,12 +317,29 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
     ]
     assert definitions[0]["default_settings"] == {}
     assert body["bar_metric_ids"] == [
-        "cpu_usage", "memory_usage", "cpu_temperature",
+        "cpu_usage", "memory_usage", "cpu_temperature", "storage_usage",
+        "gpu_usage", "gpu_temperature", "gpu_memory_usage",
+        "storage_temperature",
     ]
     assert [metric["id"] for metric in body["metric_definitions"]] == [
         "cpu_usage", "memory_usage", "cpu_temperature", "uptime",
+        "load_average_1m", "storage_usage", "network_receive_rate",
+        "network_transmit_rate", "gpu_usage", "gpu_temperature",
+        "gpu_memory_usage", "storage_temperature",
     ]
     assert all("path" not in metric for metric in body["metric_definitions"])
+    assert all("availability_reason" in metric for metric in body["metric_definitions"])
+    assert {
+        metric["availability_reason"] for metric in body["metric_definitions"]
+    } <= {
+        None,
+        "source_not_present",
+        "awaiting_initial_sample",
+        "malformed_source",
+        "ambiguous_source",
+        "unsupported_source",
+        "temporary_read_failure",
+    }
     assert definitions[1]["default_settings"] == {
         "format": "24h",
         "show_seconds": False,
@@ -338,10 +362,61 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
     assert worker.frames == []
 
 
+def test_metric_diagnostics_response_is_sanitized_and_read_only(api_client) -> None:
+    client, service, store, worker = api_client
+    availability = {
+        metric: MetricAvailability.UNAVAILABLE for metric in MetricId
+    }
+    availability[MetricId.CPU_USAGE] = MetricAvailability.AVAILABLE
+    availability[MetricId.NETWORK_RECEIVE_RATE] = (
+        MetricAvailability.AWAITING_INITIAL_DELTA
+    )
+    availability[MetricId.NETWORK_TRANSMIT_RATE] = (
+        MetricAvailability.AWAITING_INITIAL_DELTA
+    )
+    service._last_metrics_snapshot = SystemMetricsSnapshot(
+        5.0,
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        {MetricId.CPU_USAGE: 42.0},
+        availability,
+        "partial",
+        {
+            metric: (
+                None if metric is MetricId.CPU_USAGE
+                else MetricReason.AWAITING_INITIAL_SAMPLE
+                if metric in {
+                    MetricId.NETWORK_RECEIVE_RATE,
+                    MetricId.NETWORK_TRANSMIT_RATE,
+                }
+                else MetricReason.SOURCE_NOT_PRESENT
+            )
+            for metric in MetricId
+        },
+    )
+
+    response = client.get("/api/v1/free-layout/metrics")
+
+    assert response.status_code == 200
+    metrics = {item["id"]: item for item in response.json()["metrics"]}
+    assert metrics["cpu_usage"]["state"] == "available"
+    assert metrics["cpu_usage"]["reason"] is None
+    assert metrics["network_receive_rate"] == {
+        "id": "network_receive_rate",
+        "label": "NET RX",
+        "state": "awaiting_initial_delta",
+        "reason": "awaiting_initial_sample",
+    }
+    serialized = response.text
+    for forbidden in ("/proc", "/sys", "0000:", "serial", "traceback"):
+        assert forbidden not in serialized
+    assert store.saved == []
+    assert worker.frames == []
+
+
 @pytest.mark.parametrize(
     ("preset_id", "region_index", "setting", "value", "category", "field"),
     [
-        ("system-monitor", 0, "metric", "gpu_usage", "unknown_metric", "metric"),
+        ("system-monitor", 0, "metric", "fan_usage", "unknown_metric", "metric"),
         ("system-monitor", 0, "precision", 3, "invalid_precision", "precision"),
         ("system-monitor", 0, "label", "", "invalid_custom_label", "label"),
         ("system-bars", 0, "metric", "uptime", "unsupported_metric_for_bar", "metric"),
