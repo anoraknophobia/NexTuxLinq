@@ -94,7 +94,9 @@ the five widgets. **Apply** validates and updates the running profile, while
 Browser drafts and revision conflicts remain explicit. The editor and preview
 use viewer perspective (Rear left, Front right), while stored integer
 coordinates and glyph pixels remain logical and unmirrored. See
-[`docs/free-layout-editor.md`](docs/free-layout-editor.md).
+[`docs/free-layout-editor.md`](docs/free-layout-editor.md). Profile presets,
+JSON import/export, and managed backups are documented in
+[`docs/profile-management.md`](docs/profile-management.md).
 
 Install and uninstall operations use a private, non-blocking manager lock.
 Replaced or uninstalled managed units are retained as private `.bak` files

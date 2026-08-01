@@ -1965,6 +1965,40 @@ test("profile actions keep canonical layouts and new profiles empty", () => {
   );
 });
 
+test("Phase 6 profile drafts, presets, and navigation protection are immutable", () => {
+  const original = freeConfiguration(freeProfile([freeRegion()]));
+  const imported = freeLayout.addImportedProfile(original, {
+    profile_name: "imported",
+    profile: freeProfile([]),
+  });
+  assert.equal(imported.active_profile, "imported");
+  assert.equal(original.active_profile, "default");
+  assert.notEqual(imported.profiles.imported, original.profiles.default);
+  assert.equal(freeLayout.addImportedProfile(original, {
+    profile_name: "default", profile: freeProfile([]),
+  }), null);
+  const fromPreset = freeLayout.createProfileFromPreset(original, {
+    profile: freeProfile([]),
+  }, "preset_profile");
+  assert.equal(fromPreset.active_profile, "preset_profile");
+  assert.equal(original.profiles.preset_profile, undefined);
+  assert.equal(freeLayout.hasMeaningfulDraft({
+    applied: original, draftDirty: true,
+  }), true);
+  assert.equal(freeLayout.hasMeaningfulDraft({
+    applied: original, draftDirty: false,
+  }), false);
+});
+
+test("Phase 6 browser file encoding preserves exact bytes", () => {
+  const bytes = Uint8Array.from([0, 1, 127, 128, 255]);
+  const encoded = freeLayout.arrayBufferToBase64(
+    bytes.buffer,
+    (binary) => Buffer.from(binary, "binary").toString("base64"),
+  );
+  assert.deepEqual(Buffer.from(encoded, "base64"), Buffer.from(bytes));
+});
+
 test("editor state distinguishes saved, draft, invalid, conflict, and reconnect", () => {
   const baseState = {
     applied: freeConfiguration(),

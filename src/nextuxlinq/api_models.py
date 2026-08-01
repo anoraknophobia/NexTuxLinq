@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
 from nextuxlinq.models import ConfigurationDocument, LayoutConfig, ProfileConfig
-from nextuxlinq.models_v2 import ConfigurationDocumentV2
+from nextuxlinq.models_v2 import ConfigurationDocumentV2, ProfileConfigV2
 
 
 class DomainValidationError(ValueError):
@@ -173,6 +173,12 @@ class PreviewResponse(StrictModel):
     animated_content: bool
 
 
+CanonicalProfileName = Annotated[
+    str,
+    Field(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_-]+$"),
+]
+
+
 class CanonicalConfigurationModel(StrictModel):
     schema_version: StrictInt
     active_profile: str
@@ -190,6 +196,24 @@ class CanonicalConfigurationModel(StrictModel):
         configuration: ConfigurationDocumentV2,
     ) -> CanonicalConfigurationModel:
         return cls.model_validate(configuration.to_dict())
+
+
+class CanonicalProfileModel(StrictModel):
+    brightness: StrictInt | None
+    canvas: dict[str, Any]
+    regions: list[dict[str, Any]]
+
+    def to_domain(self) -> ProfileConfigV2:
+        return _convert_domain(
+            ProfileConfigV2.from_dict,
+            self.model_dump(),
+            field="profile",
+        )
+
+
+class ProfileExportRequest(StrictModel):
+    profile_name: CanonicalProfileName
+    profile: CanonicalProfileModel
 
 
 class CanonicalConfigResponse(StrictModel):
@@ -216,7 +240,84 @@ class FreeLayoutMetadataResponse(StrictModel):
     max_profiles: int
     max_regions_per_profile: int
     max_regions_per_document: int
+    max_import_bytes: int
     widget_definitions: list[WidgetEditorDefinition]
+
+
+class ImportFileRequest(StrictModel):
+    content_base64: str = Field(max_length=400_000)
+
+
+class ProfileImportRequest(ImportFileRequest):
+    existing_profile_names: list[CanonicalProfileName] = Field(
+        default_factory=list, max_length=32
+    )
+    existing_region_count: StrictInt = Field(default=0, ge=0, le=128)
+
+
+class ProfileImportResponse(StrictModel):
+    valid: bool
+    profile_name: str
+    profile: dict[str, Any]
+    region_count: int
+    framebuffer_base64: str
+
+
+class ConfigurationImportSummary(StrictModel):
+    profile_count: int
+    active_profile: str
+    schema_version: int
+    replaces_existing_profiles: bool
+
+
+class ConfigurationImportResponse(StrictModel):
+    valid: bool
+    configuration: CanonicalConfigurationModel
+    summary: ConfigurationImportSummary
+    framebuffer_base64: str
+
+
+class PresetResponse(StrictModel):
+    id: str
+    name: str
+    description: str
+    region_count: int
+    profile: dict[str, Any]
+    framebuffer_base64: str
+
+
+class PresetListResponse(StrictModel):
+    presets: list[PresetResponse]
+
+
+class BackupCreateRequest(StrictModel):
+    name: str = Field(min_length=1, max_length=64)
+
+
+class BackupMetadataResponse(StrictModel):
+    id: str
+    name: str
+    created_at: str
+    profile_count: int
+    active_profile: str
+    schema_version: int
+    kind: str = "user"
+
+
+class BackupListResponse(StrictModel):
+    retention_limit: int
+    backups: list[BackupMetadataResponse]
+
+
+class BackupRestoreResponse(StrictModel):
+    valid: bool
+    configuration: CanonicalConfigurationModel
+    summary: ConfigurationImportSummary
+    framebuffer_base64: str
+
+
+class DeleteResponse(StrictModel):
+    deleted: bool
 
 
 class CanonicalValidateRequest(StrictModel):

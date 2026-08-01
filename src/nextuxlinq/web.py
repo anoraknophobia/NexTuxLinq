@@ -42,13 +42,44 @@ from nextuxlinq.api_models import (
     SaveResponse,
     StatusResponse,
     WidgetEditorDefinition,
+    BackupCreateRequest,
+    BackupListResponse,
+    BackupMetadataResponse,
+    BackupRestoreResponse,
+    ConfigurationImportResponse,
+    ConfigurationImportSummary,
+    DeleteResponse,
+    ImportFileRequest,
+    PresetListResponse,
+    PresetResponse,
+    ProfileImportRequest,
+    ProfileImportResponse,
+    ProfileExportRequest,
 )
-from nextuxlinq.config_store import ConfigSaveError
+from nextuxlinq.config_store import (
+    ConfigSaveError,
+    MANAGED_BACKUP_RETENTION,
+    ManagedBackup,
+    ManagedBackupError,
+)
 from nextuxlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH
 from nextuxlinq.models import MAX_PROFILES
 from nextuxlinq.models_v2 import (
     MAX_REGIONS_PER_DOCUMENT,
     MAX_REGIONS_PER_PROFILE,
+    ConfigurationDocumentV2,
+)
+from nextuxlinq.profile_presets import get_builtin_presets
+from nextuxlinq.profile_transfer import (
+    TransferValidationError,
+    decode_import_content,
+    deterministic_json,
+    export_profile,
+    import_configuration,
+    import_profile,
+    MAX_IMPORT_BYTES,
+    parse_json_bytes,
+    safe_profile_filename,
 )
 from nextuxlinq.service import (
     CandidateValidationError,
@@ -278,6 +309,57 @@ def create_app(
                         "renderer_field": error.field,
                     }
                 ],
+            )
+        except TransferValidationError as error:
+            messages = {
+                "file_too_large": "The JSON file exceeds the import size limit.",
+                "empty_file": "The JSON file is empty.",
+                "invalid_utf8": "The file is not valid UTF-8.",
+                "malformed_json": "The file does not contain valid JSON.",
+                "malformed_upload": "The uploaded file data is invalid.",
+                "unsupported_export_format": "The export format is not supported.",
+                "unsupported_export_version": "The export format version is not supported.",
+                "unsupported_schema_version": "The configuration schema version is not supported.",
+                "missing_profile_data": "The export does not contain profile data.",
+                "invalid_profile_name": "The exported profile name is invalid.",
+                "duplicate_profile_name": "A unique imported profile name is unavailable.",
+                "invalid_profile_data": "The imported profile is invalid.",
+                "duplicate_region_id": "The imported profile contains a duplicate region ID.",
+                "invalid_region_id": "The imported profile contains an invalid region ID.",
+                "overlap": "Imported regions overlap.",
+                "out_of_bounds": "An imported region is outside the 90 by 10 canvas.",
+                "region_limit_reached": "The imported profile exceeds the region limit.",
+                "profile_limit_reached": "The imported configuration exceeds the profile limit.",
+                "wrong_widget_settings": "Imported widget settings are invalid.",
+                "invalid_configuration": "The imported configuration is invalid.",
+                "profile_not_found": "The selected profile was not found.",
+            }
+            return _error(
+                request,
+                413 if error.code == "file_too_large" else 404
+                if error.code == "profile_not_found" else 422,
+                error.code,
+                messages.get(error.code, "The import could not be validated."),
+                field_errors=[{
+                    "field": error.field,
+                    "message": "The imported value is not valid for this field.",
+                    "category": error.code,
+                }],
+            )
+        except ManagedBackupError as error:
+            messages = {
+                "backup_not_found": "The selected backup was not found.",
+                "invalid_backup": "The selected backup is invalid.",
+                "invalid_backup_name": "Use a printable backup name of up to 64 characters.",
+                "no_saved_configuration": "There is no saved configuration to back up.",
+                "backup_creation_failed": "The backup could not be created.",
+                "backup_deletion_failed": "The backup could not be deleted.",
+            }
+            return _error(
+                request,
+                404 if error.code == "backup_not_found" else 422,
+                error.code,
+                messages.get(error.code, "The backup operation could not be completed."),
             )
         except ConfigSaveError:
             return _error(
@@ -621,6 +703,7 @@ def create_app(
             max_profiles=MAX_PROFILES,
             max_regions_per_profile=MAX_REGIONS_PER_PROFILE,
             max_regions_per_document=MAX_REGIONS_PER_DOCUMENT,
+            max_import_bytes=MAX_IMPORT_BYTES,
             widget_definitions=[
                 WidgetEditorDefinition(
                     type=definition.widget_type.value,
@@ -632,6 +715,200 @@ def create_app(
                 for definition in service.get_widget_definitions()
             ],
         )
+
+    def backup_response(backup: ManagedBackup) -> BackupMetadataResponse:
+        return BackupMetadataResponse(
+            id=backup.id,
+            name=backup.name,
+            created_at=backup.created_at,
+            profile_count=backup.profile_count,
+            active_profile=backup.active_profile,
+            schema_version=backup.schema_version,
+        )
+
+    def import_summary(
+        configuration: ConfigurationDocumentV2,
+    ) -> ConfigurationImportSummary:
+        return ConfigurationImportSummary(
+            profile_count=len(configuration.profiles),
+            active_profile=configuration.active_profile,
+            schema_version=configuration.schema_version,
+            replaces_existing_profiles=True,
+        )
+
+    @app.get(
+        f"{API_PREFIX}/free-layout/presets",
+        response_model=PresetListResponse,
+    )
+    async def presets() -> PresetListResponse:
+        response: list[PresetResponse] = []
+        for preset in get_builtin_presets():
+            document = ConfigurationDocumentV2(
+                schema_version=2,
+                active_profile="preset",
+                profiles={"preset": preset.profile},
+            )
+            rendered = service.validate_configuration(document)
+            response.append(PresetResponse(
+                id=preset.id,
+                name=preset.name,
+                description=preset.description,
+                region_count=len(preset.profile.regions),
+                profile=preset.profile.to_dict(),
+                framebuffer_base64=base64.b64encode(
+                    rendered.logical_framebuffer
+                ).decode("ascii"),
+            ))
+        return PresetListResponse(presets=response)
+
+    @app.get(f"{API_PREFIX}/free-layout/export/profile/{{profile_name}}")
+    async def export_selected_profile(profile_name: str) -> Response:
+        configuration = service.get_configuration().configuration
+        profile = configuration.profiles.get(profile_name)
+        if profile is None:
+            raise TransferValidationError(
+                "profile_not_found", field="profile_name"
+            ) from None
+        service.validate_configuration(ConfigurationDocumentV2(
+            schema_version=2,
+            active_profile=profile_name,
+            profiles={profile_name: profile},
+        ))
+        filename = safe_profile_filename(profile_name)
+        return Response(
+            deterministic_json(export_profile(profile_name, profile)),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.post(f"{API_PREFIX}/free-layout/export/profile")
+    async def export_draft_profile(request: ProfileExportRequest) -> Response:
+        profile = request.profile.to_domain()
+        service.validate_configuration(ConfigurationDocumentV2(
+            schema_version=2,
+            active_profile=request.profile_name,
+            profiles={request.profile_name: profile},
+        ))
+        filename = safe_profile_filename(request.profile_name)
+        return Response(
+            deterministic_json(export_profile(request.profile_name, profile)),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get(f"{API_PREFIX}/free-layout/export/configuration")
+    async def export_complete_configuration() -> Response:
+        configuration = service.get_configuration().configuration
+        service.validate_configuration(configuration)
+        return Response(
+            deterministic_json(configuration.to_dict()),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": 'attachment; filename="nextuxlinq-config-v2.json"'
+            },
+        )
+
+    @app.post(
+        f"{API_PREFIX}/free-layout/import/profile/validate",
+        response_model=ProfileImportResponse,
+    )
+    async def validate_profile_import(
+        request: ProfileImportRequest,
+    ) -> ProfileImportResponse:
+        raw = parse_json_bytes(decode_import_content(request.content_base64))
+        existing = tuple(dict.fromkeys(
+            [*service.get_configuration().configuration.profiles, *request.existing_profile_names]
+        ))
+        imported = import_profile(raw, existing)
+        if len(existing) >= MAX_PROFILES:
+            raise TransferValidationError(
+                "profile_limit_reached", field="existing_profile_names"
+            )
+        current_regions = sum(
+            len(profile.regions)
+            for profile in service.get_configuration().configuration.profiles.values()
+        )
+        existing_regions = max(current_regions, request.existing_region_count)
+        if existing_regions + len(imported.profile.regions) > MAX_REGIONS_PER_DOCUMENT:
+            raise TransferValidationError(
+                "region_limit_reached", field="profile.regions"
+            )
+        document = ConfigurationDocumentV2(
+            schema_version=2,
+            active_profile=imported.profile_name,
+            profiles={imported.profile_name: imported.profile},
+        )
+        rendered = service.validate_configuration(document)
+        return ProfileImportResponse(
+            valid=True,
+            profile_name=imported.profile_name,
+            profile=imported.profile.to_dict(),
+            region_count=len(imported.profile.regions),
+            framebuffer_base64=base64.b64encode(
+                rendered.logical_framebuffer
+            ).decode("ascii"),
+        )
+
+    @app.post(
+        f"{API_PREFIX}/free-layout/import/configuration/validate",
+        response_model=ConfigurationImportResponse,
+    )
+    async def validate_configuration_import(
+        request: ImportFileRequest,
+    ) -> ConfigurationImportResponse:
+        configuration = import_configuration(
+            parse_json_bytes(decode_import_content(request.content_base64))
+        )
+        rendered = service.validate_configuration(configuration)
+        return ConfigurationImportResponse(
+            valid=True,
+            configuration=CanonicalConfigurationModel.from_domain(configuration),
+            summary=import_summary(configuration),
+            framebuffer_base64=base64.b64encode(
+                rendered.logical_framebuffer
+            ).decode("ascii"),
+        )
+
+    @app.get(
+        f"{API_PREFIX}/free-layout/backups",
+        response_model=BackupListResponse,
+    )
+    async def list_backups() -> BackupListResponse:
+        return BackupListResponse(
+            retention_limit=MANAGED_BACKUP_RETENTION,
+            backups=[backup_response(item) for item in service.list_backups()],
+        )
+
+    @app.post(
+        f"{API_PREFIX}/free-layout/backups",
+        response_model=BackupMetadataResponse,
+    )
+    async def create_backup(request: BackupCreateRequest) -> BackupMetadataResponse:
+        return backup_response(service.create_backup(request.name))
+
+    @app.post(
+        f"{API_PREFIX}/free-layout/backups/{{backup_id}}/restore",
+        response_model=BackupRestoreResponse,
+    )
+    async def restore_backup(backup_id: str) -> BackupRestoreResponse:
+        configuration = service.restore_backup(backup_id)
+        rendered = service.validate_configuration(configuration)
+        return BackupRestoreResponse(
+            valid=True,
+            configuration=CanonicalConfigurationModel.from_domain(configuration),
+            summary=import_summary(configuration),
+            framebuffer_base64=base64.b64encode(
+                rendered.logical_framebuffer
+            ).decode("ascii"),
+        )
+
+    @app.delete(
+        f"{API_PREFIX}/free-layout/backups/{{backup_id}}",
+        response_model=DeleteResponse,
+    )
+    async def delete_backup(backup_id: str) -> DeleteResponse:
+        service.delete_backup(backup_id)
+        return DeleteResponse(deleted=True)
 
     @app.post(
         f"{API_PREFIX}/free-layout/validate",

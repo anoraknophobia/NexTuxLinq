@@ -20,6 +20,7 @@
       setTimeout: root.setTimeout.bind(root),
       clearTimeout: root.clearTimeout.bind(root),
       decodeBase64: root.atob.bind(root),
+      encodeBase64: root.btoa.bind(root),
     });
   }
 })(typeof globalThis === "object" ? globalThis : this, function freeLayoutFactory(base) {
@@ -493,6 +494,37 @@
     return result;
   }
 
+  function hasMeaningfulDraft(state) {
+    return Boolean(state && state.applied && state.draftDirty);
+  }
+
+  function addImportedProfile(configuration, imported) {
+    if (!configuration || !imported || !PROFILE_ID.test(imported.profile_name)
+        || configuration.profiles[imported.profile_name]) return null;
+    const result = clone(configuration);
+    result.profiles[imported.profile_name] = clone(imported.profile);
+    result.active_profile = imported.profile_name;
+    return result;
+  }
+
+  function createProfileFromPreset(configuration, preset, profileName) {
+    if (!preset || !PROFILE_ID.test(profileName)
+        || configuration.profiles[profileName]) return null;
+    const result = clone(configuration);
+    result.profiles[profileName] = clone(preset.profile);
+    result.active_profile = profileName;
+    return result;
+  }
+
+  function arrayBufferToBase64(buffer, encodeBinary) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    }
+    return encodeBinary(binary);
+  }
+
   function deriveEditorState(state) {
     if (!state.applied) return {label: "Loading", className: ""};
     if (state.conflict) return {label: "Revision conflict", className: "invalid"};
@@ -532,6 +564,8 @@
     const setTimeoutFunction = dependencies.setTimeout;
     const clearTimeoutFunction = dependencies.clearTimeout;
     const decodeBase64 = dependencies.decodeBase64;
+    const encodeBase64 = dependencies.encodeBase64
+      || windowObject.btoa?.bind(windowObject);
     const root = documentObject.querySelector("#free-layout-root");
     const element = (selector) => root.querySelector(selector);
     const elements = {
@@ -568,6 +602,22 @@
       earlier: element("#fl-region-earlier"),
       later: element("#fl-region-later"),
       toggle: element("#fl-toggle-region"),
+      presets: element("#fl-presets"),
+      presetBrowser: element("#fl-preset-browser"),
+      presetList: element("#fl-preset-list"),
+      createPreset: element("#fl-create-preset"),
+      previewPreset: element("#fl-preview-preset"),
+      cancelPreset: element("#fl-cancel-preset"),
+      importProfile: element("#fl-import-profile"),
+      exportProfile: element("#fl-export-profile"),
+      profileFile: element("#fl-profile-file"),
+      importConfig: element("#fl-import-config"),
+      exportConfig: element("#fl-export-config"),
+      configFile: element("#fl-config-file"),
+      createBackup: element("#fl-create-backup"),
+      backupSelect: element("#fl-backup-select"),
+      restoreBackup: element("#fl-restore-backup"),
+      deleteBackup: element("#fl-delete-backup"),
     };
     const previewContext = elements.preview.getContext("2d");
     const state = {
@@ -593,6 +643,11 @@
       pointerOperation: null,
       disconnected: false,
       pendingRemote: null,
+      presets: [],
+      selectedPresetId: null,
+      backups: [],
+      pendingFullImportBackup: false,
+      backupLoading: false,
     };
     let validationTimer = null;
     let animationTimer = null;
@@ -708,6 +763,51 @@
       elements.canvasBackground.value = profile.canvas.background_color;
       elements.brightness.value = profile.brightness === null
         ? "" : String(profile.brightness);
+    }
+
+    function renderPresetControls() {
+      if (!elements.presetList) return;
+      const options = state.presets.map((preset) => {
+        const button = documentObject.createElement("button");
+        button.type = "button";
+        button.className = "preset-option";
+        button.setAttribute("role", "option");
+        button.setAttribute("aria-selected",
+          String(preset.id === state.selectedPresetId));
+        const name = documentObject.createElement("strong");
+        name.textContent = preset.name;
+        const description = documentObject.createElement("span");
+        description.className = "preset-description";
+        description.textContent = preset.description;
+        const count = documentObject.createElement("span");
+        count.textContent = `${preset.region_count} region${
+          preset.region_count === 1 ? "" : "s"}`;
+        button.append(name, description, count);
+        button.addEventListener("click", () => {
+          state.selectedPresetId = preset.id;
+          renderPresetControls();
+        });
+        return button;
+      });
+      elements.presetList.replaceChildren(...options);
+      const unavailable = !state.selectedPresetId || state.submitting;
+      if (elements.createPreset) elements.createPreset.disabled = unavailable;
+      if (elements.previewPreset) elements.previewPreset.disabled = unavailable;
+    }
+
+    function renderBackups() {
+      if (!elements.backupSelect) return;
+      const selected = elements.backupSelect.value;
+      const options = state.backups.map((backup) => {
+        const option = documentObject.createElement("option");
+        option.value = backup.id;
+        option.textContent = `${backup.name} · ${backup.created_at}`;
+        return option;
+      });
+      elements.backupSelect.replaceChildren(...options);
+      if (state.backups.some((item) => item.id === selected)) {
+        elements.backupSelect.value = selected;
+      }
     }
 
     function renderCanvas() {
@@ -946,6 +1046,8 @@
       renderCanvas();
       renderInspector();
       renderErrors();
+      renderPresetControls();
+      renderBackups();
       const presentation = deriveEditorState(state);
       elements.state.textContent = presentation.label;
       elements.state.className = `editor-state ${presentation.className}`.trim();
@@ -1186,6 +1288,14 @@
       state.submitting = true;
       render();
       try {
+        if (state.pendingFullImportBackup) {
+          await request("/backups", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name: "Before configuration import"}),
+          });
+          state.pendingFullImportBackup = false;
+        }
         const result = await request("/config", {
           method: "PUT",
           headers: {"Content-Type": "application/json"},
@@ -1373,6 +1483,199 @@
       state.pointerOperation = null;
     }
 
+    function selectedPreset() {
+      return state.presets.find(
+        (preset) => preset.id === state.selectedPresetId,
+      ) || null;
+    }
+
+    function confirmDraftTransition(message) {
+      if (!hasMeaningfulDraft(state)) return true;
+      return typeof windowObject.confirm !== "function"
+        || windowObject.confirm(message);
+    }
+
+    function replaceDraft(configuration, {fullImport = false} = {}) {
+      state.draft = clone(configuration);
+      state.selectedRegionId = null;
+      state.serverErrors = [];
+      state.inputErrors.clear();
+      state.pendingFullImportBackup = fullImport;
+      state.conflict = false;
+      updateDerivedState();
+      state.serverValidation = "idle";
+      render();
+      void validateDraft();
+    }
+
+    async function readImportFile(file) {
+      if (!file || !String(file.name || "").toLowerCase().endsWith(".json")) {
+        throw new EditorRequestError("Select a JSON file.", 422,
+          "unsupported_file_type", []);
+      }
+      if (file.size === 0) {
+        throw new EditorRequestError("The JSON file is empty.", 422,
+          "empty_file", []);
+      }
+      const limit = state.metadata.max_import_bytes || (256 * 1024);
+      if (file.size > limit) {
+        throw new EditorRequestError("The JSON file is too large.", 413,
+          "file_too_large", []);
+      }
+      if (!encodeBase64) {
+        throw new EditorRequestError("File import is unavailable.", null,
+          "file_unavailable", []);
+      }
+      return arrayBufferToBase64(await file.arrayBuffer(), encodeBase64);
+    }
+
+    async function importProfileFile(file) {
+      if (state.submitting) return false;
+      state.submitting = true;
+      render();
+      try {
+        const result = await request("/import/profile/validate", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            content_base64: await readImportFile(file),
+            existing_profile_names: Object.keys(state.draft.profiles),
+            existing_region_count: totalRegionCount(state.draft),
+          }),
+        });
+        renderPreview(result.framebuffer_base64, "Imported profile preview");
+        const confirmed = typeof windowObject.confirm !== "function"
+          || windowObject.confirm(
+            `Add imported profile ${result.profile_name} with ${
+              result.region_count} regions?`,
+          );
+        if (!confirmed) return false;
+        const candidate = addImportedProfile(state.draft, result);
+        if (!candidate) throw new EditorRequestError(
+          "The imported profile cannot be added.", 422,
+          "duplicate_profile_name", [],
+        );
+        state.selectedRegionId = null;
+        state.draft = candidate;
+        state.serverErrors = [];
+        state.inputErrors.clear();
+        updateDerivedState();
+        state.serverValidation = "idle";
+        render();
+        void validateDraft();
+        setMessage("Imported profile added to the local draft.", "success");
+        return true;
+      } catch (error) {
+        setMessage(error instanceof EditorRequestError
+          ? error.message : "The profile import failed.", "error");
+        return false;
+      } finally {
+        state.submitting = false;
+        render();
+      }
+    }
+
+    async function importConfigurationFile(file) {
+      if (state.submitting || !confirmDraftTransition(
+        "Discard the current local draft and inspect a full configuration import?"
+      )) return false;
+      state.submitting = true;
+      render();
+      try {
+        const result = await request("/import/configuration/validate", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({content_base64: await readImportFile(file)}),
+        });
+        const summary = result.summary;
+        const confirmed = typeof windowObject.confirm !== "function"
+          || windowObject.confirm(
+            `Replace the current local draft with schema v${summary.schema_version}, `
+            + `${summary.profile_count} profiles, active profile `
+            + `${summary.active_profile}? Existing profiles will be replaced.`,
+          );
+        if (!confirmed) return false;
+        replaceDraft(result.configuration, {fullImport: true});
+        renderPreview(result.framebuffer_base64, "Imported configuration preview");
+        setMessage(
+          "Configuration imported as a local draft. Apply, then Save explicitly.",
+          "success",
+        );
+        return true;
+      } catch (error) {
+        setMessage(error instanceof EditorRequestError
+          ? error.message : "The configuration import failed.", "error");
+        return false;
+      } finally {
+        state.submitting = false;
+        render();
+      }
+    }
+
+    async function loadPresets() {
+      if (state.submitting) return;
+      state.submitting = true;
+      render();
+      try {
+        if (!state.presets.length) {
+          const result = await request("/presets");
+          state.presets = clone(result.presets);
+          state.selectedPresetId = state.presets[0]?.id || null;
+        }
+        if (elements.presetBrowser) elements.presetBrowser.hidden = false;
+        renderPresetControls();
+      } finally {
+        state.submitting = false;
+        render();
+      }
+    }
+
+    async function loadBackups() {
+      if (state.backupLoading) return null;
+      state.backupLoading = true;
+      try {
+        const result = await request("/backups");
+        state.backups = clone(result.backups);
+        renderBackups();
+        return result;
+      } finally {
+        state.backupLoading = false;
+      }
+    }
+
+    async function downloadExport(path, fallbackFilename, options = {}) {
+      if (state.submitting) return false;
+      state.submitting = true;
+      render();
+      try {
+        const response = await fetchFunction(`${API_PREFIX}${path}`, options);
+        if (!response.ok) {
+          let payload = {};
+          try { payload = JSON.parse(await response.text()); } catch (error) {}
+          throw new EditorRequestError(payload.message || "Export failed.",
+            response.status, payload.code, payload.field_errors);
+        }
+        const blob = await response.blob();
+        const url = windowObject.URL.createObjectURL(blob);
+        const anchor = documentObject.createElement("a");
+        anchor.href = url;
+        anchor.download = fallbackFilename;
+        anchor.hidden = true;
+        documentObject.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        windowObject.URL.revokeObjectURL(url);
+        return true;
+      } catch (error) {
+        setMessage(error instanceof EditorRequestError
+          ? error.message : "The export failed.", "error");
+        return false;
+      } finally {
+        state.submitting = false;
+        render();
+      }
+    }
+
     function bind() {
       elements.layer.addEventListener("pointerdown", (event) => {
         const selectedRegionId = selectionForCanvasPointer(
@@ -1394,8 +1697,25 @@
         );
       }
       elements.profile.addEventListener("change", () => {
+        const previous = state.draft.active_profile;
+        if (elements.profile.value !== previous && !confirmDraftTransition(
+          "Discard the current local draft and switch profiles?"
+        )) {
+          elements.profile.value = previous;
+          return;
+        }
+        const target = elements.profile.value;
+        if (state.draftDirty) {
+          state.draft = clone(state.applied);
+          state.pendingFullImportBackup = false;
+        }
+        if (!state.draft.profiles[target]) {
+          elements.profile.value = state.draft.active_profile;
+          render();
+          return;
+        }
         mutate((candidate) => {
-          candidate.active_profile = elements.profile.value;
+          candidate.active_profile = target;
           state.selectedRegionId = selectionForProfile(
             state.selectedRegionId,
             candidate.profiles[candidate.active_profile],
@@ -1538,6 +1858,154 @@
           mutate((candidate) => Object.assign(candidate, changed));
         });
       }
+      elements.presets?.addEventListener("click", () => {
+        if (state.submitting) return;
+        void loadPresets().catch(() => {
+          setMessage("The preset library could not be loaded.", "error");
+        });
+      });
+      elements.cancelPreset?.addEventListener("click", () => {
+        elements.presetBrowser.hidden = true;
+      });
+      elements.previewPreset?.addEventListener("click", () => {
+        const preset = selectedPreset();
+        if (preset) renderPreview(preset.framebuffer_base64,
+          `${preset.name} preset`);
+      });
+      elements.createPreset?.addEventListener("click", () => {
+        const preset = selectedPreset();
+        if (!preset || state.submitting) return;
+        if (Object.keys(state.draft.profiles).length >= state.metadata.max_profiles
+            || totalRegionCount(state.draft) + preset.region_count
+              > state.metadata.max_regions_per_document) {
+          setMessage("The preset would exceed a profile or region limit.", "error");
+          return;
+        }
+        const target = typeof windowObject.prompt === "function"
+          ? windowObject.prompt("New profile name", preset.id.replaceAll("-", "_"))
+          : null;
+        if (!target) return;
+        const changed = createProfileFromPreset(state.draft, preset, target);
+        if (!changed) {
+          setMessage("Use a unique profile name with letters, numbers, _ or -.",
+            "error");
+          return;
+        }
+        state.selectedRegionId = null;
+        mutate((candidate) => Object.assign(candidate, changed));
+        elements.presetBrowser.hidden = true;
+        setMessage("Preset added as a new local-draft profile.", "success");
+      });
+      elements.importProfile?.addEventListener("click", () => {
+        if (!state.submitting) elements.profileFile.click();
+      });
+      elements.profileFile?.addEventListener("change", () => {
+        const file = elements.profileFile.files?.[0];
+        elements.profileFile.value = "";
+        if (file) void importProfileFile(file);
+      });
+      elements.importConfig?.addEventListener("click", () => {
+        if (!state.submitting) elements.configFile.click();
+      });
+      elements.configFile?.addEventListener("change", () => {
+        const file = elements.configFile.files?.[0];
+        elements.configFile.value = "";
+        if (file) void importConfigurationFile(file);
+      });
+      elements.exportProfile?.addEventListener("click", () => {
+        const name = state.draft.active_profile;
+        void downloadExport("/export/profile",
+          `nextuxlinq-profile-${name}.json`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+              profile_name: name,
+              profile: state.draft.profiles[name],
+            }),
+          });
+      });
+      elements.exportConfig?.addEventListener("click", () => {
+        void downloadExport("/export/configuration", "nextuxlinq-config-v2.json");
+      });
+      elements.createBackup?.addEventListener("click", async () => {
+        if (state.submitting) return;
+        const name = typeof windowObject.prompt === "function"
+          ? windowObject.prompt("Backup name", "Manual backup") : null;
+        if (!name) return;
+        state.submitting = true;
+        render();
+        try {
+          await request("/backups", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name}),
+          });
+          await loadBackups();
+          setMessage("Saved configuration backed up.", "success");
+        } catch (error) {
+          setMessage(error instanceof EditorRequestError
+            ? error.message : "The backup could not be created.", "error");
+        } finally {
+          state.submitting = false;
+          render();
+        }
+      });
+      elements.restoreBackup?.addEventListener("click", async () => {
+        const backupId = elements.backupSelect.value;
+        if (!backupId || state.submitting || !confirmDraftTransition(
+          "Discard the current local draft and inspect this backup?"
+        )) return;
+        if (typeof windowObject.confirm === "function"
+            && !windowObject.confirm("Restore this backup into local draft state?")) {
+          return;
+        }
+        state.submitting = true;
+        render();
+        try {
+          const result = await request(`/backups/${backupId}/restore`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: "{}",
+          });
+          replaceDraft(result.configuration);
+          renderPreview(result.framebuffer_base64, "Backup preview");
+          setMessage("Backup restored into the local draft.", "success");
+        } catch (error) {
+          setMessage(error instanceof EditorRequestError
+            ? error.message : "The backup could not be restored.", "error");
+        } finally {
+          state.submitting = false;
+          render();
+        }
+      });
+      elements.deleteBackup?.addEventListener("click", async () => {
+        const backupId = elements.backupSelect.value;
+        if (!backupId || state.submitting) return;
+        if (typeof windowObject.confirm === "function"
+            && !windowObject.confirm("Delete this managed backup?")) return;
+        state.submitting = true;
+        render();
+        try {
+          await request(`/backups/${backupId}`, {
+            method: "DELETE",
+            headers: {"Content-Type": "application/json"},
+            body: "{}",
+          });
+          await loadBackups();
+          setMessage("Managed backup deleted.", "success");
+        } catch (error) {
+          setMessage(error instanceof EditorRequestError
+            ? error.message : "The backup could not be deleted.", "error");
+        } finally {
+          state.submitting = false;
+          render();
+        }
+      });
+      elements.backupSelect?.addEventListener("focus", () => {
+        if (!state.submitting) void loadBackups().catch(() => {
+          setMessage("Managed backups could not be listed.", "error");
+        });
+      });
       elements.validate.addEventListener("click", () => void validateDraft());
       elements.apply.addEventListener("click", () => void applyDraft());
       elements.save.addEventListener("click", () => void saveApplied());
@@ -1560,6 +2028,7 @@
         state.serverErrors = [];
         state.inputErrors.clear();
         state.pendingRemote = null;
+        state.pendingFullImportBackup = false;
         state.conflict = false;
         updateDerivedState();
         state.serverValidation = "idle";
@@ -1579,7 +2048,13 @@
           if (isTextEntryTarget(event.target)) return;
           elements.remove.click();
         });
-        windowObject.addEventListener("beforeunload", stopTimers);
+        windowObject.addEventListener("beforeunload", (event) => {
+          stopTimers();
+          if (!hasMeaningfulDraft(state)) return undefined;
+          event.preventDefault?.();
+          event.returnValue = "";
+          return "";
+        });
       }
       documentObject.addEventListener?.("visibilitychange", () => {
         if (state.serverValidation === "valid") scheduleAnimatedPreview();
@@ -1619,6 +2094,10 @@
       validateDraft,
       applyDraft,
       saveApplied,
+      importProfileFile,
+      importConfigurationFile,
+      loadPresets,
+      loadBackups,
       reload,
       mutate,
       cancelPointerOperation,
@@ -1662,6 +2141,10 @@
     moveGeometryInViewer,
     resizeGeometryInViewer,
     profileAction,
+    hasMeaningfulDraft,
+    addImportedProfile,
+    createProfileFromPreset,
+    arrayBufferToBase64,
     deriveEditorState,
     createEditor,
     bootstrap,

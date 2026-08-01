@@ -74,8 +74,38 @@
             <button type="button" data-profile-action="duplicate">Duplicate</button>
             <button type="button" data-profile-action="rename">Rename</button>
             <button type="button" data-profile-action="delete">Delete</button>
+            <button id="fl-presets" type="button">Presets</button>
+            <button id="fl-import-profile" type="button">Import</button>
+            <button id="fl-export-profile" type="button">Export</button>
+            <input id="fl-profile-file" type="file" accept="application/json,.json" hidden>
           </div>
         </div>
+        <div id="fl-preset-browser" class="preset-browser" hidden
+             aria-labelledby="fl-preset-heading">
+          <h3 id="fl-preset-heading">Built-in presets</h3>
+          <div id="fl-preset-list" class="preset-list" role="listbox"
+               aria-label="Built-in profile presets"></div>
+          <div class="actions">
+            <button id="fl-create-preset" type="button">Create profile from preset</button>
+            <button id="fl-preview-preset" type="button">Preview preset</button>
+            <button id="fl-cancel-preset" type="button">Cancel</button>
+          </div>
+        </div>
+        <details class="profile-advanced">
+          <summary>Configuration import, export, and backups</summary>
+          <div class="advanced-actions">
+            <button id="fl-export-config" type="button">Export full configuration</button>
+            <button id="fl-import-config" type="button">Import full configuration</button>
+            <input id="fl-config-file" type="file" accept="application/json,.json" hidden>
+            <button id="fl-create-backup" type="button">Create backup</button>
+            <label>Managed backup
+              <select id="fl-backup-select" aria-label="Managed backup"></select>
+            </label>
+            <button id="fl-restore-backup" type="button">Restore backup</button>
+            <button id="fl-delete-backup" type="button">Delete backup</button>
+          </div>
+          <p class="field-help">Imports and restores become local drafts. Apply and Save remain separate.</p>
+        </details>
       </section>
 
       <section aria-labelledby="editor-heading">

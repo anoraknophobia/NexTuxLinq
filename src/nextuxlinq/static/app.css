@@ -213,6 +213,37 @@ button:hover:not(:disabled) { border-color: #65ded5; }
   flex-wrap: wrap;
   gap: .45rem;
 }
+.profile-advanced, .preset-browser {
+  margin-top: .9rem;
+  padding: .8rem;
+  border: 1px solid #314758;
+  border-radius: .55rem;
+  background: #0d151d;
+}
+.profile-advanced summary { cursor: pointer; color: #9fdad5; }
+.advanced-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+  align-items: end;
+  margin-top: .75rem;
+}
+.advanced-actions label { display: grid; gap: .3rem; min-width: 12rem; }
+.preset-browser h3 { margin: 0 0 .65rem; }
+.preset-list { display: grid; gap: .4rem; }
+.preset-option {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) 3fr auto;
+  gap: .7rem;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+}
+.preset-option[aria-selected="true"] {
+  border-color: #65ded5;
+  background: #123b3a;
+}
+.preset-description { color: #9ab0c1; font-size: .82rem; }
 .region-toolbar { margin: .8rem 0; }
 .region-toolbar button, .profile-actions button, .helper-actions button {
   padding: .5rem .65rem;
@@ -365,6 +396,7 @@ textarea {
   header, .section-heading { align-items: flex-start; flex-direction: column; }
   .compact-controls, .editor-workspace { grid-template-columns: 1fr; }
   .region-inspector { max-height: none; }
+  .preset-option { grid-template-columns: 1fr; }
 }
 @media (max-width: 480px) {
   .status-grid, .technical-grid, .form-grid {

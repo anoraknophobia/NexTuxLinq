@@ -10,7 +10,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from nextuxlinq.config_store import ConfigSaveError, ConfigStore
+from nextuxlinq.config_store import (
+    ConfigSaveError,
+    ConfigStore,
+    ManagedBackup,
+    ManagedBackupError,
+)
 from nextuxlinq.defaults import (
     default_configuration,
     legacy_equivalent_configuration_v2,
@@ -229,6 +234,28 @@ class NexTuxLinqService:
     def get_widget_definitions(self) -> tuple[Any, ...]:
         """Return immutable canonical definitions for editor metadata."""
         return self._widget_registry.definitions
+
+    def list_backups(self) -> tuple[ManagedBackup, ...]:
+        """Return managed backup metadata without exposing paths."""
+        return self.config_store.list_backups()
+
+    def create_backup(self, name: str) -> ManagedBackup:
+        """Back up the last successfully saved canonical configuration."""
+        with self._coordination_lock:
+            saved = self._saved_configuration
+        if saved is None:
+            raise ManagedBackupError("no_saved_configuration") from None
+        return self.config_store.create_backup(name, saved)
+
+    def restore_backup(self, backup_id: str) -> ConfigurationDocumentV2:
+        """Validate a backup through schema and compositor and return a draft."""
+        configuration = self.config_store.restore_backup(backup_id)
+        self.validate_configuration(configuration)
+        return configuration
+
+    def delete_backup(self, backup_id: str) -> None:
+        """Delete one validated user-managed backup."""
+        self.config_store.delete_backup(backup_id)
 
     @property
     def render_task(self) -> asyncio.Task[None] | None:

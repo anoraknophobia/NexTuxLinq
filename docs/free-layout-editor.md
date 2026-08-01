@@ -1,5 +1,8 @@
 # Visual free-layout editor
 
+Profile presets, JSON transfer, managed backups, and draft-loss behavior are
+documented in [Profile management, transfer, presets, and backups](profile-management.md).
+
 The active NexTuxLinq web GUI includes a visual editor for the Phanteks
 Matrix900's exact 90×10 RGB888 canvas. A profile contains an ordered list of
 regions; each region can be added, duplicated, selected, moved, resized,
