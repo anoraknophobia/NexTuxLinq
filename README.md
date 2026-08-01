@@ -113,6 +113,13 @@ remain stored and return when the effect is disabled. Animated effects use the
 existing continuous scheduler and the preview and Matrix900 derive from the
 same framebuffer. See [`docs/display-effects.md`](docs/display-effects.md).
 
+### Showcase
+
+![NexTuxLinq Rainbow display preview](docs/images/rainbow-showcase.png)
+
+Rendered display preview of a NexTuxLinq Matrix900 layout using the global
+Foreground Rainbow effect.
+
 Text widgets use immutable native 3×5, 3×7, 5×7, 4×9, 5×9, and 5×10 bitmap
 fonts. Auto selects the largest fitting native fixture from backend metadata;
 a 25×10 `HH:MM` Clock resolves to the true 5×10 font without scaling.
