@@ -34,7 +34,7 @@ from nextuxlinq.rendering_v2.fonts.text import (
 from nextuxlinq.widget_models import FontChoice
 
 REQUIRED_3X5 = frozenset(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-_:!?/"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-_:!?/°"
 )
 
 EXPECTED_3X5 = {
@@ -82,6 +82,7 @@ EXPECTED_3X5 = {
     "Y": ("101", "101", "010", "010", "010"),
     "Z": ("111", "001", "010", "100", "111"),
     "_": ("000", "000", "000", "000", "111"),
+    "°": ("111", "101", "111", "000", "000"),
 }
 
 
@@ -232,10 +233,14 @@ def test_legacy_3x7_is_exactly_equivalent_to_active_renderer() -> None:
         FontChoice.LEGACY_3X7
     )
 
-    assert LEGACY_3X7_ROWS == FONT_3X7
+    assert {
+        character: rows for character, rows in LEGACY_3X7_ROWS.items()
+        if character != "°"
+    } == FONT_3X7
     assert {
         character: glyph.to_strings()
         for character, glyph in definition.glyphs.items()
+        if character != "°"
     } == dict(FONT_3X7)
     assert definition.character_spacing == 1
 
@@ -245,14 +250,19 @@ def test_legacy_5x7_is_exactly_equivalent_to_active_renderer() -> None:
         FontChoice.LEGACY_5X7
     )
 
-    assert LEGACY_5X7_ROWS == FONT_5X7
+    assert {
+        character: rows for character, rows in LEGACY_5X7_ROWS.items()
+        if character != "°"
+    } == FONT_5X7
     assert {
         character: glyph.to_strings()
         for character, glyph in definition.glyphs.items()
+        if character != "°"
     } == dict(FONT_5X7)
     assert {
         character: glyph.width
         for character, glyph in definition.glyphs.items()
+        if character != "°"
     } == {
         character: len(rows[0])
         for character, rows in FONT_5X7.items()
@@ -292,21 +302,21 @@ def test_compact_3x5_has_complete_exact_checked_in_fixture() -> None:
             NATIVE_4X9_ROWS,
             4,
             9,
-            "6676524eed29938ce199d8165dd8ffb1f8fe6a5f96ad0d2e83738ae9b7455c1e",
+            "a807f64706c35b47a2466d09c6a6b66aaefc42f4d90a8c7d25d49c012e04042f",
         ),
         (
             FontChoice.NATIVE_5X9,
             NATIVE_5X9_ROWS,
             5,
             9,
-            "70449262b1a2ee5202bbf96a0d1c451a64aa34f62073ac0e411856a6f0f57700",
+            "c4edeef23bb70befec53650a53eddca7c8280f370675047d91439e1bbcef0e3a",
         ),
         (
             FontChoice.NATIVE_5X10,
             NATIVE_5X10_ROWS,
             5,
             10,
-            "15d9dddd2a6d849959c895f2ebb6880fadbf2f187a745dfead30fe32fa24631d",
+            "3095a7dd2d4220ca12bf7c7cbdc85d8e875dc76134a78c46ad155a2972f92511",
         ),
     ],
 )
@@ -317,7 +327,7 @@ def test_larger_native_fonts_are_exact_complete_immutable_fixtures(
     height: int,
     fixture_hash: str,
 ) -> None:
-    required = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-_:!?/%")
+    required = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-_:!?/%°")
     definition = create_builtin_font_registry().resolve(font_id)
     encoded = json.dumps(
         dict(rows), sort_keys=True, separators=(",", ":")
@@ -332,6 +342,24 @@ def test_larger_native_fonts_are_exact_complete_immutable_fixtures(
     } == dict(rows)
     assert isinstance(rows, MappingProxyType)
     assert not (set("abcdefghijklmnopqrstuvwxyz") & set(rows))
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        (LEGACY_3X7_ROWS, ("111", "101", "111", *(["000"] * 4))),
+        (LEGACY_5X7_ROWS, ("111", "101", "111", *(["000"] * 4))),
+        (COMPACT_3X5_ROWS, ("111", "101", "111", "000", "000")),
+        (NATIVE_4X9_ROWS, ("111", "101", "111", *(["000"] * 6))),
+        (NATIVE_5X9_ROWS, ("111", "101", "111", *(["000"] * 6))),
+        (NATIVE_5X10_ROWS, ("111", "101", "111", *(["000"] * 7))),
+    ],
+)
+def test_degree_glyph_is_an_exact_checked_in_fixture(
+    rows: MappingProxyType,
+    expected: tuple[str, ...],
+) -> None:
+    assert rows["°"] == expected
 
 
 def test_auto_font_priority_is_explicit_and_largest_first() -> None:

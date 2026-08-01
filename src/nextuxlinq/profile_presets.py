@@ -137,7 +137,7 @@ BUILTIN_PRESETS = (
                 _settings(
                     WidgetType.SYSTEM_METRIC,
                     metric="cpu_temperature",
-                    label="CPU TEMP",
+                    label="CPU",
                     font=FontChoice.COMPACT_3X5.value,
                 ),
                 "CPU Temperature",
@@ -244,7 +244,7 @@ BUILTIN_PRESETS = (
                 _settings(
                     WidgetType.SYSTEM_METRIC,
                     metric="storage_temperature",
-                    label="DISK TEMP",
+                    label="DISK",
                     font=FontChoice.COMPACT_3X5.value,
                 ),
                 "Storage Temperature",

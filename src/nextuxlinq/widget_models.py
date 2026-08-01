@@ -11,7 +11,11 @@ from typing import Mapping, TypeAlias
 
 from nextuxlinq.models import MAX_SCROLL_SPEED, MAX_TEXT_LENGTH, MIN_SCROLL_SPEED
 from nextuxlinq.models import normalize_color
-from nextuxlinq.system_metrics import BAR_METRICS, MetricId
+from nextuxlinq.system_metrics import (
+    BAR_METRICS,
+    MetricId,
+    canonical_metric_label,
+)
 
 MAX_TIME_ZONE_LENGTH = 128
 MAX_TRAILING_GAP = 90
@@ -148,6 +152,12 @@ class DateFormat(StrEnum):
 class MetricDisplayMode(StrEnum):
     VALUE_ONLY = "value_only"
     LABEL_AND_VALUE = "label_and_value"
+
+
+class TemperatureUnit(StrEnum):
+    DEGREE_ONLY = "degree_only"
+    CELSIUS = "celsius"
+    FAHRENHEIT = "fahrenheit"
 
 
 class BarOrientation(StrEnum):
@@ -509,13 +519,21 @@ class SystemMetricSettings:
     overflow: TextOverflow = TextOverflow.ERROR
     precision: int = 0
     unavailable_text: str = "--"
+    temperature_unit: TemperatureUnit = TemperatureUnit.CELSIUS
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metric", _enum(MetricId, self.metric, "metric"))
         object.__setattr__(
             self, "display_mode", _enum(MetricDisplayMode, self.display_mode, "display_mode")
         )
-        object.__setattr__(self, "label", _content(self.label, "label"))
+        object.__setattr__(
+            self,
+            "label",
+            canonical_metric_label(
+                self.metric,
+                _content(self.label, "label"),
+            ),
+        )
         object.__setattr__(self, "color", normalize_color(self.color, "color"))
         object.__setattr__(self, "font", _enum(FontChoice, self.font, "font"))
         object.__setattr__(
@@ -535,6 +553,15 @@ class SystemMetricSettings:
         object.__setattr__(
             self, "unavailable_text", _content(self.unavailable_text, "unavailable_text")
         )
+        object.__setattr__(
+            self,
+            "temperature_unit",
+            _enum(
+                TemperatureUnit,
+                self.temperature_unit,
+                "temperature_unit",
+            ),
+        )
 
     @classmethod
     def from_dict(cls, raw: object) -> SystemMetricSettings:
@@ -542,10 +569,26 @@ class SystemMetricSettings:
         allowed = {
             "metric", "display_mode", "label", "color", "font",
             "horizontal_alignment", "vertical_alignment", "overflow",
-            "precision", "unavailable_text",
+            "precision", "unavailable_text", "temperature_unit",
         }
-        _fields(values, allowed, "system_metric settings")
-        return cls(**{key: values[key] for key in allowed})  # type: ignore[arg-type]
+        unknown = sorted(set(values) - allowed)
+        required = allowed - {"temperature_unit"}
+        missing = sorted(required - set(values))
+        if unknown:
+            raise ValueError(
+                "system_metric settings contains unknown fields: "
+                f"{', '.join(unknown)}."
+            )
+        if missing:
+            raise ValueError(
+                "system_metric settings is missing fields: "
+                f"{', '.join(missing)}."
+            )
+        normalized = {key: values[key] for key in required}
+        normalized["temperature_unit"] = values.get(
+            "temperature_unit", TemperatureUnit.CELSIUS.value
+        )
+        return cls(**normalized)  # type: ignore[arg-type]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -559,6 +602,7 @@ class SystemMetricSettings:
             "overflow": self.overflow.value,
             "precision": self.precision,
             "unavailable_text": self.unavailable_text,
+            "temperature_unit": self.temperature_unit.value,
         }
 
 

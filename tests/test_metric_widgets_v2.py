@@ -12,6 +12,8 @@ from nextuxlinq.rendering_v2.registry import RenderContext, create_widget_regist
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.widgets.errors import WidgetRenderingError
 from nextuxlinq.rendering_v2.widgets.system_metric import (
+    analyze_system_metric_font_fit,
+    format_temperature_value,
     metric_bar_fill_length,
     metric_text,
     metric_text_format_envelope,
@@ -63,11 +65,49 @@ def context(width: int, height: int, metrics=None) -> RenderContext:
 
 
 @pytest.mark.parametrize(
+    ("metric", "legacy_label", "short_label"),
+    [
+        ("cpu_temperature", "CPU TEMP", "CPU"),
+        ("gpu_temperature", "GPU TEMP", "GPU"),
+        ("storage_temperature", "DISK TEMP", "DISK"),
+    ],
+)
+def test_temperature_legacy_default_labels_resolve_without_rewriting_custom_labels(
+    metric: str,
+    legacy_label: str,
+    short_label: str,
+) -> None:
+    legacy = SystemMetricSettings(
+        metric=metric, label=legacy_label
+    )  # type: ignore[arg-type]
+    assert legacy.label == short_label
+    custom = SystemMetricSettings(
+        metric=metric, label=f"{legacy_label} CUSTOM"
+    )  # type: ignore[arg-type]
+    assert custom.label == f"{legacy_label} CUSTOM"
+
+
+def test_exact_long_label_for_a_different_metric_remains_custom() -> None:
+    settings = SystemMetricSettings(
+        metric="gpu_temperature", label="CPU TEMP"
+    )  # type: ignore[arg-type]
+    assert settings.label == "CPU TEMP"
+
+
+def test_old_system_metric_settings_default_to_celsius() -> None:
+    serialized = SystemMetricSettings().to_dict()
+    serialized.pop("temperature_unit")
+    restored = SystemMetricSettings.from_dict(serialized)
+    assert restored.temperature_unit.value == "celsius"
+    assert restored.to_dict()["temperature_unit"] == "celsius"
+
+
+@pytest.mark.parametrize(
     ("metric", "value", "expected"),
     [
         ("cpu_usage", 42.0, "CPU 42%"),
         ("memory_usage", 63.0, "RAM 63%"),
-        ("cpu_temperature", 54.0, "CPU TEMP 54C"),
+        ("cpu_temperature", 54.0, "CPU54°C"),
         ("uptime", 221.0, "UPTIME 03:41"),
     ],
 )
@@ -75,7 +115,7 @@ def test_system_metric_formats_every_metric(metric: str, value: float, expected:
     labels = {
         "cpu_usage": "CPU",
         "memory_usage": "RAM",
-        "cpu_temperature": "CPU TEMP",
+        "cpu_temperature": "CPU",
         "uptime": "UPTIME",
     }
     settings = SystemMetricSettings(metric=metric, label=labels[metric])  # type: ignore[arg-type]
@@ -87,7 +127,7 @@ def test_system_metric_formats_every_metric(metric: str, value: float, expected:
     assert rendered == ("03:41" if metric == "uptime" else {
         "cpu_usage": "42.0%",
         "memory_usage": "63.0%",
-        "cpu_temperature": "54.0C",
+        "cpu_temperature": "54.0°C",
     }[metric])
 
 
@@ -99,9 +139,9 @@ def test_system_metric_formats_every_metric(metric: str, value: float, expected:
         ("network_receive_rate", "NET RX", 1536.0, 1, "NET RX 1.5KB/S"),
         ("network_transmit_rate", "NET TX", 2 * 1024 ** 2, 1, "NET TX 2.0MB/S"),
         ("gpu_usage", "GPU", 61.0, 0, "GPU 61%"),
-        ("gpu_temperature", "GPU TEMP", 54.0, 0, "GPU TEMP 54C"),
+        ("gpu_temperature", "GPU", 54.0, 0, "GPU54°C"),
         ("gpu_memory_usage", "VRAM", 40.0, 0, "VRAM 40%"),
-        ("storage_temperature", "DISK TEMP", 38.0, 0, "DISK TEMP 38C"),
+        ("storage_temperature", "DISK", 38.0, 0, "DISK38°C"),
     ],
 )
 def test_system_metric_formats_every_extended_metric(
@@ -284,9 +324,9 @@ def test_percentage_auto_font_is_stable_for_one_two_and_three_digits(
 @pytest.mark.parametrize(
     ("metric", "label", "values"),
     [
-        ("cpu_temperature", "CPU TEMP", (9.0, 54.0, 150.0)),
-        ("gpu_temperature", "GPU TEMP", (5.0, 64.0, 150.0)),
-        ("storage_temperature", "DISK TEMP", (5.0, 38.0, 100.0)),
+        ("cpu_temperature", "CPU", (9.0, 54.0, 150.0)),
+        ("gpu_temperature", "GPU", (5.0, 64.0, 150.0)),
+        ("storage_temperature", "DISK", (5.0, 38.0, 100.0)),
     ],
 )
 def test_temperature_auto_font_is_snapshot_independent(
@@ -322,6 +362,203 @@ def test_temperature_auto_font_is_snapshot_independent(
             placement.origin_x for placement in layouts[1].placements
             if placement.role == "suffix"
         )
+
+
+@pytest.mark.parametrize(
+    ("unit", "value", "precision", "expected"),
+    [
+        ("degree_only", 43.0, 0, "43°"),
+        ("celsius", 43.0, 0, "43°C"),
+        ("celsius", 43.25, 1, "43.2°C"),
+        ("fahrenheit", 43.0, 0, "109°F"),
+        ("fahrenheit", 30.25, 1, "86.5°F"),
+    ],
+)
+def test_temperature_units_format_from_canonical_celsius(
+    unit: str,
+    value: float,
+    precision: int,
+    expected: str,
+) -> None:
+    settings = SystemMetricSettings(
+        metric="cpu_temperature",
+        label="CPU",
+        temperature_unit=unit,
+        precision=precision,
+    )  # type: ignore[arg-type]
+    assert format_temperature_value(settings, value) == expected
+    assert metric_text(
+        settings,
+        context(90, 10, snapshot(cpu_temperature=value)),
+    ) == f"CPU{expected}"
+
+
+def test_compact_celsius_cpu_temperature_fits_25_by_5_exactly() -> None:
+    settings = SystemMetricSettings(
+        metric="cpu_temperature", label="CPU", temperature_unit="celsius"
+    )  # type: ignore[arg-type]
+    analysis = analyze_system_metric_font_fit(
+        settings, region_width=25, region_height=5
+    )
+    assert analysis.resolved_auto_font.value == "3x5"
+    candidate = next(
+        item for item in analysis.candidates if item.font_id.value == "3x5"
+    )
+    assert candidate.minimum_width == 25
+    layout = layout_system_metric_text(
+        settings,
+        context(25, 5, snapshot(cpu_temperature=43)),
+        region_width=25,
+        region_height=5,
+    )
+    assert layout.font_id.value == "3x5"
+    assert layout.measured_width == 25
+    assert all(placement.character != " " for placement in layout.placements)
+    degree = next(
+        placement for placement in layout.placements
+        if placement.role == "degree"
+    )
+    unit = next(
+        placement for placement in layout.placements
+        if placement.role == "suffix"
+    )
+    assert unit.origin_x == degree.origin_x + 3
+
+
+def test_temperature_unit_changes_exact_minimum_width_guidance() -> None:
+    expected = {"degree_only": 22, "celsius": 25, "fahrenheit": 29}
+    for unit, width in expected.items():
+        settings = SystemMetricSettings(
+            metric="cpu_temperature", label="CPU", temperature_unit=unit
+        )  # type: ignore[arg-type]
+        analysis = analyze_system_metric_font_fit(
+            settings, region_width=25, region_height=5
+        )
+        candidate = next(
+            item for item in analysis.candidates
+            if item.font_id.value == "3x5"
+        )
+        assert candidate.minimum_width == width
+        assert candidate.overall_fit is (unit != "fahrenheit")
+
+
+def test_explicit_temperature_font_keeps_selection_and_suggests_smaller_fit() -> None:
+    settings = SystemMetricSettings(
+        metric="cpu_temperature",
+        label="CPU",
+        temperature_unit="celsius",
+        font="5x7",
+    )  # type: ignore[arg-type]
+    analysis = analyze_system_metric_font_fit(
+        settings, region_width=36, region_height=7
+    )
+    selected = next(
+        item for item in analysis.candidates if item.font_id.value == "5x7"
+    )
+    assert analysis.selected_explicit_font.value == "5x7"
+    assert analysis.resolved_auto_font is None
+    assert selected.minimum_width == 37
+    assert selected.rejection_category == "too_wide"
+    assert analysis.best_smaller_alternative.value == "3x5"
+    with pytest.raises(WidgetRenderingError) as raised:
+        render_system_metric(
+            RegionSurface(36, 7),
+            settings,
+            context(36, 7, snapshot(cpu_temperature=43)),
+        )
+    assert raised.value.category == "content_too_wide"
+
+
+def test_fahrenheit_digit_cells_and_anchors_are_stable() -> None:
+    settings = SystemMetricSettings(
+        metric="cpu_temperature",
+        label="CPU",
+        temperature_unit="fahrenheit",
+        font="3x5",
+    )  # type: ignore[arg-type]
+    layouts = [
+        layout_system_metric_text(
+            settings,
+            context(40, 5, snapshot(cpu_temperature=value)),
+            region_width=40,
+            region_height=5,
+        )
+        for value in (30.0, 42.8)
+    ]
+    assert [
+        format_temperature_value(settings, value)
+        for value in (30.0, 42.8)
+    ] == ["86°F", "109°F"]
+    assert {layout.font_id.value for layout in layouts} == {"3x5"}
+    assert {layout.measured_width for layout in layouts} == {29}
+    first_digits = [p for p in layouts[0].placements if p.role == "digit"]
+    second_digits = [p for p in layouts[1].placements if p.role == "digit"]
+    assert [p.visible for p in first_digits] == [False, True, True]
+    assert [p.visible for p in second_digits] == [True, True, True]
+    assert [p.origin_x for p in first_digits] == [p.origin_x for p in second_digits]
+    degree_origins = [
+        next(
+            placement.origin_x for placement in layout.placements
+            if placement.role == "degree"
+        )
+        for layout in layouts
+    ]
+    assert degree_origins[0] == degree_origins[1]
+
+
+def test_temperature_unavailable_and_available_keep_the_same_auto_font() -> None:
+    settings = SystemMetricSettings(
+        metric="cpu_temperature", label="CPU", temperature_unit="celsius",
+        overflow="clip",
+    )  # type: ignore[arg-type]
+    layouts = [
+        layout_system_metric_text(
+            settings,
+            context(25, 5, current_snapshot),
+            region_width=25,
+            region_height=5,
+        )
+        for current_snapshot in (
+            snapshot(),
+            snapshot(cpu_temperature=5),
+            snapshot(cpu_temperature=99),
+            snapshot(cpu_temperature=100),
+        )
+    ]
+    assert {layout.font_id.value for layout in layouts} == {"3x5"}
+    assert metric_text(settings, context(25, 5, snapshot())) == "CPU--"
+
+
+def test_temperature_hidden_digit_cell_draws_no_pixels() -> None:
+    settings = SystemMetricSettings(
+        metric="cpu_temperature",
+        label="CPU",
+        temperature_unit="celsius",
+        font="3x5",
+        horizontal_alignment="start",
+        vertical_alignment="top",
+    )  # type: ignore[arg-type]
+    layout = layout_system_metric_text(
+        settings,
+        context(25, 5, snapshot(cpu_temperature=5)),
+        region_width=25,
+        region_height=5,
+    )
+    hidden = next(
+        placement for placement in layout.placements
+        if placement.role == "digit" and not placement.visible
+    )
+    background = RgbColor(7, 8, 9)
+    surface = RegionSurface(25, 5, background)
+    render_system_metric(
+        surface, settings, context(25, 5, snapshot(cpu_temperature=5))
+    )
+    payload = surface.to_bytes()
+    assert all(
+        payload[((y * 25 + x) * 3):][:3] == background.to_bytes()
+        for y in range(hidden.origin_y, hidden.origin_y + layout.glyph_height)
+        for x in range(hidden.origin_x, hidden.origin_x + hidden.advance)
+    )
 
 
 def test_unavailable_and_available_snapshots_use_the_same_auto_font(
@@ -531,6 +768,21 @@ def test_system_metric_overflow_modes_use_existing_text_rules() -> None:
 )
 def test_metric_bar_rounding_and_clamping(value, extent: int, expected: int) -> None:
     assert metric_bar_fill_length(value, MetricBarSettings(), extent) == expected
+
+
+def test_temperature_metric_bar_keeps_canonical_celsius_value() -> None:
+    settings = MetricBarSettings(
+        metric="cpu_temperature", minimum=0, maximum=100
+    )  # type: ignore[arg-type]
+    surface = RegionSurface(10, 1)
+    render_metric_bar(
+        surface,
+        settings,
+        context(10, 1, snapshot(cpu_temperature=50)),
+    )
+    assert surface.to_bytes() == (
+        bytes.fromhex("00D4C7") * 5 + bytes.fromhex("000000") * 5
+    )
 
 
 @pytest.mark.parametrize(

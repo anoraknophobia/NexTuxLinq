@@ -391,6 +391,17 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
         "gpu_usage", "gpu_temperature", "gpu_memory_usage",
         "storage_temperature",
     ]
+    assert body["temperature_unit_definitions"] == [
+        {"id": "degree_only", "label": "Degree only (°)", "suffix": "°"},
+        {"id": "celsius", "label": "Celsius (°C)", "suffix": "°C"},
+        {"id": "fahrenheit", "label": "Fahrenheit (°F)", "suffix": "°F"},
+    ]
+    metric_labels = {
+        metric["id"]: metric["label"] for metric in body["metric_definitions"]
+    }
+    assert metric_labels["cpu_temperature"] == "CPU"
+    assert metric_labels["gpu_temperature"] == "GPU"
+    assert metric_labels["storage_temperature"] == "DISK"
     assert [metric["id"] for metric in body["metric_definitions"]] == [
         "cpu_usage", "memory_usage", "cpu_temperature", "uptime",
         "load_average_1m", "storage_usage", "network_receive_rate",
@@ -916,6 +927,54 @@ def test_candidate_validation_reports_each_invalid_renderer_region(
     assert [error["region_id"] for error in errors] == ["metric-a", "metric-b"]
     assert all(error["minimum_width"] == 35 for error in errors)
     assert provider.calls == 1
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_temperature_unit_updates_candidate_validation_width(api_client) -> None:
+    client, service, store, worker = api_client
+    candidate = legacy_equivalent_configuration_v2().to_dict()
+    settings = SystemMetricSettings(
+        metric="cpu_temperature",
+        label="CPU",
+        temperature_unit="celsius",
+    ).to_dict()  # type: ignore[arg-type]
+    candidate["profiles"]["default"]["regions"] = [{
+        "id": "temperature", "name": "Temperature",
+        "x": 0, "y": 0, "width": 25, "height": 5,
+        "enabled": True, "background_color": None,
+        "widget": {"type": "system_metric", "settings": settings},
+    }]
+
+    celsius = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+    assert celsius.status_code == 200
+    assert celsius.json()["resolved_fonts"] == {"temperature": "3x5"}
+
+    settings["temperature_unit"] = "degree_only"
+    degree_only = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+    assert degree_only.status_code == 200
+    compact = next(
+        item for item in degree_only.json()["font_fit"]["temperature"]["candidates"]
+        if item["font_id"] == "3x5"
+    )
+    assert compact["minimum_width"] == 22
+
+    settings["temperature_unit"] = "fahrenheit"
+    fahrenheit = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+    assert fahrenheit.status_code == 422
+    error = fahrenheit.json()["field_errors"][0]
+    assert error["category"] == "content_too_wide"
+    assert error["minimum_width"] == 29
+    assert error["font_fit"]["no_font_fits"] is True
     assert store.saved == []
     assert worker.frames == []
 

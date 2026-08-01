@@ -259,6 +259,7 @@ def test_canonical_defaults_serialize_exactly() -> None:
         "overflow": "error",
         "precision": 0,
         "unavailable_text": "--",
+        "temperature_unit": "celsius",
     }
     assert registry.resolve(WidgetType.METRIC_BAR).default_settings.to_dict() == {
         "metric": "cpu_usage",

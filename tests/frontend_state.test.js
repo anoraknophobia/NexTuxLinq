@@ -71,7 +71,7 @@ const widgetMetadata = {
         metric: "cpu_usage", display_mode: "label_and_value", label: "CPU",
         color: "#FFFFFF", font: "auto", horizontal_alignment: "center",
         vertical_alignment: "center", overflow: "error", precision: 0,
-        unavailable_text: "--",
+        unavailable_text: "--", temperature_unit: "celsius",
       },
       minimum_width: 1, minimum_height: 5,
     },
@@ -93,7 +93,7 @@ const widgetMetadata = {
     {id: "memory_usage", label: "RAM", value_type: "percentage",
       unit: "%", default_precision: 0, supports_bar: true,
       default_minimum: 0, default_maximum: 100},
-    {id: "cpu_temperature", label: "CPU TEMP", value_type: "temperature",
+    {id: "cpu_temperature", label: "CPU", value_type: "temperature",
       unit: "C", default_precision: 0, supports_bar: true,
       default_minimum: 0, default_maximum: 100},
     {id: "uptime", label: "UPTIME", value_type: "duration", unit: "",
@@ -114,15 +114,20 @@ const widgetMetadata = {
     {id: "gpu_usage", label: "GPU", value_type: "percentage", unit: "%",
       default_precision: 0, supports_bar: true,
       default_minimum: 0, default_maximum: 100},
-    {id: "gpu_temperature", label: "GPU TEMP", value_type: "temperature", unit: "C",
+    {id: "gpu_temperature", label: "GPU", value_type: "temperature", unit: "C",
       default_precision: 0, supports_bar: true,
       default_minimum: 0, default_maximum: 100},
     {id: "gpu_memory_usage", label: "VRAM", value_type: "percentage", unit: "%",
       default_precision: 0, supports_bar: true,
       default_minimum: 0, default_maximum: 100},
-    {id: "storage_temperature", label: "DISK TEMP", value_type: "temperature",
+    {id: "storage_temperature", label: "DISK", value_type: "temperature",
       unit: "C", default_precision: 0, supports_bar: true,
       default_minimum: 0, default_maximum: 100},
+  ],
+  temperature_unit_definitions: [
+    {id: "degree_only", label: "Degree only (°)", suffix: "°"},
+    {id: "celsius", label: "Celsius (°C)", suffix: "°C"},
+    {id: "fahrenheit", label: "Fahrenheit (°F)", suffix: "°F"},
   ],
   bar_metric_ids: [
     "cpu_usage", "memory_usage", "cpu_temperature", "storage_usage",
@@ -2495,6 +2500,10 @@ test("metric widget validation rejects unknown metrics and invalid bar ranges", 
     settings: {...defaults.system_metric, metric: "fan_usage"},
   }, widgetMetadata), "metric");
   assert.equal(freeLayout.validateWidgetSettings({
+    type: "system_metric",
+    settings: {...defaults.system_metric, temperature_unit: "kelvin"},
+  }, widgetMetadata), "temperature_unit");
+  assert.equal(freeLayout.validateWidgetSettings({
     type: "metric_bar",
     settings: {...defaults.metric_bar, metric: "uptime"},
   }, widgetMetadata), "metric");
@@ -2502,6 +2511,35 @@ test("metric widget validation rejects unknown metrics and invalid bar ranges", 
     type: "metric_bar",
     settings: {...defaults.metric_bar, minimum: 10, maximum: 10},
   }, widgetMetadata), "maximum");
+});
+
+test("temperature unit examples and visibility use backend metadata", () => {
+  const settings = {
+    ...freeLayout.widgetDefaultMap(widgetMetadata).system_metric,
+    metric: "cpu_temperature",
+    label: "CPU",
+  };
+  assert.equal(freeLayout.temperatureFormatExample(
+    settings, widgetMetadata.temperature_unit_definitions,
+  ), "CPU43°C");
+  assert.equal(freeLayout.temperatureFormatExample(
+    {...settings, temperature_unit: "degree_only", precision: 1},
+    widgetMetadata.temperature_unit_definitions,
+  ), "CPU43.0°");
+  assert.equal(freeLayout.temperatureFormatExample(
+    {...settings, temperature_unit: "fahrenheit"},
+    widgetMetadata.temperature_unit_definitions,
+  ), "CPU109°F");
+  assert.equal(freeLayout.temperatureFormatExample(
+    {...settings, display_mode: "value_only"},
+    widgetMetadata.temperature_unit_definitions,
+  ), "43°C");
+  assert.equal(freeLayout.temperatureUnitVisible(
+    "cpu_temperature", widgetMetadata.metric_definitions,
+  ), true);
+  assert.equal(freeLayout.temperatureUnitVisible(
+    "cpu_usage", widgetMetadata.metric_definitions,
+  ), false);
 });
 
 test("profile actions keep canonical layouts and new profiles empty", () => {
@@ -2585,12 +2623,15 @@ test("metric availability diagnostics render backend labels and sanitized states
   await fixture.editor.initialize();
 
   assert.equal(fixture.metricAvailability.children.length, 12);
-  const rows = Object.fromEntries(fixture.metricAvailability.children.map(
+  const rowEntries = fixture.metricAvailability.children.map(
     (row) => [row.children[0].textContent, row.children[1].textContent]
-  ));
-  assert.equal(rows.CPU, "Available");
+  );
+  const rows = Object.fromEntries(rowEntries);
+  assert.equal(rowEntries.some(
+    ([label, status]) => label === "CPU" && status === "Available"
+  ), true);
   assert.equal(rows["NET RX"], "Awaiting sample");
-  assert.equal(rows["GPU TEMP"], "Unavailable");
+  assert.equal(rows.GPU, "Unavailable");
   assert.equal(JSON.stringify(rows).includes("/sys"), false);
   assert.equal(JSON.stringify(rows).includes("/proc"), false);
   assert.equal(fixture.metricAvailability.replaceCalls, 1);

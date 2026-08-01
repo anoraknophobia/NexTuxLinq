@@ -321,6 +321,12 @@ class MetricEditorDefinition(StrictModel):
     availability_reason: str | None
 
 
+class TemperatureUnitEditorDefinition(StrictModel):
+    id: str
+    label: str
+    suffix: str
+
+
 class MetricDiagnostic(StrictModel):
     id: str
     label: str
@@ -342,6 +348,7 @@ class FreeLayoutMetadataResponse(StrictModel):
     widget_definitions: list[WidgetEditorDefinition]
     font_definitions: list[FontEditorDefinition]
     metric_definitions: list[MetricEditorDefinition]
+    temperature_unit_definitions: list[TemperatureUnitEditorDefinition]
     bar_metric_ids: list[str]
 
 

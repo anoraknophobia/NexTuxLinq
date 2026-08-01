@@ -429,6 +429,19 @@ def test_metric_dropdowns_are_backend_driven_without_extended_id_duplication() -
     assert page.index('id="preview-heading"') < page.index('id="profile-heading"')
 
 
+def test_temperature_unit_control_and_safe_example_are_backend_driven() -> None:
+    page, _, _ = _frontend_source()
+    editor = _editor_source()
+
+    assert "data-temperature-unit-field" in page
+    assert "data-temperature-unit-select" in page
+    assert "data-temperature-example" in page
+    assert "state.metadata.temperature_unit_definitions" in editor
+    assert "example.textContent" in editor
+    assert "temperatureUnitVisible(" in editor
+    assert '<option value="fahrenheit"' not in page
+
+
 def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:
     repository = Path(__file__).resolve().parents[1]
     wheel_directory = tmp_path / "wheel"

@@ -14,22 +14,24 @@ shows only settings belonging to the selected widget.
 System Metric formats one immutable render-cycle snapshot as value-only or
 label-and-value text. It supports CPU, memory, load, fixed-root storage,
 network receive/transmit, generic GPU/VRAM, uptime, and available CPU, GPU, and
-storage temperatures. Percentage values use `%`; temperatures use the
-font-safe ASCII suffix `C`; network rates automatically use `KB/S`, `MB/S`, or
-`GB/S`. Unavailable values use configurable safe text, defaulting to `--`.
+storage temperatures. Percentage values use `%`; temperatures use compact
+`CPU43°`, `CPU43°C`, or `CPU109°F` token layouts; network rates use `KB/S`,
+`MB/S`, or `GB/S`. Unavailable values use configurable safe text, defaulting
+to `--`.
 Uptime is `MM:SS` below one hour, `HH:MM` below one day, and
 `<days>D <hours>H` from one day onward, with a two-digit hour. Precision is
 zero to two decimals for numeric values. Existing intrinsic fonts, alignments,
 and overflow modes apply, and five-pixel rows can use `3x5`.
 
 Font selection never depends on the current sample. In a ten-pixel-high region,
-Auto keeps `5x7` whenever its glyph coverage is valid and never shrinks merely
-to fit a wider value. Percentages below ten and non-negative integer
-temperatures below ten reserve an invisible leading digit cell with no drawn
-zero pixels. A compact token gap replaces the ordinary space glyph between the
-label and number. Thus one- and two-digit values retain the same label and
-suffix positions. Validation uses this two-digit layout rather than rejecting
-a region for a hypothetical three-digit value. An actual `100` retains the
+Auto keeps one resolved font across every sampled value. Percentages below ten
+reserve an invisible leading digit cell; temperature layouts reserve two
+integer cells for Celsius/degree-only and three for Fahrenheit. Transparent
+cells draw no pixels. One compact pixel separates label and number, with no
+ordinary space between number, degree symbol, and optional unit letter. Thus
+values retain the same label and suffix positions. Validation uses the stable
+layout rather than rejecting a region for a hypothetical three-digit value.
+An actual `100` retains the
 font and follows Error, Clip, or Truncate. Explicit fonts remain authoritative.
 
 ## Metric Bar

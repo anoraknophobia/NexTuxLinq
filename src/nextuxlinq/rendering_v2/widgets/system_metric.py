@@ -36,6 +36,7 @@ from nextuxlinq.widget_models import (
     MetricBarSettings,
     MetricDisplayMode,
     SystemMetricSettings,
+    TemperatureUnit,
     TextOverflow,
 )
 
@@ -85,14 +86,55 @@ def metric_text(settings: SystemMetricSettings, context: RenderContext) -> str:
     """Return the exact safe display text for one snapshot metric."""
     snapshot = context.metrics_snapshot
     value = None if snapshot is None else snapshot.value(settings.metric)
-    rendered = (
-        settings.unavailable_text
-        if value is None
+    rendered = settings.unavailable_text if value is None else (
+        format_temperature_value(settings, value)
+        if _is_temperature(settings)
         else format_metric_value(settings.metric, value, settings.precision)
     )
     if settings.display_mode is MetricDisplayMode.LABEL_AND_VALUE:
+        if _is_temperature(settings):
+            return f"{settings.label}{rendered}"
         return f"{settings.label} {rendered}"
     return rendered
+
+
+def _is_temperature(settings: SystemMetricSettings) -> bool:
+    return (
+        METRIC_DEFINITIONS[settings.metric].value_type
+        is MetricValueType.TEMPERATURE
+    )
+
+
+def format_temperature_value(
+    settings: SystemMetricSettings,
+    celsius_value: float,
+) -> str:
+    """Format one canonical Celsius snapshot using the selected display unit."""
+    value = float(celsius_value)
+    suffix = "°"
+    if settings.temperature_unit is TemperatureUnit.CELSIUS:
+        suffix = "°C"
+    elif settings.temperature_unit is TemperatureUnit.FAHRENHEIT:
+        value = value * 9.0 / 5.0 + 32.0
+        suffix = "°F"
+    return f"{value:.{settings.precision}f}{suffix}"
+
+
+def _temperature_format_envelope(
+    settings: SystemMetricSettings,
+) -> tuple[str, ...]:
+    integer = (
+        "999"
+        if settings.temperature_unit is TemperatureUnit.FAHRENHEIT
+        else "99"
+    )
+    fraction = f".{('0' * settings.precision)}" if settings.precision else ""
+    suffix = {
+        TemperatureUnit.DEGREE_ONLY: "°",
+        TemperatureUnit.CELSIUS: "°C",
+        TemperatureUnit.FAHRENHEIT: "°F",
+    }[settings.temperature_unit]
+    return (f"{integer}{fraction}{suffix}",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,18 +199,19 @@ def _digit_slots(
     font: FontDefinition,
     digits: str,
     *,
-    hidden_leading_zero: bool,
+    minimum_cells: int,
     initial_gap: int,
 ) -> tuple[_GlyphSlot, ...]:
     cell_width = max(font.glyphs[str(digit)].width for digit in range(10))
-    characters = f"0{digits}" if hidden_leading_zero else digits
+    hidden_count = max(0, minimum_cells - len(digits))
+    characters = f"{'0' * hidden_count}{digits}"
     return tuple(
         _GlyphSlot(
             character,
             cell_width,
             (cell_width - font.glyphs[character].width) // 2,
             initial_gap if index == 0 else _COMPACT_METRIC_GAP,
-            not (hidden_leading_zero and index == 0),
+            index >= hidden_count,
             "digit",
         )
         for index, character in enumerate(characters)
@@ -193,7 +236,7 @@ def _fixed_value_slots(
         slots = list(_digit_slots(
             font,
             integer,
-            hidden_leading_zero=len(integer) == 1,
+            minimum_cells=2,
             initial_gap=initial_gap,
         ))
         if separator:
@@ -206,7 +249,7 @@ def _fixed_value_slots(
             slots.extend(_digit_slots(
                 font,
                 fraction,
-                hidden_leading_zero=False,
+                minimum_cells=0,
                 initial_gap=_COMPACT_METRIC_GAP,
             ))
         slots.extend(_ordinary_slots(
@@ -216,27 +259,64 @@ def _fixed_value_slots(
             initial_gap=_COMPACT_METRIC_GAP,
         ))
         return tuple(slots)
-    if (
-        definition.value_type is MetricValueType.TEMPERATURE
-        and settings.precision == 0
-        and value_text.endswith("C")
-        and value_text[:-1].isdigit()
-    ):
-        integer = value_text[:-1]
-        return (
-            *_digit_slots(
-                font,
-                integer,
-                hidden_leading_zero=len(integer) == 1,
-                initial_gap=initial_gap,
+    if definition.value_type is MetricValueType.TEMPERATURE:
+        suffix = {
+            TemperatureUnit.DEGREE_ONLY: "°",
+            TemperatureUnit.CELSIUS: "°C",
+            TemperatureUnit.FAHRENHEIT: "°F",
+        }[settings.temperature_unit]
+        if not value_text.endswith(suffix):
+            return None
+        numeric = value_text[:-len(suffix)]
+        sign = ""
+        if numeric.startswith("-"):
+            sign, numeric = "-", numeric[1:]
+        integer, separator, fraction = numeric.partition(".")
+        if not integer.isdigit() or (separator and not fraction.isdigit()):
+            return None
+        slots: list[_GlyphSlot] = []
+        if sign:
+            slots.extend(_ordinary_slots(
+                font, sign, role="sign", initial_gap=initial_gap
+            ))
+            initial_gap = _COMPACT_METRIC_GAP
+        slots.extend(_digit_slots(
+            font,
+            integer,
+            minimum_cells=(
+                3
+                if settings.temperature_unit is TemperatureUnit.FAHRENHEIT
+                else 2
             ),
-            *_ordinary_slots(
+            initial_gap=initial_gap,
+        ))
+        if separator:
+            slots.extend(_ordinary_slots(
                 font,
-                "C",
-                role="suffix",
+                separator,
+                role="decimal",
                 initial_gap=_COMPACT_METRIC_GAP,
-            ),
-        )
+            ))
+            slots.extend(_digit_slots(
+                font,
+                fraction,
+                minimum_cells=0,
+                initial_gap=_COMPACT_METRIC_GAP,
+            ))
+        slots.extend(_ordinary_slots(
+            font,
+            "°",
+            role="degree",
+            initial_gap=0,
+        ))
+        if len(suffix) == 2:
+            slots.extend(_ordinary_slots(
+                font,
+                suffix[1],
+                role="suffix",
+                initial_gap=0,
+            ))
+        return tuple(slots)
     return None
 
 
@@ -248,7 +328,12 @@ def _metric_slots(
     available: bool,
 ) -> tuple[_GlyphSlot, ...]:
     has_label = settings.display_mode is MetricDisplayMode.LABEL_AND_VALUE
-    prefix = f"{settings.label} " if has_label else ""
+    temperature = _is_temperature(settings)
+    prefix = (
+        settings.label
+        if has_label and temperature
+        else f"{settings.label} " if has_label else ""
+    )
     content = f"{prefix}{value_text}"
     measure_normalized_text(font, content)
     value_slots = (
@@ -269,6 +354,19 @@ def _metric_slots(
         return (
             *label_slots,
             *value_slots,
+        )
+    if temperature:
+        return (
+            *(
+                _ordinary_slots(font, settings.label, role="label")
+                if has_label else ()
+            ),
+            *_ordinary_slots(
+                font,
+                value_text,
+                role="value",
+                initial_gap=_COMPACT_METRIC_GAP if has_label else 0,
+            ),
         )
     return (
         *_ordinary_slots(font, prefix, role="label"),
@@ -298,8 +396,10 @@ def _font_envelope_widths(
                 font, settings, value_text, available=True
             ),
         )
-        for value_text in metric_value_format_envelope(
-            settings.metric, settings.precision
+        for value_text in (
+            _temperature_format_envelope(settings)
+            if _is_temperature(settings)
+            else metric_value_format_envelope(settings.metric, settings.precision)
         )
     ]
     widths.append(_slots_width(
@@ -313,12 +413,14 @@ def _font_envelope_widths(
 
 def metric_text_format_envelope(settings: SystemMetricSettings) -> tuple[str, ...]:
     """Return snapshot-independent text forms used to choose one stable font."""
-    values = (
-        *metric_value_format_envelope(settings.metric, settings.precision),
-        settings.unavailable_text,
-    )
+    values = (*(
+        _temperature_format_envelope(settings)
+        if _is_temperature(settings)
+        else metric_value_format_envelope(settings.metric, settings.precision)
+    ), settings.unavailable_text)
     if settings.display_mode is MetricDisplayMode.LABEL_AND_VALUE:
-        values = tuple(f"{settings.label} {value}" for value in values)
+        separator = "" if _is_temperature(settings) else " "
+        values = tuple(f"{settings.label}{separator}{value}" for value in values)
     return tuple(dict.fromkeys(values))
 
 
@@ -390,9 +492,9 @@ def _layout_system_metric_text(
     """Lay out one current value using one already-resolved concrete font."""
     snapshot = context.metrics_snapshot
     value = None if snapshot is None else snapshot.value(settings.metric)
-    value_text = (
-        settings.unavailable_text
-        if value is None
+    value_text = settings.unavailable_text if value is None else (
+        format_temperature_value(settings, value)
+        if _is_temperature(settings)
         else format_metric_value(settings.metric, value, settings.precision)
     )
     slots = _metric_slots(

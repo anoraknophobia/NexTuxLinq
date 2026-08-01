@@ -114,10 +114,10 @@ def test_metric_value_format_envelopes_are_deterministic_and_include_precision()
     assert metric_value_format_envelope(MetricId.CPU_USAGE, 0) == ("99%",)
     assert metric_value_format_envelope(MetricId.GPU_USAGE, 2) == ("99.00%",)
     assert metric_value_format_envelope(MetricId.CPU_TEMPERATURE, 1) == (
-        "99.0C",
+        "99.0°C",
     )
     assert metric_value_format_envelope(MetricId.CPU_TEMPERATURE, 0) == (
-        "99C",
+        "99°C",
     )
     assert metric_value_format_envelope(MetricId.LOAD_AVERAGE_1M, 2) == (
         "9999.00",

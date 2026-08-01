@@ -308,6 +308,28 @@
       ? "Resolved font: unavailable" : "Resolved font: validating…";
   }
 
+  function temperatureFormatExample(settings, unitDefinitions = []) {
+    const precision = Number.isInteger(settings.precision)
+      ? Math.min(2, Math.max(0, settings.precision)) : 0;
+    let value = 43;
+    if (settings.temperature_unit === "fahrenheit") {
+      value = value * 9 / 5 + 32;
+    }
+    const suffix = unitDefinitions.find(
+      (item) => item.id === settings.temperature_unit,
+    )?.suffix || "";
+    const label = settings.display_mode === "label_and_value"
+      ? settings.label : "";
+    return `${label}${value.toFixed(precision)}${suffix}`;
+  }
+
+  function temperatureUnitVisible(metricId, metricDefinitions = []) {
+    return metricDefinitions.some(
+      (definition) => definition.id === metricId
+        && definition.value_type === "temperature",
+    );
+  }
+
   function totalRegionCount(configuration) {
     return Object.values(configuration.profiles).reduce(
       (total, profile) => total + profile.regions.length,
@@ -374,12 +396,20 @@
       if (!textValid(settings.unavailable_text)) return "unavailable_text";
       if (!Number.isInteger(settings.precision)
           || settings.precision < 0 || settings.precision > 2) return "precision";
+      const temperatureUnitIds = new Set(
+        (metadata.temperature_unit_definitions || []).map((item) => item.id),
+      );
+      if (temperatureUnitIds.size > 0
+          && !temperatureUnitIds.has(settings.temperature_unit)) {
+        return "temperature_unit";
+      }
       if (!fontValid()) return "font";
       if (!colorValid()) return "color";
       if (!verticalValid()) return "vertical_alignment";
       if (!horizontalValid()) return "horizontal_alignment";
       return OVERFLOW.has(settings.overflow) ? null : "overflow";
     }
+
     if (widget.type === "metric_bar") {
       const metricIds = new Set(metadata.bar_metric_ids || []);
       if (!metricIds.has(settings.metric)) return "metric";
@@ -1270,6 +1300,19 @@
         panel.hidden = panel.dataset.widgetPanel !== region.widget.type;
       }
       const settings = region.widget.settings;
+      const temperatureUnitSelect = elements.settings.querySelector?.(
+        '[data-widget-panel="system_metric"] [data-temperature-unit-select]',
+      );
+      if (temperatureUnitSelect) {
+        const options = (state.metadata.temperature_unit_definitions || [])
+          .map((definition) => {
+            const option = documentObject.createElement("option");
+            option.value = definition.id;
+            option.textContent = definition.label;
+            return option;
+          });
+        temperatureUnitSelect.replaceChildren(...options);
+      }
       const optionStatuses = new Map(
         (state.fontOptions[region.id] || []).map((item) => [item.id, item]),
       );
@@ -1345,6 +1388,10 @@
         '[data-widget-panel="system_metric"]',
       );
       if (metricPanel && region.widget.type === "system_metric") {
+        const unitControl = metricPanel.querySelector(
+          "[data-temperature-unit-select]",
+        );
+        if (unitControl) unitControl.value = settings.temperature_unit;
         const labelVisible = settings.display_mode === "label_and_value";
         metricPanel.querySelector("[data-metric-label-field]")
           ?.toggleAttribute("hidden", !labelVisible);
@@ -1353,6 +1400,22 @@
         );
         metricPanel.querySelector("[data-metric-precision-field]")
           ?.toggleAttribute("hidden", metricDefinition?.value_type === "duration");
+        const temperature = temperatureUnitVisible(
+          settings.metric,
+          state.metadata.metric_definitions,
+        );
+        metricPanel.querySelector("[data-temperature-unit-field]")
+          ?.toggleAttribute("hidden", !temperature);
+        const example = metricPanel.querySelector("[data-temperature-example]");
+        if (example) {
+          example.hidden = !temperature;
+          example.textContent = temperature
+            ? `Example: ${temperatureFormatExample(
+              settings,
+              state.metadata.temperature_unit_definitions,
+            )}`
+            : "";
+        }
       }
       const direction = elements.settings.querySelector?.("[data-bar-direction]");
       if (direction && region.widget.type === "metric_bar") {
@@ -2825,6 +2888,8 @@
     regionValidationErrors,
     fontOptionReason,
     resolvedFontExplanation,
+    temperatureFormatExample,
+    temperatureUnitVisible,
     validateLocalCandidate,
     validateWidgetSettings,
     nextStableId,

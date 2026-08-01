@@ -47,6 +47,7 @@ from nextuxlinq.api_models import (
     MetricEditorDefinition,
     MetricDiagnostic,
     MetricDiagnosticsResponse,
+    TemperatureUnitEditorDefinition,
     BackupCreateRequest,
     BackupListResponse,
     BackupMetadataResponse,
@@ -95,6 +96,7 @@ from nextuxlinq.service import (
 )
 from nextuxlinq.service_manager import UserServiceStatus
 from nextuxlinq.system_metrics import BAR_METRICS, METRIC_DEFINITIONS, MetricId
+from nextuxlinq.widget_models import TemperatureUnit
 from nextuxlinq.legacy_compat import LegacyEditorUnsupportedError
 
 LOGGER = logging.getLogger(__name__)
@@ -808,6 +810,23 @@ def create_app(
                     availability_reason=diagnostics[metric_id.value][1],
                 )
                 for metric_id, definition in METRIC_DEFINITIONS.items()
+            ],
+            temperature_unit_definitions=[
+                TemperatureUnitEditorDefinition(
+                    id=TemperatureUnit.DEGREE_ONLY.value,
+                    label="Degree only (°)",
+                    suffix="°",
+                ),
+                TemperatureUnitEditorDefinition(
+                    id=TemperatureUnit.CELSIUS.value,
+                    label="Celsius (°C)",
+                    suffix="°C",
+                ),
+                TemperatureUnitEditorDefinition(
+                    id=TemperatureUnit.FAHRENHEIT.value,
+                    label="Fahrenheit (°F)",
+                    suffix="°F",
+                ),
             ],
             bar_metric_ids=[
                 metric_id.value for metric_id in MetricId

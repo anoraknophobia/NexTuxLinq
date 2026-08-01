@@ -34,17 +34,21 @@ Memory and storage usage use available-capacity semantics and report a clamped
 percentage. Load average is the finite, non-negative one-minute value. Uptime
 is `MM:SS` below one hour, `HH:MM` below one day, and `<days>D <hours>H` from
 one day onward. Network rates automatically use uppercase `KB/S`, `MB/S`, or
-`GB/S`. Temperatures use the font-safe ASCII suffix `C`.
+`GB/S`. Temperature System Metrics use compact native-bitmap formats such as
+`CPU43°`, `CPU43°C`, and `CPU109°F`. Snapshots remain canonical Celsius;
+the selected display unit is applied only by System Metric, so Metric Bar
+values and ranges remain Celsius.
 
 System Metric font selection is snapshot-independent. An explicit font stays
 authoritative. Auto uses the largest native font whose stable configured
 format envelope fits the region; a ten-pixel-high region can therefore use
 `5x10`. Horizontal fit may choose another native font for that region, but a
 sampled value never changes that choice. For bounded
-integer metrics, validation checks the compact fixed two-digit `0`–`99`
-layout, the unavailable text, and the effective label. A hypothetical `100`
-does not invalidate an otherwise usable region. The deterministic envelopes
-for intrinsically unbounded text are `9999.00` for load average,
+integer metrics, validation checks the compact fixed numeric envelope, the
+unavailable text, and the effective label. Celsius and degree-only temperature
+formats reserve two integer cells; Fahrenheit reserves three. A hypothetical
+`100` does not invalidate an otherwise usable region. The deterministic
+envelopes for intrinsically unbounded text are `9999.00` for load average,
 `9999.00GB/S` for network rates, and `999999D 23H` for uptime (shown here at
 two-decimal numeric precision). Values beyond those display ceilings retain
 the ceiling representation.
@@ -54,13 +58,27 @@ label-to-number gap and the gaps between digits and the suffix are compact,
 deterministic advances rather than a normal space glyph. A
 single-digit value reserves the leading zero cell without drawing its pixels,
 so `5%` remains visibly `5%` while its label, value field, and percent suffix
-stay anchored like a two-digit value. Non-negative integer temperatures below
-ten use the same rule. The digit-cell width is derived from the widest digit in
+stay anchored like a two-digit value. Temperature layouts use one compact
+pixel between the label and number, then no ordinary space between number,
+degree symbol, and optional `C` or `F`. Transparent leading cells draw no
+pixels: Celsius values reserve two integer cells, while Fahrenheit values
+reserve three, so `86°F` and `109°F` retain identical anchors and font size.
+The digit-cell width is derived from the widest digit in
 the selected bitmap font; uptime, rates, and free decimal text do not receive
 hidden slots. An actual three-digit value retains the same font and follows
 the configured overflow policy. With `overflow=error`, a too-wide current
 value reports `content_too_wide`; Clip and Truncate keep their configured
 behavior.
+
+Temperature System Metrics default to `CPU`, `GPU`, and `DISK`. Exact legacy
+defaults `CPU TEMP`, `GPU TEMP`, and `DISK TEMP` are interpreted as those new
+short defaults when loaded; other custom labels are preserved. Old settings
+without `temperature_unit` default to Celsius, while new imports, exports,
+presets, and backups retain the explicit `degree_only`, `celsius`, or
+`fahrenheit` choice. The editor shows a live safe-text example and hides the
+unit selector for non-temperature metrics. All six production fonts contain
+an explicit checked-in degree glyph; no glyph is scaled, stretched, generated,
+or antialiased.
 
 Generic GPU selection first prefers one DRM device marked as the primary VGA
 device, then one uniquely active device, then the sole discovered card. An

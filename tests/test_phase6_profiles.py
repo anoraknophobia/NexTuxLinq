@@ -185,6 +185,60 @@ def test_larger_native_font_round_trips_through_transfer_and_backup(
     assert restored.active.regions[0].widget.settings.font.value == "5x10"
 
 
+def test_temperature_unit_round_trips_through_transfer_and_backup(
+    tmp_path: Path,
+) -> None:
+    preset = next(
+        item for item in get_builtin_presets()
+        if item.id == "temperature-monitor"
+    )
+    raw_profile = preset.profile.to_dict()
+    metric_region = next(
+        region for region in raw_profile["regions"]
+        if region["widget"]["type"] == "system_metric"
+    )
+    metric_region["widget"]["settings"]["temperature_unit"] = "fahrenheit"
+    document = ConfigurationDocumentV2.from_dict({
+        "schema_version": 2,
+        "active_profile": "temperature",
+        "profiles": {"temperature": raw_profile},
+    })
+    envelope = export_profile("temperature", document.active)
+    imported = import_profile(envelope, ())
+    imported_settings = next(
+        region.widget.settings for region in imported.profile.regions
+        if region.widget.type.value == "system_metric"
+    )
+    assert imported_settings.temperature_unit.value == "fahrenheit"
+    assert imported.profile.to_dict() == document.active.to_dict()
+    full_import = import_configuration(
+        parse_json_bytes(deterministic_json(document.to_dict()))
+    )
+    assert full_import.to_dict() == document.to_dict()
+
+    store = ConfigStore(
+        tmp_path / "nextuxlinq" / "config.json",
+        backup_id_factory=lambda: "3" * 32,
+        backup_clock=lambda: datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    backup = store.create_backup("Temperature units", document)
+    restored = store.restore_backup(backup.id)
+    assert restored.to_dict() == document.to_dict()
+
+    old_envelope = export_profile("temperature", document.active)
+    old_region = next(
+        region for region in old_envelope["profile"]["regions"]
+        if region["widget"]["type"] == "system_metric"
+    )
+    old_region["widget"]["settings"].pop("temperature_unit")
+    old_import = import_profile(old_envelope, ())
+    old_settings = next(
+        region.widget.settings for region in old_import.profile.regions
+        if region.widget.type.value == "system_metric"
+    )
+    assert old_settings.temperature_unit.value == "celsius"
+
+
 @pytest.mark.parametrize(
     ("raw", "code"),
     [

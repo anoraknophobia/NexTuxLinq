@@ -74,7 +74,7 @@ METRIC_DEFINITIONS: Mapping[MetricId, MetricDefinition] = MappingProxyType({
         "%", 0, True, 0.0, 100.0,
     ),
     MetricId.CPU_TEMPERATURE: MetricDefinition(
-        MetricId.CPU_TEMPERATURE, "CPU TEMP", MetricValueType.TEMPERATURE,
+        MetricId.CPU_TEMPERATURE, "CPU", MetricValueType.TEMPERATURE,
         "C", 0, True, 0.0, 100.0,
     ),
     MetricId.UPTIME: MetricDefinition(
@@ -102,7 +102,7 @@ METRIC_DEFINITIONS: Mapping[MetricId, MetricDefinition] = MappingProxyType({
         "%", 0, True, 0.0, 100.0,
     ),
     MetricId.GPU_TEMPERATURE: MetricDefinition(
-        MetricId.GPU_TEMPERATURE, "GPU TEMP", MetricValueType.TEMPERATURE,
+        MetricId.GPU_TEMPERATURE, "GPU", MetricValueType.TEMPERATURE,
         "C", 0, True, 0.0, 100.0,
     ),
     MetricId.GPU_MEMORY_USAGE: MetricDefinition(
@@ -110,10 +110,25 @@ METRIC_DEFINITIONS: Mapping[MetricId, MetricDefinition] = MappingProxyType({
         "%", 0, True, 0.0, 100.0,
     ),
     MetricId.STORAGE_TEMPERATURE: MetricDefinition(
-        MetricId.STORAGE_TEMPERATURE, "DISK TEMP", MetricValueType.TEMPERATURE,
+        MetricId.STORAGE_TEMPERATURE, "DISK", MetricValueType.TEMPERATURE,
         "C", 0, True, 0.0, 100.0,
     ),
 })
+LEGACY_TEMPERATURE_LABELS: Mapping[MetricId, str] = MappingProxyType({
+    MetricId.CPU_TEMPERATURE: "CPU TEMP",
+    MetricId.GPU_TEMPERATURE: "GPU TEMP",
+    MetricId.STORAGE_TEMPERATURE: "DISK TEMP",
+})
+
+
+def canonical_metric_label(metric_id: MetricId, label: str) -> str:
+    """Resolve exact legacy temperature defaults without changing custom labels."""
+    metric = MetricId(metric_id)
+    if label == LEGACY_TEMPERATURE_LABELS.get(metric):
+        return METRIC_DEFINITIONS[metric].label
+    return label
+
+
 BAR_METRICS = frozenset(
     metric_id for metric_id, definition in METRIC_DEFINITIONS.items()
     if definition.supports_bar
@@ -277,6 +292,8 @@ def format_metric_value(metric_id: MetricId, value: float, precision: int) -> st
         return f"{normalized / divisor:.{precision}f}{suffix}"
     if metric is MetricId.LOAD_AVERAGE_1M:
         normalized = min(normalized, MAX_DISPLAY_LOAD_AVERAGE)
+    if METRIC_DEFINITIONS[metric].value_type is MetricValueType.TEMPERATURE:
+        return f"{normalized:.{precision}f}°C"
     suffix = METRIC_DEFINITIONS[metric].unit
     return f"{normalized:.{precision}f}{suffix}"
 
