@@ -508,6 +508,12 @@
       ),
       statusSavedRevision: documentObject.querySelector("#status-saved-revision"),
       renderingState: documentObject.querySelector("#rendering-state"),
+      runtimeMode: documentObject.querySelector("#runtime-mode"),
+      serviceAutostart: documentObject.querySelector("#service-autostart"),
+      serviceActive: documentObject.querySelector("#service-active"),
+      openlinkhubRecovery: documentObject.querySelector(
+        "#openlinkhub-recovery"
+      ),
       frameRate: documentObject.querySelector("#frame-rate"),
       lastUpload: documentObject.querySelector("#last-upload"),
       lastError: documentObject.querySelector("#last-error"),
@@ -623,6 +629,22 @@
         displayedSavedRevision === null
           ? "Not saved yet" : String(displayedSavedRevision);
       elements.renderingState.textContent = status.rendering_state;
+      elements.runtimeMode.textContent = ({
+        systemd_user_service: "systemd user service",
+        manual: "Manual",
+        unknown: "Unavailable / unknown",
+      })[status.runtime_mode] || "Unavailable / unknown";
+      elements.serviceAutostart.textContent = status.service_enabled === true
+        ? "Enabled"
+        : status.service_enabled === false ? "Disabled" : "Unknown";
+      elements.serviceActive.textContent = status.service_active === true
+        ? "Active"
+        : status.service_active === false ? "Inactive" : "Unknown";
+      elements.openlinkhubRecovery.textContent = (
+        status.openlinkhub_recovery_enabled === true
+          ? "Enabled"
+          : status.openlinkhub_recovery_enabled === false ? "Disabled" : "Unknown"
+      );
       const frameRate = Number(status.frame_rate);
       elements.frameRate.textContent = Number.isFinite(frameRate)
         ? `${frameRate} FPS` : "—";

@@ -516,6 +516,10 @@ function fakeDocument() {
     "#configuration-revision",
     "#status-saved-revision",
     "#rendering-state",
+    "#runtime-mode",
+    "#service-autostart",
+    "#service-active",
+    "#openlinkhub-recovery",
     "#frame-rate",
     "#last-upload",
     "#last-error",
@@ -599,6 +603,12 @@ function configPayload(changes = {}) {
 function statusPayload(changes = {}) {
   return {
     daemon_state: "running",
+    runtime_mode: "unknown",
+    service_installed: null,
+    service_enabled: null,
+    service_active: null,
+    service_state: "unknown",
+    openlinkhub_recovery_enabled: false,
     device_available: false,
     model_name: null,
     device_path: null,
@@ -1745,6 +1755,11 @@ test("status exposes existing Matrix900 and configuration information", () => {
     model_name: "Phanteks Matrix900",
     device_path: "/dev/hidraw-test",
     frame_rate: 4,
+    runtime_mode: "systemd_user_service",
+    service_enabled: true,
+    service_active: true,
+    service_state: "active",
+    openlinkhub_recovery_enabled: true,
     last_display_error: "Display unavailable.",
     configuration_warning: "Configuration migration warning.",
   }));
@@ -1755,6 +1770,10 @@ test("status exposes existing Matrix900 and configuration information", () => {
     "Phanteks Matrix900 connected",
   );
   assert.equal(controller.elements.frameRate.textContent, "4 FPS");
+  assert.equal(controller.elements.runtimeMode.textContent, "systemd user service");
+  assert.equal(controller.elements.serviceAutostart.textContent, "Enabled");
+  assert.equal(controller.elements.serviceActive.textContent, "Active");
+  assert.equal(controller.elements.openlinkhubRecovery.textContent, "Enabled");
   assert.match(controller.elements.lastError.textContent, /Display unavailable/);
   assert.match(
     controller.elements.lastError.textContent,

@@ -203,10 +203,16 @@ def build_parser() -> argparse.ArgumentParser:
         "uninstall",
         help="Stop, disable, and remove the managed unit.",
     )
-    for action in ("start", "stop", "restart", "status"):
+    for action in (
+        "enable", "disable", "start", "stop", "restart", "status", "logs",
+    ):
         service_actions.add_parser(
             action,
-            help=f"{action.capitalize()} nextuxlinqd.service.",
+            help=(
+                "Show journal commands for nextuxlinqd.service."
+                if action == "logs"
+                else f"{action.capitalize()} nextuxlinqd.service."
+            ),
         )
     recovery_parser = service_actions.add_parser(
         "openlinkhub-restart",

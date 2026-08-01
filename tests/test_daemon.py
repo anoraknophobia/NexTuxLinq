@@ -1,6 +1,7 @@
 """Tests for the initial foreground nextuxlinqd entry point."""
 
 import asyncio
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,7 +19,7 @@ from nextuxlinq.defaults import default_configuration
 from nextuxlinq.device_worker import DeviceWorker
 from nextuxlinq.service import CandidateValidationError, NexTuxLinqService
 from nextuxlinq.state import DaemonSnapshot
-from nextuxlinq.writer_lock import WriterLock
+from nextuxlinq.writer_lock import WriterLock, WriterLockHeldError
 
 
 def test_daemon_parser_supports_foreground_mode_only() -> None:
@@ -183,6 +184,50 @@ def test_initial_render_failure_never_starts_http_lifespan(caplog) -> None:
     assert "NexTuxLinq Matrix900 rendering failed." in messages
 
 
+@pytest.mark.parametrize(
+    ("runtime_mode", "expected"),
+    [
+        (
+            "manual",
+            "NexTuxLinq is already running as a user service or another daemon.",
+        ),
+        (
+            "systemd_user_service",
+            "Another NexTuxLinq instance already owns the Matrix900 lock.",
+        ),
+    ],
+)
+def test_duplicate_daemon_failure_has_clear_sanitized_guidance(
+    runtime_mode: str,
+    expected: str,
+    caplog,
+) -> None:
+    class Service:
+        async def start(self) -> None:
+            raise WriterLockHeldError("private lock path and owner")
+
+        def snapshot(self) -> DaemonSnapshot:
+            return DaemonSnapshot(lifecycle_state="failed")
+
+        @property
+        def owns_resources(self) -> bool:
+            return False
+
+    with patch(
+        "nextuxlinq.daemon.detect_runtime_mode",
+        return_value=runtime_mode,
+    ):
+        result = asyncio.run(run_service(
+            service_factory=Service,  # type: ignore[arg-type]
+            stop_requested=asyncio.Event(),
+        ))
+
+    assert result == 1
+    messages = [record.getMessage() for record in caplog.records]
+    assert expected in messages
+    assert all("private lock path" not in message for message in messages)
+
+
 def test_renderer_failure_suppresses_server_cleanup_cancellation(caplog) -> None:
     async def scenario() -> tuple[int, bool]:
         server_started = asyncio.Event()
@@ -305,7 +350,9 @@ def test_http_startup_failure_stops_service_and_releases_lock(
 
 def test_normal_http_shutdown_stops_service_and_releases_lock(
     tmp_path: Path,
+    caplog,
 ) -> None:
+    caplog.set_level(logging.INFO)
     class Store:
         def load(self) -> ConfigLoadResult:
             return ConfigLoadResult(default_configuration())
@@ -361,6 +408,16 @@ def test_normal_http_shutdown_stops_service_and_releases_lock(
     replacement = WriterLock(lock_path)
     replacement.acquire()
     replacement.release()
+    messages = [record.getMessage() for record in caplog.records]
+    assert "NexTuxLinq DeviceWorker startup successful." in messages
+    assert any(
+        message.startswith(
+            "Initial render successful: schema v2, active profile default, "
+        )
+        for message in messages
+    )
+    assert any(message.startswith("Matrix900 selection: ") for message in messages)
+    assert "NexTuxLinq Matrix900 service core stopped." in messages
 
 
 @pytest.mark.parametrize("simultaneous_stop", [False, True])

@@ -3,7 +3,8 @@
 # generic interpreter below with the absolute path of its current interpreter.
 [Unit]
 Description=NexTuxLinq Matrix900 Controller
-After=default.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 Conflicts=nextuxlinq-display.service nextuxlinq-telemetry.service nexlinq-display.service nexlinq-telemetry.service
 
 [Service]

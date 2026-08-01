@@ -26,6 +26,7 @@ from nextuxlinq.models_v2 import ConfigurationDocumentV2
 from nextuxlinq.profile_presets import get_builtin_presets
 from nextuxlinq.service import NexTuxLinqService
 from nextuxlinq.service import RevisionConflictError
+from nextuxlinq.service_manager import UserServiceStatus
 from nextuxlinq.system_metrics import (
     MetricAvailability,
     MetricId,
@@ -147,6 +148,56 @@ def test_status_and_config_are_strict_read_only_responses(api_client) -> None:
     assert service.get_configuration() == before
     assert store.saved == []
     assert worker.frames == []
+
+
+def test_web_status_serializes_only_sanitized_user_service_state(
+    api_client,
+) -> None:
+    _, service, store, worker = api_client
+    app = create_app(
+        service,
+        service_status_provider=lambda: UserServiceStatus(
+            runtime_mode="systemd_user_service",
+            installed=True,
+            managed=True,
+            enabled=True,
+            active=True,
+            service_state="active",
+            openlinkhub_recovery_enabled=True,
+            pid=4321,
+            last_failure_summary=None,
+            configuration_path=Path("/private/config.json"),
+        ),
+    )
+    response = LocalClient(app).get("/api/v1/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runtime_mode"] == "systemd_user_service"
+    assert body["service_installed"] is True
+    assert body["service_enabled"] is True
+    assert body["service_active"] is True
+    assert body["service_state"] == "active"
+    assert body["openlinkhub_recovery_enabled"] is True
+    serialized = json.dumps(body)
+    assert "4321" not in serialized
+    assert "/private" not in serialized
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_web_status_preserves_manual_runtime_when_systemd_is_unavailable(
+    api_client,
+) -> None:
+    _, service, _, _ = api_client
+    response = LocalClient(create_app(
+        service,
+        runtime_mode="manual",
+    )).get("/api/v1/status")
+    assert response.status_code == 200
+    assert response.json()["runtime_mode"] == "manual"
+    assert response.json()["service_active"] is None
+    assert response.json()["openlinkhub_recovery_enabled"] is None
 
 
 def test_canonical_configuration_and_preview_are_schema_v2(api_client) -> None:

@@ -7,6 +7,7 @@ import ipaddress
 import logging
 import re
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -91,6 +92,7 @@ from nextuxlinq.service import (
     RevisionConflictError,
     ServiceUnavailableError,
 )
+from nextuxlinq.service_manager import UserServiceStatus
 from nextuxlinq.system_metrics import BAR_METRICS, METRIC_DEFINITIONS, MetricId
 from nextuxlinq.legacy_compat import LegacyEditorUnsupportedError
 
@@ -197,6 +199,8 @@ def create_app(
     *,
     allowed_hosts: set[str] | None = None,
     configured_port: int = 8765,
+    service_status_provider: Callable[[], UserServiceStatus] | None = None,
+    runtime_mode: str = "unknown",
 ) -> FastAPI:
     """Create an HTTP application with no hardware or lifecycle ownership."""
     hosts = (
@@ -204,6 +208,19 @@ def create_app(
         if allowed_hosts is None
         else {host.lower() for host in allowed_hosts}
     )
+    if service_status_provider is None:
+        service_status_provider = lambda: UserServiceStatus(
+            runtime_mode=runtime_mode,
+            installed=None,
+            managed=None,
+            enabled=None,
+            active=None,
+            service_state="unknown",
+            openlinkhub_recovery_enabled=None,
+            pid=None,
+            last_failure_summary=None,
+            configuration_path=Path("."),
+        )
     app = FastAPI(
         title="NexTuxLinq Matrix900 Controller",
         docs_url=None,
@@ -565,8 +582,17 @@ def create_app(
     async def status() -> StatusResponse:
         state = service.snapshot()
         configuration = service.get_configuration()
+        user_service = service_status_provider()
         return StatusResponse(
             daemon_state=state.lifecycle_state,
+            runtime_mode=user_service.runtime_mode,
+            service_installed=user_service.installed,
+            service_enabled=user_service.enabled,
+            service_active=user_service.active,
+            service_state=user_service.service_state,
+            openlinkhub_recovery_enabled=(
+                user_service.openlinkhub_recovery_enabled
+            ),
             device_available=state.device_available,
             model_name="Phanteks Matrix900" if state.device_available else None,
             device_path=state.device_path,

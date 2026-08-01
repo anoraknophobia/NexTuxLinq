@@ -10,9 +10,12 @@ uses `sudo` or installs a system-wide unit.
 
 ## Install
 
-Run the command from the Python environment that should run the daemon:
+Run the commands from the Python environment that should run the daemon. This
+sequence enables the optional OpenLinkHub recovery before the first managed
+start:
 
 ```console
+nextuxlinqctl service openlinkhub-restart enable
 nextuxlinqctl service install
 ```
 
@@ -44,6 +47,15 @@ also disables and stops their pre-rename `nexlinq-*` counterparts. Missing
 helpers are harmless. The installer then enables and starts
 `nextuxlinqd.service`.
 
+The generated service binds only to `127.0.0.1:8765`, uses the canonical
+`${XDG_CONFIG_HOME:-~/.config}/nextuxlinq/config.json`, and runs through the
+absolute Python interpreter of the environment that executed the installer.
+For an editable project virtual environment this is the project `.venv`
+interpreter; it is not `/usr/bin/env` resolution. The unit uses
+`Restart=on-failure` with a three-second delay and a five-starts-per-minute
+limit, preventing rapid restart storms while retaining recovery from a normal
+transient failure.
+
 The repository file `systemd/nextuxlinqd.service` is a generic example. The
 CLI-generated unit is the installed form and records the actual interpreter;
 the example does not depend on the local development checkout.
@@ -54,14 +66,25 @@ the example does not depend on the local development checkout.
 nextuxlinqctl service start
 nextuxlinqctl service stop
 nextuxlinqctl service restart
+nextuxlinqctl service enable
+nextuxlinqctl service disable
 nextuxlinqctl service status
+nextuxlinqctl service logs
 ```
 
 View journal output with:
 
 ```console
-journalctl --user -u nextuxlinqd.service
+journalctl --user -u nextuxlinqd.service -n 100 --no-pager
+journalctl --user -u nextuxlinqd.service -f
 ```
+
+Status reports installation, managed-unit ownership, autostart, active state,
+daemon URL, recovery state, canonical configuration path, PID, and a sanitized
+last-failure summary. `logs` only prints the two read-only journal commands.
+The loopback GUI's collapsed Technical details show runtime mode, autostart,
+user-service activity, and recovery state. The web API exposes no service
+control command or arbitrary `systemctl` operation.
 
 The GUI remains bound to `127.0.0.1:8765`; the service installer does not make
 it remotely accessible.
@@ -91,9 +114,20 @@ directory and preserve other drop-ins. Enable and disable perform a user
 does not contain this behavior, and manual `nextuxlinqd --host ...` starts are
 unaffected.
 
+For this installation the workaround is enabled explicitly. It remains
+optional project functionality: other installations keep the default behavior
+until their user runs the enable command. The user journal records the fixed
+post-start command and a sanitized active, inactive, or nonfatal-failure result.
+
 This workaround does not add OpenLinkHub or Corsair-device control to
 NexTuxLinq. The Phanteks Matrix900 remains the only hardware supported by this
 project.
+
+Once autostart is configured, a manual `nextuxlinqd --host 127.0.0.1 --port
+8765` process is only for deliberate development or debugging while the user
+service is stopped. The dual advisory application/device lock rejects a second
+daemon; never run manual and systemd instances together. NexTuxLinq does not
+control Corsair fans or RGB settings.
 
 ## Uninstall
 
@@ -109,4 +143,4 @@ legacy helper.
 
 The service normally starts automatically after the user logs in. Running a
 user manager before login would require distribution-specific lingering
-configuration, which NexTuxLinq does not change.
+configuration, which NexTuxLinq reports as optional and never changes.

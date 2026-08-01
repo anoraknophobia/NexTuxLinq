@@ -149,6 +149,12 @@ class ConfigResponse(StrictModel):
 
 class StatusResponse(StrictModel):
     daemon_state: str
+    runtime_mode: str
+    service_installed: bool | None
+    service_enabled: bool | None
+    service_active: bool | None
+    service_state: str
+    openlinkhub_recovery_enabled: bool | None
     device_available: bool
     model_name: str | None
     device_path: str | None

@@ -17,6 +17,12 @@ from fastapi import FastAPI
 from nextuxlinq.config_store import ConfigStore
 from nextuxlinq.device_worker import DeviceWorker
 from nextuxlinq.service import NexTuxLinqService
+from nextuxlinq.service_manager import (
+    CachedUserServiceStatusProvider,
+    ServiceManager,
+    ServiceManagerError,
+    detect_runtime_mode,
+)
 from nextuxlinq.web import create_app
 from nextuxlinq.writer_lock import WriterLock, WriterLockHeldError
 
@@ -159,18 +165,56 @@ async def run_service(
             loop.add_signal_handler(signal_number, stop_requested.set)
 
     service = service_factory()
+    runtime_mode = detect_runtime_mode()
     server: HttpServer | None = None
     server_task: asyncio.Task[None] | None = None
     stop_task: asyncio.Task[bool] | None = None
     worker_failure_task: asyncio.Task[None] | None = None
-    logging.info("Starting NexTuxLinq Matrix900 controller at http://%s:%d.", host, port)
+    logging.info(
+        "Starting NexTuxLinq Matrix900 controller at http://%s:%d (%s).",
+        host,
+        port,
+        (
+            "systemd user service"
+            if runtime_mode == "systemd_user_service"
+            else "manual"
+        ),
+    )
     exit_code = 0
     try:
         await service.start()
+        service_snapshot = service.snapshot()
+        logging.info("NexTuxLinq DeviceWorker startup successful.")
+        get_configuration = getattr(service, "get_configuration", None)
+        if callable(get_configuration):
+            configuration = get_configuration().configuration
+            logging.info(
+                "Initial render successful: schema v%d, active profile %s, "
+                "update policy %s.",
+                configuration.schema_version,
+                configuration.active_profile,
+                service_snapshot.update_policy,
+            )
+        else:
+            logging.info("Initial render successful.")
+        logging.info(
+            "Matrix900 selection: %s.",
+            "connected" if service_snapshot.device_available else "awaiting device",
+        )
+        status_provider = None
+        try:
+            status_provider = CachedUserServiceStatusProvider(
+                ServiceManager(),
+                runtime_mode=runtime_mode,
+            )
+        except ServiceManagerError:
+            logging.warning("User-service status inspection is unavailable.")
         app = create_app(
             service,
             allowed_hosts={host, "127.0.0.1", "::1", "localhost"},
             configured_port=port,
+            service_status_provider=status_provider,
+            runtime_mode=runtime_mode,
         )
         server = server_factory(app, host, port)
         server_task = asyncio.create_task(
@@ -206,8 +250,18 @@ async def run_service(
         else:
             logging.error("NexTuxLinq Matrix900 service failed.")
         exit_code = 1
-    except WriterLockHeldError as error:
-        logging.error("%s", error)
+    except WriterLockHeldError:
+        logging.error(
+            "%s",
+            (
+                "Another NexTuxLinq instance already owns the Matrix900 lock."
+                if runtime_mode == "systemd_user_service"
+                else (
+                    "NexTuxLinq is already running as a user service or "
+                    "another daemon."
+                )
+            ),
+        )
         exit_code = 1
     except (Exception, SystemExit):
         if service.snapshot().rendering_state == "failed":

@@ -18,6 +18,7 @@ import pytest
 from nextuxlinq import cli
 from nextuxlinq import service_manager
 from nextuxlinq.service_manager import (
+    CachedUserServiceStatusProvider,
     GENERATED_MARKER,
     GUI_ADDRESS,
     HELPER_SERVICES,
@@ -32,6 +33,7 @@ from nextuxlinq.service_manager import (
     ServiceOperationResult,
     _default_runner,
     _resolve_config_root,
+    detect_runtime_mode,
     generate_unit,
     generate_openlinkhub_restart_dropin,
     systemd_quote_argument,
@@ -149,7 +151,9 @@ def test_generated_unit_contains_required_directives_and_marker() -> None:
     assert "Restart=on-failure" in unit
     assert "RestartSec=3" in unit
     assert "TimeoutStopSec=10" in unit
-    assert "After=default.target" in unit
+    assert "After=default.target" not in unit
+    assert "StartLimitIntervalSec=60" in unit
+    assert "StartLimitBurst=5" in unit
     assert "WantedBy=default.target" in unit
     assert "StandardOutput=journal" in unit
     assert "StandardError=journal" in unit
@@ -165,7 +169,7 @@ def test_generated_unit_contains_required_directives_and_marker() -> None:
 
 
 def test_openlinkhub_recovery_dropin_is_fixed_nonfatal_and_delayed() -> None:
-    dropin = generate_openlinkhub_restart_dropin()
+    dropin = generate_openlinkhub_restart_dropin("/opt/NexTuxLinq/bin/python")
 
     assert dropin.startswith(f"{OPENLINKHUB_DROPIN_MARKER}\n")
     assert "[Service]" in dropin
@@ -174,8 +178,13 @@ def test_openlinkhub_recovery_dropin_is_fixed_nonfatal_and_delayed() -> None:
         "ExecStartPost=-/usr/bin/systemctl --user try-restart "
         f"{OPENLINKHUB_SERVICE_NAME}"
     ) in dropin
+    assert (
+        'ExecStartPost=-"/opt/NexTuxLinq/bin/python" '
+        "-m nextuxlinq.openlinkhub_recovery"
+    ) in dropin
     assert " restart " not in dropin
     assert "Requires=" not in dropin
+    assert "BindsTo=" not in dropin
     assert "After=" not in dropin
 
 
@@ -404,7 +413,7 @@ def test_production_runner_exception_is_sanitized_by_manager(
         result = manager.control("restart")
 
     assert not result.success
-    assert "Could not run systemctl" in (result.error or "")
+    assert result.error == "Could not run systemctl to restart nextuxlinqd."
     assert "/private/" not in (result.error or "")
 
 
@@ -1829,11 +1838,12 @@ def test_systemctl_executable_missing_is_sanitized(tmp_path: Path) -> None:
         tmp_path,
         runner=RecordingRunner(missing_executable),
     )
+    manager._write_unit_atomically(force=False)
 
     result = manager.control("status")
 
     assert not result.success
-    assert "Could not run systemctl" in (result.error or "")
+    assert result.error == "User-service status could not be inspected."
     assert "/private/" not in (result.error or "")
 
 
@@ -2034,12 +2044,15 @@ def test_uninstall_directory_sync_failure_reports_removed_state(
     ]
 
 
-@pytest.mark.parametrize("action", ["start", "stop", "restart"])
+@pytest.mark.parametrize(
+    "action", ["enable", "disable", "start", "stop", "restart"],
+)
 def test_service_control_actions_target_only_daemon(
     tmp_path: Path,
     action: str,
 ) -> None:
-    manager, runner = manager_for(tmp_path)
+    runner = RecordingRunner(lambda arguments: completed())
+    manager, runner = manager_for(tmp_path, runner=runner)
 
     result = manager.control(action)
 
@@ -2050,19 +2063,150 @@ def test_service_control_actions_target_only_daemon(
 
 
 def test_status_is_read_only_and_preserves_useful_output(tmp_path: Path) -> None:
-    runner = RecordingRunner(
-        lambda arguments: completed(stdout="● nextuxlinqd.service - active\n")
-    )
+    def status_result(arguments: list[str]):
+        if arguments[2] == "is-enabled":
+            return completed(stdout="enabled\n")
+        if arguments[2] == "is-active":
+            return completed(stdout="active\n")
+        if arguments[2] == "show":
+            return completed(stdout="MainPID=1234\nResult=success\n")
+        raise AssertionError(arguments)
+
+    runner = RecordingRunner(status_result)
     manager, _ = manager_for(tmp_path, runner=runner)
+    manager._write_unit_atomically(force=False)
 
     result = manager.control("status")
 
     assert result.success
-    assert result.output == ("● nextuxlinqd.service - active",)
+    assert "Service installed: yes" in result.output
+    assert "Managed unit: yes" in result.output
+    assert "Autostart enabled: yes" in result.output
+    assert "Service active: yes" in result.output
+    assert "Service state: active" in result.output
+    assert "Current PID: 1234" in result.output
+    assert "Last failure: none" in result.output
     assert runner.calls == [
-        ["systemctl", "--user", "status", SERVICE_NAME, "--no-pager"],
+        ["systemctl", "--user", "is-enabled", SERVICE_NAME],
+        ["systemctl", "--user", "is-active", SERVICE_NAME],
+        [
+            "systemctl", "--user", "show", SERVICE_NAME,
+            "--property=MainPID", "--property=Result",
+        ],
     ]
-    assert not manager.unit_path.exists()
+    assert manager.unit_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("enabled_state", "active_state", "result_state", "enabled", "active", "failure"),
+    [
+        ("enabled", "inactive", "success", True, False, None),
+        (
+            "disabled", "failed", "exit-code", False, False,
+            "The service process exited with an error.",
+        ),
+    ],
+)
+def test_structured_status_handles_inactive_and_failed_units(
+    tmp_path: Path,
+    enabled_state: str,
+    active_state: str,
+    result_state: str,
+    enabled: bool,
+    active: bool,
+    failure: str | None,
+) -> None:
+    def status_result(arguments: list[str]):
+        return {
+            "is-enabled": completed(
+                0 if enabled else 1, stdout=f"{enabled_state}\n"
+            ),
+            "is-active": completed(
+                0 if active else 3, stdout=f"{active_state}\n"
+            ),
+            "show": completed(stdout=f"MainPID=0\nResult={result_state}\n"),
+        }[arguments[2]]
+
+    manager, _ = manager_for(tmp_path, runner=RecordingRunner(status_result))
+    manager._write_unit_atomically(force=False)
+
+    status = manager.inspect_status(runtime_mode="manual")
+
+    assert status.enabled is enabled
+    assert status.active is active
+    assert status.service_state == active_state
+    assert status.pid is None
+    assert status.last_failure_summary == failure
+    assert status.runtime_mode == "manual"
+
+
+def test_status_cache_bounds_systemctl_inspection(tmp_path: Path) -> None:
+    ticks = iter((10.0, 11.0, 16.0))
+    manager, runner = manager_for(tmp_path)
+    manager._write_unit_atomically(force=False)
+    provider = CachedUserServiceStatusProvider(
+        manager,
+        runtime_mode="systemd_user_service",
+        ttl=5,
+        monotonic=lambda: next(ticks),
+    )
+
+    first = provider()
+    second = provider()
+    third = provider()
+
+    assert first is second
+    assert third is not second
+    assert first.runtime_mode == "systemd_user_service"
+    assert len(runner.calls) == 6
+
+
+def test_cached_status_sanitizes_systemctl_failure(tmp_path: Path) -> None:
+    def fail(arguments: list[str]):
+        raise OSError("/private/systemctl failure")
+
+    manager, _ = manager_for(
+        tmp_path,
+        runner=RecordingRunner(fail),
+    )
+    manager._write_unit_atomically(force=False)
+    provider = CachedUserServiceStatusProvider(
+        manager,
+        runtime_mode="systemd_user_service",
+    )
+
+    status = provider()
+
+    assert status.runtime_mode == "systemd_user_service"
+    assert status.installed is None
+    assert status.enabled is None
+    assert status.active is None
+    assert status.openlinkhub_recovery_enabled is None
+    assert status.last_failure_summary == (
+        "User-service status is temporarily unavailable."
+    )
+    assert "/private" not in (status.last_failure_summary or "")
+
+
+def test_runtime_mode_requires_a_systemd_invocation_identifier() -> None:
+    assert detect_runtime_mode({}) == "manual"
+    assert detect_runtime_mode({"INVOCATION_ID": "not-systemd"}) == "manual"
+    assert detect_runtime_mode({"INVOCATION_ID": "a" * 32}) == (
+        "systemd_user_service"
+    )
+
+
+def test_logs_action_only_identifies_read_only_journal_commands(
+    tmp_path: Path,
+) -> None:
+    manager, runner = manager_for(tmp_path)
+    result = manager.control("logs")
+    assert result.success
+    assert result.output == (
+        f"journalctl --user -u {SERVICE_NAME} -n 100 --no-pager",
+        f"journalctl --user -u {SERVICE_NAME} -f",
+    )
+    assert runner.calls == []
 
 
 def test_control_failure_is_sanitized_and_nonzero(tmp_path: Path) -> None:
@@ -2090,7 +2234,7 @@ def test_openlinkhub_recovery_enable_status_disable_is_idempotent(
     assert enabled.success and enabled_again.success and status.success
     assert status.output == ("OpenLinkHub startup recovery: enabled.",)
     assert manager.openlinkhub_dropin_path.read_text(encoding="utf-8") == (
-        generate_openlinkhub_restart_dropin()
+        generate_openlinkhub_restart_dropin(manager.executable)
     )
     assert stat.S_IMODE(manager.openlinkhub_dropin_path.stat().st_mode) == 0o644
     assert stat.S_IMODE(
@@ -2230,6 +2374,9 @@ def test_default_unit_has_no_openlinkhub_hook() -> None:
         (["service", "start"], "control", True, 0),
         (["service", "stop"], "control", True, 0),
         (["service", "restart"], "control", True, 0),
+        (["service", "enable"], "control", True, 0),
+        (["service", "disable"], "control", True, 0),
+        (["service", "logs"], "control", True, 0),
         (["service", "status"], "control", False, 1),
         (
             ["service", "openlinkhub-restart", "enable"],

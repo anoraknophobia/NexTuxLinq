@@ -79,6 +79,7 @@ nextuxlinqctl brightness 50
 Install the Matrix900 controller as a systemd user service:
 
 ```console
+nextuxlinqctl service openlinkhub-restart enable
 nextuxlinqctl service install
 ```
 
@@ -125,8 +126,12 @@ Control or inspect the service with:
 nextuxlinqctl service start
 nextuxlinqctl service stop
 nextuxlinqctl service restart
+nextuxlinqctl service enable
+nextuxlinqctl service disable
 nextuxlinqctl service status
-journalctl --user -u nextuxlinqd.service
+nextuxlinqctl service logs
+journalctl --user -u nextuxlinqd.service -n 100 --no-pager
+journalctl --user -u nextuxlinqd.service -f
 ```
 
 For systems affected by a shared USB/controller hand-off issue, NexTuxLinq can
@@ -134,6 +139,14 @@ optionally install a post-start drop-in that waits two seconds and
 `try-restart`s an already-active `OpenLinkHub.service`. It is disabled by
 default, does not affect manual daemon starts, and is documented with its
 enable, disable, and status commands in [`docs/systemd.md`](docs/systemd.md).
+It remains optional project functionality but is enabled explicitly by the
+setup sequence above. OpenLinkHub is restarted only when already active, and
+failure is nonfatal. This does not add Corsair fan or RGB control.
+
+After autostart is configured, direct `nextuxlinqd` execution is reserved for
+development while the user service is stopped. The application lock rejects a
+manual and managed daemon running together. Startup before login may require
+optional systemd user lingering; NexTuxLinq never enables lingering itself.
 
 Uninstalling preserves all configuration and profiles, reports the retained
 disabled-unit backup, and does not re-enable legacy helpers:
