@@ -119,8 +119,8 @@ same framebuffer. See [`docs/display-effects.md`](docs/display-effects.md).
 
 ![NexTuxLinq Rainbow display preview](docs/images/rainbow-showcase.png)
 
-Rendered display preview of a NexTuxLinq Matrix900 layout using the global
-Foreground Rainbow effect.
+Example of a rendered NexTuxLinq layout using the global Foreground Rainbow
+effect.
 
 Text widgets use immutable native 3×5, 3×7, 5×7, 4×9, 5×9, and 5×10 bitmap
 fonts. Auto selects the largest fitting native fixture from backend metadata;
