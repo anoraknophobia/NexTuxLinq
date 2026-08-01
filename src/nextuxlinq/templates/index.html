@@ -450,6 +450,9 @@
                   </div>
                   <p class="field-help">Vertical start-to-end fills bottom to top. Values use nearest-pixel rounding.</p>
                 </fieldset>
+                <p id="fl-foreground-effect-note" class="field-help" hidden>
+                  Foreground Rainbow overrides this color while the effect is active.
+                </p>
               </div>
             </div>
           </aside>
@@ -507,6 +510,27 @@
               <option value="90">90%</option><option value="100">100%</option>
             </select>
           </label>
+          <fieldset class="display-effect-controls">
+            <legend>Display effect</legend>
+            <div class="display-effect-grid">
+              <label>Effect
+                <select id="fl-effect-mode"></select>
+              </label>
+              <div id="fl-effect-settings" class="display-effect-settings" hidden>
+                <label>Direction
+                  <select id="fl-effect-direction"></select>
+                </label>
+                <label>Speed
+                  <span class="input-with-unit">
+                    <input id="fl-effect-speed" type="number"
+                           inputmode="decimal" aria-describedby="fl-effect-description">
+                    <span>cycles/s</span>
+                  </span>
+                </label>
+                <p id="fl-effect-description" class="field-help"></p>
+              </div>
+            </div>
+          </fieldset>
           <div class="profile-actions" aria-label="Profile actions">
             <button type="button" data-profile-action="create">New</button>
             <button type="button" data-profile-action="duplicate">Duplicate</button>

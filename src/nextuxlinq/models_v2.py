@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
 from dataclasses import dataclass
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
@@ -20,6 +22,102 @@ MAX_REGION_ID_LENGTH = 64
 MAX_REGION_NAME_LENGTH = 64
 _PROFILE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 _REGION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+DISPLAY_EFFECT_SPEED_MIN = 0.0
+DISPLAY_EFFECT_SPEED_MAX = 2.0
+DISPLAY_EFFECT_SPEED_STEP = 0.01
+DEFAULT_RAINBOW_SPEED = 0.10
+
+
+class DisplayEffectMode(StrEnum):
+    NONE = "none"
+    FOREGROUND_RAINBOW = "foreground_rainbow"
+
+
+class RainbowDirection(StrEnum):
+    REAR_TO_FRONT = "rear_to_front"
+    FRONT_TO_REAR = "front_to_rear"
+
+
+@dataclass(frozen=True, slots=True)
+class NoDisplayEffect:
+    """The canonical disabled profile-level display effect."""
+
+    mode: DisplayEffectMode = DisplayEffectMode.NONE
+
+    def __post_init__(self) -> None:
+        try:
+            mode = DisplayEffectMode(self.mode)
+        except (TypeError, ValueError):
+            raise ValueError("display effect mode must be none.") from None
+        if mode is not DisplayEffectMode.NONE:
+            raise ValueError("display effect mode must be none.")
+        object.__setattr__(self, "mode", mode)
+
+    def to_dict(self) -> dict[str, object]:
+        return {"mode": self.mode.value}
+
+
+@dataclass(frozen=True, slots=True)
+class ForegroundRainbowEffect:
+    """A continuous physical-width rainbow applied to foreground pixels."""
+
+    direction: RainbowDirection = RainbowDirection.REAR_TO_FRONT
+    speed: float = DEFAULT_RAINBOW_SPEED
+    mode: DisplayEffectMode = DisplayEffectMode.FOREGROUND_RAINBOW
+
+    def __post_init__(self) -> None:
+        try:
+            mode = DisplayEffectMode(self.mode)
+        except (TypeError, ValueError):
+            raise ValueError("display effect mode must be foreground_rainbow.") from None
+        if mode is not DisplayEffectMode.FOREGROUND_RAINBOW:
+            raise ValueError("display effect mode must be foreground_rainbow.")
+        try:
+            direction = RainbowDirection(self.direction)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "display effect direction must be rear_to_front or front_to_rear."
+            ) from None
+        if isinstance(self.speed, bool) or not isinstance(self.speed, (int, float)):
+            raise TypeError("display effect speed must be a finite number.")
+        speed = float(self.speed)
+        if not math.isfinite(speed):
+            raise ValueError("display effect speed must be a finite number.")
+        if not DISPLAY_EFFECT_SPEED_MIN <= speed <= DISPLAY_EFFECT_SPEED_MAX:
+            raise ValueError(
+                "display effect speed must be between 0 and 2 cycles per second."
+            )
+        object.__setattr__(self, "mode", mode)
+        object.__setattr__(self, "direction", direction)
+        object.__setattr__(self, "speed", speed)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "mode": self.mode.value,
+            "direction": self.direction.value,
+            "speed": self.speed,
+        }
+
+
+DisplayEffect = NoDisplayEffect | ForegroundRainbowEffect
+
+
+def display_effect_from_dict(raw: object) -> DisplayEffect:
+    """Parse one strictly discriminated profile display effect."""
+    values = _mapping(raw, "display effect")
+    raw_mode = values.get("mode")
+    try:
+        mode = DisplayEffectMode(raw_mode)
+    except (TypeError, ValueError):
+        raise ValueError("display effect mode must be none or foreground_rainbow.") from None
+    if mode is DisplayEffectMode.NONE:
+        _fields(values, {"mode"}, "display effect")
+        return NoDisplayEffect()
+    _fields(values, {"mode", "direction", "speed"}, "display effect")
+    return ForegroundRainbowEffect(
+        direction=values["direction"],  # type: ignore[arg-type]
+        speed=values["speed"],  # type: ignore[arg-type]
+    )
 
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
@@ -220,6 +318,7 @@ class ProfileConfigV2:
     brightness: int | None
     canvas: CanvasConfig
     regions: tuple[RegionConfig, ...]
+    effect: DisplayEffect = NoDisplayEffect()
 
     def __post_init__(self) -> None:
         if self.brightness is not None:
@@ -230,6 +329,8 @@ class ProfileConfigV2:
                 raise ValueError("brightness must use ten-percent steps.")
         if not isinstance(self.canvas, CanvasConfig):
             raise TypeError("canvas must be a CanvasConfig.")
+        if not isinstance(self.effect, (NoDisplayEffect, ForegroundRainbowEffect)):
+            raise TypeError("effect must be a canonical display effect.")
         if isinstance(self.regions, (str, bytes)) or not isinstance(
             self.regions, Sequence
         ):
@@ -257,8 +358,13 @@ class ProfileConfigV2:
     @classmethod
     def from_dict(cls, raw: object) -> ProfileConfigV2:
         values = _mapping(raw, "profile")
-        allowed = {"brightness", "canvas", "regions"}
-        _fields(values, allowed, "profile")
+        allowed = {"brightness", "canvas", "regions", "effect"}
+        unknown = sorted(set(values) - allowed)
+        missing = sorted({"brightness", "canvas", "regions"} - set(values))
+        if unknown:
+            raise ValueError(f"profile contains unknown fields: {', '.join(unknown)}.")
+        if missing:
+            raise ValueError(f"profile is missing fields: {', '.join(missing)}.")
         raw_regions = values["regions"]
         if not isinstance(raw_regions, list):
             raise TypeError("regions must be a JSON array.")
@@ -266,6 +372,11 @@ class ProfileConfigV2:
             brightness=values["brightness"],  # type: ignore[arg-type]
             canvas=CanvasConfig.from_dict(values["canvas"]),
             regions=tuple(RegionConfig.from_dict(item) for item in raw_regions),
+            effect=(
+                NoDisplayEffect()
+                if "effect" not in values
+                else display_effect_from_dict(values["effect"])
+            ),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -273,6 +384,7 @@ class ProfileConfigV2:
             "brightness": self.brightness,
             "canvas": self.canvas.to_dict(),
             "regions": [region.to_dict() for region in self.regions],
+            "effect": self.effect.to_dict(),
         }
 
     def _legacy_projection(self):

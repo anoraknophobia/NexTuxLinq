@@ -17,7 +17,12 @@ from nextuxlinq.config_store import (
     ManagedBackupError,
 )
 from nextuxlinq.defaults import legacy_equivalent_configuration_v2
-from nextuxlinq.models_v2 import ConfigurationDocumentV2
+from nextuxlinq.models_v2 import (
+    ConfigurationDocumentV2,
+    ForegroundRainbowEffect,
+    ProfileConfigV2,
+    RainbowDirection,
+)
 from nextuxlinq.profile_presets import get_builtin_presets
 from nextuxlinq.profile_transfer import (
     MAX_IMPORT_BYTES,
@@ -109,6 +114,67 @@ def test_profile_export_round_trip_is_exact_and_runtime_free() -> None:
     assert [region.id for region in imported.profile.regions] == [
         region.id for region in profile.regions
     ]
+
+
+def test_rainbow_effect_round_trips_through_all_transfer_and_backup_paths(
+    tmp_path: Path,
+) -> None:
+    source = next(
+        preset.profile
+        for preset in get_builtin_presets()
+        if preset.id == "rainbow-showcase"
+    )
+    assert source.effect == ForegroundRainbowEffect(
+        RainbowDirection.REAR_TO_FRONT, 0.1
+    )
+    imported_profile = import_profile(export_profile("rainbow", source), ())
+    assert imported_profile.profile == source
+    document = ConfigurationDocumentV2(2, "rainbow", {"rainbow": source})
+    assert import_configuration(document.to_dict()) == document
+
+    store = ConfigStore(
+        tmp_path / "config.json",
+        backup_id_factory=lambda: "4" * 32,
+        backup_clock=lambda: datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    backup = store.create_backup("Rainbow", document)
+    assert store.restore_backup(backup.id) == document
+
+    old = source.to_dict()
+    old.pop("effect")
+    assert ProfileConfigV2.from_dict(old).effect.mode.value == "none"
+
+
+@pytest.mark.parametrize(
+    ("effect", "code"),
+    [
+        ({"mode": "future"}, "unknown_display_effect"),
+        (
+            {"mode": "foreground_rainbow", "direction": "side", "speed": 0.1},
+            "invalid_effect_direction",
+        ),
+        (
+            {
+                "mode": "foreground_rainbow",
+                "direction": "rear_to_front",
+                "speed": 3,
+            },
+            "invalid_effect_speed",
+        ),
+    ],
+)
+def test_import_rejects_invalid_rainbow_settings_safely(effect, code) -> None:
+    profile = legacy_equivalent_configuration_v2().active.to_dict()
+    profile["effect"] = effect
+    envelope = export_profile(
+        "rainbow", legacy_equivalent_configuration_v2().active
+    )
+    envelope["profile"] = profile
+    with pytest.raises(TransferValidationError) as caught:
+        import_profile(envelope, ())
+    assert caught.value.code == code
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
     serialized = deterministic_json(envelope)
     assert serialized == deterministic_json(envelope)
     for forbidden in (
@@ -284,7 +350,7 @@ def test_safe_filename_does_not_change_embedded_profile_name() -> None:
 def test_every_builtin_preset_validates_and_renders_without_mutation() -> None:
     compositor = Compositor(create_widget_registry())
     presets = get_builtin_presets()
-    expected_counts = [0, 2, 3, 2, 2, 1, 3, 3, 4, 3]
+    expected_counts = [0, 2, 3, 2, 2, 1, 3, 3, 4, 3, 3]
     before = [preset.profile.to_dict() for preset in presets]
 
     for preset, expected in zip(presets, expected_counts, strict=True):
@@ -303,6 +369,20 @@ def test_every_builtin_preset_validates_and_renders_without_mutation() -> None:
     temperatures = next(
         preset for preset in presets if preset.id == "temperature-monitor"
     )
+    rainbow = next(
+        preset for preset in presets if preset.id == "rainbow-showcase"
+    )
+    assert rainbow.name == "Rainbow Showcase"
+    assert rainbow.profile.effect.to_dict() == {
+        "mode": "foreground_rainbow",
+        "direction": "rear_to_front",
+        "speed": 0.1,
+    }
+    assert Compositor(create_widget_registry()).render(
+        rainbow.profile,
+        generation_time=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        animation_time=0.0,
+    ).update_policy.value == "continuous"
     assert [
         region.widget.settings.metric.value for region in extended.profile.regions
     ] == [
@@ -439,7 +519,7 @@ def test_phase6_api_operations_are_side_effect_free_until_explicit_mutation(
     assert "nextuxlinq-profile-default.json" in profile_export.headers["content-disposition"]
     assert config_export.status_code == 200
     assert list(json.loads(config_export.content)["profiles"]) == ["default"]
-    assert len(presets.json()["presets"]) == 10
+    assert len(presets.json()["presets"]) == 11
     assert profile_import.status_code == 200
     assert profile_import.json()["profile_name"] == "default_Imported"
     assert full_import.json()["summary"] == {

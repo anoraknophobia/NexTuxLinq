@@ -44,6 +44,22 @@
   const VERTICAL = new Set(["top", "center", "bottom"]);
   const OVERFLOW = new Set(["error", "truncate", "clip"]);
 
+  function effectSpeedDescription(speed) {
+    const value = Number(speed);
+    if (!Number.isFinite(value) || value < 0) return "Invalid speed";
+    if (value === 0) return "Static";
+    const seconds = 1 / value;
+    return `One cycle every ${seconds.toFixed(seconds < 10 ? 2 : 1)} seconds`;
+  }
+
+  function effectDefault(metadata = {}) {
+    return {mode: metadata.display_effect?.default_mode || "none"};
+  }
+
+  function foregroundRainbowActive(profile) {
+    return profile?.effect?.mode === "foreground_rainbow";
+  }
+
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
   }
@@ -520,6 +536,30 @@
         add("invalid_canvas", `profiles.${profileName}.canvas`);
         continue;
       }
+      if (profile.effect !== undefined) {
+        const effect = profile.effect;
+        const effectMetadata = metadata.display_effect || {};
+        const modes = new Set((effectMetadata.modes || []).map(
+          (item) => item.id,
+        ));
+        if (!effect || typeof effect !== "object"
+            || (modes.size > 0 && !modes.has(effect.mode))) {
+          add("unknown_display_effect", `profiles.${profileName}.effect.mode`);
+        } else if (effect.mode === "foreground_rainbow") {
+          const directions = new Set((effectMetadata.directions || []).map(
+            (item) => item.id,
+          ));
+          if (directions.size > 0 && !directions.has(effect.direction)) {
+            add("invalid_effect_direction",
+              `profiles.${profileName}.effect.direction`);
+          }
+          if (!Number.isFinite(effect.speed)
+              || effect.speed < effectMetadata.speed_minimum
+              || effect.speed > effectMetadata.speed_maximum) {
+            add("invalid_effect_speed", `profiles.${profileName}.effect.speed`);
+          }
+        }
+      }
       if (!Array.isArray(profile.regions)
           || profile.regions.length
             > (metadata.max_regions_per_profile ?? 32)) {
@@ -598,7 +638,7 @@
     ));
   }
 
-  function createEmptyProfile() {
+  function createEmptyProfile(metadata = {}) {
     return {
       brightness: null,
       canvas: {
@@ -607,6 +647,7 @@
         background_color: "#000000",
       },
       regions: [],
+      effect: effectDefault(metadata),
     };
   }
 
@@ -782,11 +823,13 @@
     return geometryFromViewer(left, top, right - left, bottom - top);
   }
 
-  function profileAction(configuration, action, sourceName, targetName) {
+  function profileAction(
+    configuration, action, sourceName, targetName, metadata = {}
+  ) {
     const result = clone(configuration);
     if (action === "create") {
       if (!PROFILE_ID.test(targetName) || result.profiles[targetName]) return null;
-      result.profiles[targetName] = createEmptyProfile();
+      result.profiles[targetName] = createEmptyProfile(metadata);
       result.active_profile = targetName;
     } else if (action === "duplicate") {
       if (!result.profiles[sourceName] || !PROFILE_ID.test(targetName)
@@ -895,6 +938,12 @@
         '[data-color-target="canvas_background"]'
       ),
       brightness: element("#fl-brightness"),
+      effectMode: element("#fl-effect-mode"),
+      effectSettings: element("#fl-effect-settings"),
+      effectDirection: element("#fl-effect-direction"),
+      effectSpeed: element("#fl-effect-speed"),
+      effectDescription: element("#fl-effect-description"),
+      foregroundEffectNote: element("#fl-foreground-effect-note"),
       layer: element("#fl-region-layer"),
       canvas: element("#fl-editor-canvas"),
       regionValidationSummary: element("#fl-region-validation-summary"),
@@ -1074,6 +1123,9 @@
         invalid_color: "Use a six-digit hexadecimal color.",
         wrong_widget_settings: "Widget settings do not match the widget type.",
         region_limit: "The region limit has been reached.",
+        unknown_display_effect: "Choose an available display effect.",
+        invalid_effect_direction: "Choose an available effect direction.",
+        invalid_effect_speed: "Use a valid display-effect speed.",
       }[error.category] || "The draft is not valid.";
     }
 
@@ -1086,6 +1138,10 @@
         time_zone_unavailable: "The named time zone is unavailable.",
         renderer_invariant: "The widget settings are inconsistent.",
         unexpected_renderer_failure: "The widget could not be rendered.",
+        unknown_display_effect: "Choose an available display effect.",
+        invalid_effect_direction: "Choose an available effect direction.",
+        invalid_effect_speed: "Use a valid display-effect speed.",
+        effect_invariant: "The display effect could not be rendered safely.",
       }[error.category] || "Server validation failed.";
     }
 
@@ -1134,6 +1190,39 @@
       }
       elements.brightness.value = profile.brightness === null
         ? "" : String(profile.brightness);
+      const effectMetadata = state.metadata.display_effect;
+      const effect = profile.effect || effectDefault(state.metadata);
+      if (elements.effectMode && effectMetadata) {
+        elements.effectMode.replaceChildren(...effectMetadata.modes.map(
+          (definition) => {
+            const option = documentObject.createElement("option");
+            option.value = definition.id;
+            option.textContent = definition.label;
+            return option;
+          },
+        ));
+        elements.effectMode.value = effect.mode;
+        elements.effectDirection.replaceChildren(...effectMetadata.directions.map(
+          (definition) => {
+            const option = documentObject.createElement("option");
+            option.value = definition.id;
+            option.textContent = definition.label;
+            return option;
+          },
+        ));
+        const rainbow = foregroundRainbowActive(profile);
+        elements.effectSettings.hidden = !rainbow;
+        elements.effectDirection.value = rainbow
+          ? effect.direction : effectMetadata.default_direction;
+        elements.effectSpeed.min = String(effectMetadata.speed_minimum);
+        elements.effectSpeed.max = String(effectMetadata.speed_maximum);
+        elements.effectSpeed.step = String(effectMetadata.speed_step);
+        elements.effectSpeed.value = rainbow && effect.speed !== null
+          ? String(effect.speed) : String(effectMetadata.default_speed);
+        elements.effectDescription.textContent = effectSpeedDescription(
+          rainbow ? effect.speed : effectMetadata.default_speed,
+        );
+      }
     }
 
     function renderPresetControls() {
@@ -1459,6 +1548,9 @@
       elements.noSelection.hidden = Boolean(region);
       elements.selectedPanel.hidden = !region;
       if (!region) {
+        if (elements.foregroundEffectNote) {
+          elements.foregroundEffectNote.hidden = true;
+        }
         if (elements.regionValidationDetails) {
           elements.regionValidationDetails.hidden = true;
           elements.regionValidationDetails.replaceChildren();
@@ -1561,6 +1653,16 @@
       elements.width.value = String(region.width);
       elements.height.value = String(region.height);
       renderWidgetSettings(region);
+      if (elements.foregroundEffectNote) {
+        elements.foregroundEffectNote.textContent = region.widget.type
+          === "metric_bar"
+          ? "Foreground Rainbow overrides fill and enabled border colors while active. Empty color remains unchanged."
+          : "Foreground Rainbow overrides this color while the effect is active.";
+        elements.foregroundEffectNote.hidden = !(
+          foregroundRainbowActive(activeProfile())
+          && region.widget.type !== "blank"
+        );
+      }
     }
 
     function renderErrors() {
@@ -1569,10 +1671,13 @@
         elements.canvasBackground,
         elements.x, elements.y, elements.width, elements.height,
         elements.name, elements.enabled, elements.background, elements.widget,
+        elements.effectMode, elements.effectDirection, elements.effectSpeed,
         ...elements.settings.querySelectorAll("[data-setting]"),
         ...elements.settings.querySelectorAll("[data-color-control] input"),
       ];
-      for (const control of controls) control.removeAttribute("aria-invalid");
+      for (const control of controls.filter(Boolean)) {
+        control.removeAttribute("aria-invalid");
+      }
       for (const field of state.inputErrors.keys()) {
         elements[field]?.setAttribute("aria-invalid", "true");
       }
@@ -1621,6 +1726,15 @@
           widget: elements.widget,
         }[field];
         if (direct) direct.setAttribute("aria-invalid", "true");
+        if (field.endsWith("effect.mode")) {
+          elements.effectMode?.setAttribute("aria-invalid", "true");
+        }
+        if (field.endsWith("effect.direction")) {
+          elements.effectDirection?.setAttribute("aria-invalid", "true");
+        }
+        if (field.endsWith("effect.speed")) {
+          elements.effectSpeed?.setAttribute("aria-invalid", "true");
+        }
         if (field === "background_color" && elements.backgroundColorControl) {
           elements.backgroundColorControl.dataset.invalid = "true";
           for (const input of elements.backgroundColorControl.querySelectorAll(
@@ -1679,6 +1793,9 @@
         "input"
       ) || [elements.canvasBackground]) control.disabled = busy;
       elements.brightness.disabled = busy;
+      if (elements.effectMode) elements.effectMode.disabled = busy;
+      if (elements.effectDirection) elements.effectDirection.disabled = busy;
+      if (elements.effectSpeed) elements.effectSpeed.disabled = busy;
       elements.inspector.toggleAttribute("inert", busy);
       elements.canvas.setAttribute("aria-disabled", String(busy));
       elements.apply.disabled = busy || !state.draftDirty || !valid;
@@ -2510,6 +2627,42 @@
               ? null : Number(elements.brightness.value);
         });
       });
+      elements.effectMode?.addEventListener("change", () => {
+        mutate((candidate) => {
+          const profile = candidate.profiles[candidate.active_profile];
+          if (elements.effectMode.value === "foreground_rainbow") {
+            const metadata = state.metadata.display_effect;
+            profile.effect = {
+              mode: elements.effectMode.value,
+              direction: metadata.default_direction,
+              speed: metadata.default_speed,
+            };
+          } else {
+            profile.effect = {mode: elements.effectMode.value};
+          }
+        });
+      });
+      elements.effectDirection?.addEventListener("change", () => {
+        mutate((candidate) => {
+          candidate.profiles[
+            candidate.active_profile
+          ].effect.direction = elements.effectDirection.value;
+        });
+      });
+      elements.effectSpeed?.addEventListener("input", () => {
+        const raw = elements.effectSpeed.value.trim();
+        const speed = raw === "" ? null : Number(raw);
+        mutate((candidate) => {
+          candidate.profiles[candidate.active_profile].effect.speed = speed;
+        });
+        if (speed === null || !Number.isFinite(speed)) {
+          state.inputErrors.set(
+            "effectSpeed", "Use a finite display-effect speed."
+          );
+          state.serverValidation = "invalid";
+          render();
+        }
+      });
       elements.inspector.addEventListener("input", handleInspectorInput);
       elements.useBackground.addEventListener("change", () => {
         const region = selectedRegion();
@@ -2602,7 +2755,9 @@
             if (Object.keys(state.draft.profiles).length <= 1) return;
             if (typeof windowObject.confirm === "function"
                 && !windowObject.confirm(`Delete profile ${source}?`)) return;
-            const changed = profileAction(state.draft, action, source, "");
+            const changed = profileAction(
+              state.draft, action, source, "", state.metadata
+            );
             if (changed) {
               state.selectedRegionId = selectionForProfile(
                 state.selectedRegionId,
@@ -2621,7 +2776,9 @@
             ? windowObject.prompt(promptLabel, action === "rename" ? source : "")
             : null;
           if (!target) return;
-          const changed = profileAction(state.draft, action, source, target);
+          const changed = profileAction(
+            state.draft, action, source, target, state.metadata
+          );
           if (!changed) {
             setMessage("Use a unique profile name with letters, numbers, _ or -.",
               "error");
@@ -2913,6 +3070,9 @@
     resolvedFontExplanation,
     temperatureFormatExample,
     temperatureUnitVisible,
+    effectSpeedDescription,
+    effectDefault,
+    foregroundRainbowActive,
     metricDefinitionGroups,
     validateLocalCandidate,
     validateWidgetSettings,

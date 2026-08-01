@@ -14,6 +14,11 @@ from nextuxlinq.creator import (
     RGB_CHANNELS,
 )
 from nextuxlinq.models_v2 import ProfileConfigV2, RegionConfig
+from nextuxlinq.models_v2 import ForegroundRainbowEffect
+from nextuxlinq.rendering_v2.effects import (
+    EffectInvariantError,
+    apply_display_effect,
+)
 from nextuxlinq.rendering_v2.registry import (
     RenderContext,
     RenderContextValidationError,
@@ -58,6 +63,7 @@ class CompositorFailure(StrEnum):
     UNEXPECTED_RENDERER_FAILURE = "unexpected_renderer_failure"
     INVALID_DRAWING = "invalid_drawing"
     INVALID_LOCAL_BUFFER = "invalid_local_buffer"
+    EFFECT_INVARIANT = "effect_invariant"
 
 
 _FAILURE_MESSAGES = {
@@ -104,6 +110,9 @@ _FAILURE_MESSAGES = {
     ),
     CompositorFailure.INVALID_LOCAL_BUFFER: (
         "The widget renderer produced an invalid local framebuffer."
+    ),
+    CompositorFailure.EFFECT_INVARIANT: (
+        "The display effect could not be applied safely."
     ),
 }
 
@@ -340,11 +349,16 @@ def _copy_local_surface(
     destination: RegionSurface,
     region: RegionConfig,
     local_payload: bytes,
+    local_mask: bytes,
 ) -> None:
     expected = region.width * region.height * RGB_CHANNELS
     if len(local_payload) != expected:
         raise SurfaceInvariantError(
             "Local surface export has an invalid byte length."
+        )
+    if len(local_mask) != region.width * region.height:
+        raise SurfaceInvariantError(
+            "Local surface mask has an invalid byte length."
         )
     row_bytes = region.width * RGB_CHANNELS
     for local_y in range(region.height):
@@ -353,6 +367,12 @@ def _copy_local_surface(
             region.x,
             region.y + local_y,
             local_payload[start : start + row_bytes],
+        )
+        mask_start = local_y * region.width
+        destination._write_mask_row(
+            region.x,
+            region.y + local_y,
+            local_mask[mask_start : mask_start + region.width],
         )
 
 
@@ -520,7 +540,9 @@ class Compositor:
                     region_policy = definition.resolve_update_policy(
                         region.widget.settings
                     )
-                    _copy_local_surface(logical, region, local_payload)
+                    _copy_local_surface(
+                        logical, region, local_payload, surface.foreground_mask()
+                    )
             except CompositorError:
                 failure = (
                     CompositorFailure.UNEXPECTED_RENDERER_FAILURE,
@@ -556,6 +578,26 @@ class Compositor:
             )
 
         logical_framebuffer = logical.to_bytes()
+        try:
+            logical_framebuffer = apply_display_effect(
+                logical_framebuffer,
+                logical.foreground_mask(),
+                profile.effect,
+                animation_time=validated_animation,
+                width=MATRIX_WIDTH,
+                height=MATRIX_HEIGHT,
+            )
+        except EffectInvariantError:
+            raise CompositorError(CompositorFailure.EFFECT_INVARIANT) from None
+        effect_policy = (
+            UpdatePolicy.CONTINUOUS
+            if isinstance(profile.effect, ForegroundRainbowEffect)
+            and profile.effect.speed > 0
+            else UpdatePolicy.STATIC
+        )
+        update_policy = aggregate_update_policies(
+            (update_policy, effect_policy)
+        )
         device_framebuffer = _logical_to_device(
             logical_framebuffer, profile, canvas_color
         )

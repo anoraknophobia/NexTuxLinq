@@ -26,6 +26,12 @@ Schema v2 permits at most 32 regions in one profile and 128 regions across one
 configuration document. These limits bound validation, API, and persistence
 costs.
 
+Each profile also has one discriminated display-effect setting. `none` is the
+backward-compatible default. `foreground_rainbow` additionally stores a stable
+Rear/Front direction identifier and a finite speed from 0 through 2 complete
+cycles per second. Runtime phase is derived and is never persisted. See
+[Display effects](display-effects.md).
+
 ## Stable region identity
 
 Every region has an ID containing at most 64 ASCII letters, digits, hyphens, or
@@ -74,7 +80,8 @@ generating random IDs. Each v1 profile becomes:
 Both clocks retain the v1 color, local 24-hour time, centered alignment, no
 seconds, and no blinking separator. Scrolling content, text color, speed, and
 brightness are preserved. Profile names and the active profile are preserved.
-Fixed migration IDs are unique within every migrated profile.
+Fixed migration IDs are unique within every migrated profile. Every migrated
+profile receives the disabled `none` display effect.
 
 Pre-versioned schema-0 data follows the existing normalization path:
 

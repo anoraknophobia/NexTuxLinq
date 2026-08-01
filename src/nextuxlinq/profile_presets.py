@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from nextuxlinq.models_v2 import CanvasConfig, ProfileConfigV2, RegionConfig
+from nextuxlinq.models_v2 import (
+    CanvasConfig,
+    DisplayEffect,
+    ForegroundRainbowEffect,
+    ProfileConfigV2,
+    RainbowDirection,
+    RegionConfig,
+)
 from nextuxlinq.rendering_v2.registry import create_widget_registry
 from nextuxlinq.widget_models import FontChoice, WidgetConfig, WidgetType
 
@@ -47,11 +54,15 @@ def _region(
     )
 
 
-def _profile(*regions: RegionConfig) -> ProfileConfigV2:
+def _profile(
+    *regions: RegionConfig,
+    effect: DisplayEffect | None = None,
+) -> ProfileConfigV2:
     return ProfileConfigV2(
         brightness=None,
         canvas=CanvasConfig(width=90, height=10, background_color="#000000"),
         regions=regions,
+        **({} if effect is None else {"effect": effect}),
     )
 
 
@@ -248,6 +259,34 @@ BUILTIN_PRESETS = (
                     font=FontChoice.COMPACT_3X5.value,
                 ),
                 "Storage Temperature",
+            ),
+        ),
+    ),
+    BuiltinPreset(
+        "rainbow-showcase",
+        "Rainbow Showcase",
+        "A continuous Rear-to-Front rainbow across three foreground regions.",
+        _profile(
+            _region(
+                "front-rainbow-clock", 0, 0, 24, 10,
+                _settings(WidgetType.CLOCK), "Front Clock",
+            ),
+            _region(
+                "rainbow-message", 28, 0, 34, 10,
+                _settings(
+                    WidgetType.SCROLLING_TEXT,
+                    content="NEXTUXLINQ",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "Rainbow Message",
+            ),
+            _region(
+                "rear-rainbow-clock", 66, 0, 24, 10,
+                _settings(WidgetType.CLOCK), "Rear Clock",
+            ),
+            effect=ForegroundRainbowEffect(
+                direction=RainbowDirection.REAR_TO_FRONT,
+                speed=0.10,
             ),
         ),
     ),

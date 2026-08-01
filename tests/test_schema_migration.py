@@ -125,6 +125,7 @@ def expected_migrated_profile(
                 },
             },
         ],
+        "effect": {"mode": "none"},
     }
 
 

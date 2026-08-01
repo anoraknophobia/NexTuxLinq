@@ -21,6 +21,15 @@ class DomainValidationError(ValueError):
 
 def _domain_failure(message: str, default_field: str) -> tuple[str, str]:
     normalized = message.lower()
+    effect_mappings = (
+        ("display effect must be", "unknown_display_effect", "effect.mode"),
+        ("display effect mode must", "unknown_display_effect", "effect.mode"),
+        ("display effect direction must", "invalid_effect_direction", "effect.direction"),
+        ("display effect speed must", "invalid_effect_speed", "effect.speed"),
+    )
+    for marker, category, setting in effect_mappings:
+        if marker in normalized:
+            return category, f"{default_field}.{setting}"
     mappings = (
         ("metric must be one of", "unknown_metric", "metric"),
         ("metric does not support a bar", "unsupported_metric_for_bar", "metric"),
@@ -229,11 +238,12 @@ class CanonicalProfileModel(StrictModel):
     brightness: StrictInt | None
     canvas: dict[str, Any]
     regions: list[dict[str, Any]]
+    effect: dict[str, Any] | None = None
 
     def to_domain(self) -> ProfileConfigV2:
         return _convert_domain(
             ProfileConfigV2.from_dict,
-            self.model_dump(),
+            self.model_dump(exclude_unset=True),
             field="profile",
         )
 
@@ -329,6 +339,17 @@ class TemperatureUnitEditorDefinition(StrictModel):
     suffix: str
 
 
+class DisplayEffectEditorDefinition(StrictModel):
+    modes: list[dict[str, str]]
+    directions: list[dict[str, str]]
+    speed_minimum: float
+    speed_maximum: float
+    speed_step: float
+    default_mode: str
+    default_direction: str
+    default_speed: float
+
+
 class MetricDiagnostic(StrictModel):
     id: str
     label: str
@@ -351,6 +372,7 @@ class FreeLayoutMetadataResponse(StrictModel):
     font_definitions: list[FontEditorDefinition]
     metric_definitions: list[MetricEditorDefinition]
     temperature_unit_definitions: list[TemperatureUnitEditorDefinition]
+    display_effect: DisplayEffectEditorDefinition
     bar_metric_ids: list[str]
 
 

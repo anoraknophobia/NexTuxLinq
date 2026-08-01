@@ -656,11 +656,14 @@ def render_metric_bar(
         empty = RgbColor.from_schema_color(settings.empty_color)
         fill = RgbColor.from_schema_color(settings.fill_color)
         border = RgbColor.from_schema_color(settings.border_color)
-        surface.fill(empty)
+        surface.fill(empty, effect_eligible=False)
         inset = 1 if settings.border_enabled and surface.width > 2 and surface.height > 2 else 0
         if inset:
-            surface.fill(border)
-            surface.fill_rect(1, 1, surface.width - 2, surface.height - 2, empty)
+            surface.fill(border, effect_eligible=True)
+            surface.fill_rect(
+                1, 1, surface.width - 2, surface.height - 2, empty,
+                effect_eligible=False,
+            )
         inner_width = surface.width - inset * 2
         inner_height = surface.height - inset * 2
         snapshot = context.metrics_snapshot
@@ -669,11 +672,15 @@ def render_metric_bar(
         length = metric_bar_fill_length(value, settings, extent)
         if settings.orientation is BarOrientation.HORIZONTAL:
             x = inset if settings.direction is BarDirection.START_TO_END else inset + inner_width - length
-            surface.fill_rect(x, inset, length, inner_height, fill)
+            surface.fill_rect(
+                x, inset, length, inner_height, fill, effect_eligible=True
+            )
         else:
             # Vertical start-to-end is bottom-to-top; end-to-start is top-to-bottom.
             y = inset + inner_height - length if settings.direction is BarDirection.START_TO_END else inset
-            surface.fill_rect(inset, y, inner_width, length, fill)
+            surface.fill_rect(
+                inset, y, inner_width, length, fill, effect_eligible=True
+            )
         return None
     except WidgetRenderingError:
         raise

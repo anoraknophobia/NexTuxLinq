@@ -54,6 +54,13 @@ surfaces expose immutable byte copies, not their mutable backing storage.
 After a widget succeeds, only its exact rectangle is copied to the logical
 canvas.
 
+Alongside RGB888 data, each local surface records semantic foreground
+eligibility. Glyph and Metric Bar foreground writes mark this mask explicitly;
+background fills clear it. The compositor copies immutable mask rows with the
+same clipping and region isolation as color rows. It applies any profile effect
+once to the complete logical framebuffer after all regions render and before
+Creator orientation. See [Display effects](display-effects.md).
+
 Disabled regions remain editor metadata but do not render. Schema v2 rejects
 overlaps, and the compositor does not add overlap handling, layers, z-index,
 alpha, transparency, or blending.
@@ -111,6 +118,8 @@ Empty layouts and layouts containing only disabled regions are `static`.
 `continuous`, `half_second`, and `second_boundary`, and false for
 `minute_boundary`, `day_boundary`, and `static`. Phase 4's single service
 scheduler consumes this metadata without creating one task per region.
+An animated Foreground Rainbow contributes `continuous`; Off and a zero-speed
+rainbow add no periodic requirement.
 
 Two separate five-pixel rows are supported. Each renderer receives only its
 own five-pixel local surface, automatic font selection can choose `3x5`, and

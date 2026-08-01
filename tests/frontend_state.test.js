@@ -140,6 +140,22 @@ const widgetMetadata = {
     {id: "celsius", label: "Celsius (°C)", suffix: "°C"},
     {id: "fahrenheit", label: "Fahrenheit (°F)", suffix: "°F"},
   ],
+  display_effect: {
+    modes: [
+      {id: "none", label: "Off"},
+      {id: "foreground_rainbow", label: "Foreground Rainbow"},
+    ],
+    directions: [
+      {id: "rear_to_front", label: "Rear → Front"},
+      {id: "front_to_rear", label: "Front → Rear"},
+    ],
+    speed_minimum: 0,
+    speed_maximum: 2,
+    speed_step: 0.01,
+    default_mode: "none",
+    default_direction: "rear_to_front",
+    default_speed: 0.1,
+  },
   bar_metric_ids: [
     "cpu_usage", "memory_usage", "cpu_temperature", "storage_usage",
     "gpu_usage", "gpu_temperature", "gpu_memory_usage", "storage_temperature",
@@ -185,11 +201,18 @@ function freeEditorFixture({
   saveStatus = 200,
   profiles = null,
   validationFrames = null,
+  validationPolicy = "static",
 } = {}) {
   const ids = [
     "#fl-profile",
     "#fl-canvas-background",
     "#fl-brightness",
+    "#fl-effect-mode",
+    "#fl-effect-settings",
+    "#fl-effect-direction",
+    "#fl-effect-speed",
+    "#fl-effect-description",
+    "#fl-foreground-effect-note",
     "#fl-region-layer",
     "#fl-editor-canvas",
     "#fl-region-validation-summary",
@@ -322,8 +345,8 @@ function freeEditorFixture({
       validationFrameIndex += 1;
       return response({
         valid: true,
-        update_policy: "static",
-        animated_content: false,
+        update_policy: validationPolicy,
+        animated_content: validationPolicy === "continuous",
         framebuffer_base64: validationFrame,
         resolved_fonts: {},
         font_options: {},
@@ -362,15 +385,20 @@ function freeEditorFixture({
     throw new Error(`Unexpected editor request: ${url}`);
   };
   let timerId = 0;
+  const timerDelays = [];
+  const clearedTimers = [];
   const editor = freeLayout.createEditor({
     document,
     window,
     fetch,
-    setTimeout() {
+    setTimeout(callback, delay) {
       timerId += 1;
+      timerDelays.push(delay);
       return timerId;
     },
-    clearTimeout() {},
+    clearTimeout(id) {
+      clearedTimers.push(id);
+    },
     decodeBase64(value) {
       return Buffer.from(value, "base64").toString("binary");
     },
@@ -383,7 +411,10 @@ function freeEditorFixture({
     metricAvailability,
     windowListeners,
     documentListeners,
+    document,
     calls,
+    timerDelays,
+    clearedTimers,
   };
 }
 
@@ -2620,6 +2651,95 @@ test("profile actions keep canonical layouts and new profiles empty", () => {
     freeLayout.profileAction(original, "delete", "default", ""),
     null,
   );
+});
+
+test("display effect defaults, speed descriptions, and validation use metadata", () => {
+  assert.deepEqual(freeLayout.effectDefault(widgetMetadata), {mode: "none"});
+  assert.deepEqual(freeLayout.createEmptyProfile(widgetMetadata).effect,
+    {mode: "none"});
+  assert.equal(freeLayout.effectSpeedDescription(0), "Static");
+  assert.equal(
+    freeLayout.effectSpeedDescription(0.1),
+    "One cycle every 10.0 seconds",
+  );
+  const effect = {
+    mode: "foreground_rainbow", direction: "rear_to_front", speed: 0.1,
+  };
+  const valid = freeLayout.validateLocalCandidate(
+    freeConfiguration({...freeProfile(), effect}), widgetMetadata,
+  );
+  assert.equal(valid.valid, true);
+  for (const invalid of [
+    {...effect, direction: "sideways"},
+    {...effect, speed: -0.01},
+    {...effect, speed: 2.01},
+    {...effect, speed: Number.NaN},
+  ]) {
+    assert.equal(freeLayout.validateLocalCandidate(
+      freeConfiguration({...freeProfile(), effect: invalid}), widgetMetadata,
+    ).valid, false);
+  }
+});
+
+test("display effect controls mutate only the local draft", async () => {
+  const clockSettings = structuredClone(
+    widgetMetadata.widget_definitions.find(
+      (definition) => definition.type === "clock"
+    ).default_settings,
+  );
+  clockSettings.color = "#123456";
+  const fixture = freeEditorFixture({profiles: {
+    default: freeProfile([freeRegion({
+      width: 25, height: 10,
+      widget: {type: "clock", settings: clockSettings},
+    })]),
+  }});
+  await fixture.editor.initialize();
+  const mode = fixture.elements.get("#fl-effect-mode");
+  const settings = fixture.elements.get("#fl-effect-settings");
+  const direction = fixture.elements.get("#fl-effect-direction");
+  const speed = fixture.elements.get("#fl-effect-speed");
+  assert.equal(mode.value, "none");
+  assert.equal(settings.hidden, true);
+  mode.value = "foreground_rainbow";
+  mode.dispatch("change");
+  assert.deepEqual(
+    fixture.editor.state.draft.profiles.default.effect,
+    {mode: "foreground_rainbow", direction: "rear_to_front", speed: 0.1},
+  );
+  assert.equal(fixture.editor.state.applied.profiles.default.effect, undefined);
+  assert.equal(
+    fixture.editor.state.draft.profiles.default.regions[0].widget.settings.color,
+    "#123456",
+  );
+  assert.equal(settings.hidden, false);
+  direction.value = "front_to_rear";
+  direction.dispatch("change");
+  speed.value = "0";
+  speed.dispatch("input");
+  assert.equal(
+    fixture.editor.state.draft.profiles.default.effect.direction,
+    "front_to_rear",
+  );
+  assert.equal(fixture.editor.state.draft.profiles.default.effect.speed, 0);
+  assert.equal(
+    fixture.elements.get("#fl-effect-description").textContent,
+    "Static",
+  );
+});
+
+test("animated effect preview reuses bounded page-hidden-aware scheduling", async () => {
+  const fixture = freeEditorFixture({validationPolicy: "continuous"});
+  await fixture.editor.initialize();
+  assert.equal(fixture.editor.state.previewPolicy, "continuous");
+  assert.ok(fixture.timerDelays.includes(500));
+  const clearsBefore = fixture.clearedTimers.length;
+  fixture.document.hidden = true;
+  fixture.documentListeners.visibilitychange();
+  assert.equal(fixture.timerDelays.at(-1), 4000);
+  fixture.documentListeners.visibilitychange();
+  assert.equal(fixture.timerDelays.at(-1), 4000);
+  assert.ok(fixture.clearedTimers.length >= clearsBefore + 1);
 });
 
 test("Phase 6 profile drafts, presets, and navigation protection are immutable", () => {

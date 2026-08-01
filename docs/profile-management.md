@@ -43,12 +43,15 @@ creating a profile from it makes an independent local draft copy.
 Single-profile exports use UTF-8 JSON format `nextuxlinq-profile`, format
 version `1`, and NexTuxLinq schema version `2`. The envelope contains the
 canonical profile name and complete profile data, including canvas background,
-ordered regions, exact logical geometry, widget types, and widget settings. It
+profile-level display effect, ordered regions, exact logical geometry, widget
+types, and widget settings. It
 contains no revision, runtime, device, service, or filesystem data.
 
 Complete exports are canonical schema-v2 documents named
 `nextuxlinq-config-v2.json`. Canonical profile ordering, the active profile,
 brightness, canvas settings, regions, and widget settings are preserved.
+Profile-level display effects are preserved as well; old exports without the
+field remain valid and resolve to Off.
 System Metric and Metric Bar settings use the existing transfer format version
 and round-trip exactly; unknown metric identifiers and invalid bar ranges fail
 strict validation. Managed backups preserve and validate them identically.

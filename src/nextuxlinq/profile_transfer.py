@@ -142,6 +142,14 @@ def _mapping(raw: object) -> Mapping[str, object]:
 def _profile_error_code(error: BaseException) -> str:
     """Classify a domain error while discarding all underlying details."""
     message = str(error).lower()
+    if "display effect must be" in message:
+        return "unknown_display_effect"
+    if "display effect mode must" in message:
+        return "unknown_display_effect"
+    if "display effect direction must" in message:
+        return "invalid_effect_direction"
+    if "display effect speed must" in message:
+        return "invalid_effect_speed"
     if "metric must be one of" in message:
         return "unknown_metric"
     if "metric does not support a bar" in message:

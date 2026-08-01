@@ -396,6 +396,22 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
         {"id": "celsius", "label": "Celsius (°C)", "suffix": "°C"},
         {"id": "fahrenheit", "label": "Fahrenheit (°F)", "suffix": "°F"},
     ]
+    assert body["display_effect"] == {
+        "modes": [
+            {"id": "none", "label": "Off"},
+            {"id": "foreground_rainbow", "label": "Foreground Rainbow"},
+        ],
+        "directions": [
+            {"id": "rear_to_front", "label": "Rear → Front"},
+            {"id": "front_to_rear", "label": "Front → Rear"},
+        ],
+        "speed_minimum": 0.0,
+        "speed_maximum": 2.0,
+        "speed_step": 0.01,
+        "default_mode": "none",
+        "default_direction": "rear_to_front",
+        "default_speed": 0.1,
+    }
     metric_labels = {
         metric["id"]: metric["label"] for metric in body["metric_definitions"]
     }
@@ -572,6 +588,54 @@ def test_metric_configuration_errors_are_sanitized_and_field_addressable(
     assert "gpu_usage" not in serialized
     assert "diagonal" not in serialized
     assert "reverse" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("effect", "category", "field"),
+    [
+        (None, "unknown_display_effect", "effect.mode"),
+        ({"mode": "future"}, "unknown_display_effect", "effect.mode"),
+        (
+            {"mode": "foreground_rainbow", "direction": "side", "speed": 0.1},
+            "invalid_effect_direction",
+            "effect.direction",
+        ),
+        (
+            {
+                "mode": "foreground_rainbow",
+                "direction": "rear_to_front",
+                "speed": 2.1,
+            },
+            "invalid_effect_speed",
+            "effect.speed",
+        ),
+    ],
+)
+def test_display_effect_errors_are_sanitized_and_field_addressable(
+    api_client, effect: object, category: str, field: str
+) -> None:
+    client, service, store, worker = api_client
+    profile = legacy_equivalent_configuration_v2().active.to_dict()
+    profile["effect"] = effect
+    response = client.post(
+        "/api/v1/free-layout/validate",
+        json={
+            "configuration": {
+                "schema_version": 2,
+                "active_profile": "effect",
+                "profiles": {"effect": profile},
+            }
+        },
+    )
+    body = response.json()
+    assert response.status_code == 422
+    assert body["code"] == category
+    assert body["field_errors"][0]["field"].endswith(field)
+    serialized = json.dumps(body)
+    assert "future" not in serialized
+    assert "side" not in serialized
+    assert "traceback" not in serialized.lower()
+    assert store.saved == []
     assert worker.frames == []
 
 

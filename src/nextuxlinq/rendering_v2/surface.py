@@ -74,7 +74,7 @@ BLACK = RgbColor(0, 0, 0)
 class RegionSurface:
     """An isolated local drawing surface with deterministic clipping."""
 
-    __slots__ = ("_data", "_height", "_width")
+    __slots__ = ("_data", "_foreground_mask", "_height", "_width")
 
     def __init__(
         self,
@@ -95,6 +95,7 @@ class RegionSurface:
         self._width = normalized_width
         self._height = normalized_height
         self._data = bytearray(self.byte_length)
+        self._foreground_mask = bytearray(self.pixel_count)
         self.fill(BLACK if initial_color is None else initial_color)
 
     @property
@@ -109,6 +110,10 @@ class RegionSurface:
     def byte_length(self) -> int:
         return self._width * self._height * RGB_CHANNELS
 
+    @property
+    def pixel_count(self) -> int:
+        return self._width * self._height
+
     @staticmethod
     def _require_color(color: object) -> RgbColor:
         if not isinstance(color, RgbColor):
@@ -120,17 +125,33 @@ class RegionSurface:
             raise SurfaceInvariantError(
                 "RegionSurface storage has an invalid byte length."
             )
+        if len(self._foreground_mask) != self.pixel_count:
+            raise SurfaceInvariantError(
+                "RegionSurface foreground mask has an invalid byte length."
+            )
 
-    def fill(self, color: RgbColor) -> None:
+    def fill(self, color: RgbColor, *, effect_eligible: bool = False) -> None:
         """Fill the complete local surface with one opaque color."""
+        if not isinstance(effect_eligible, bool):
+            raise SurfaceTypeError("effect_eligible must be a boolean.")
         pixel = self._require_color(color).to_bytes()
         self._data[:] = pixel * (self._width * self._height)
+        self._foreground_mask[:] = bytes((int(effect_eligible),)) * self.pixel_count
         self._verify_storage()
 
-    def set_pixel(self, x: int, y: int, color: RgbColor) -> bool:
-        """Write one local pixel, returning false when it is clipped."""
+    def set_pixel(
+        self,
+        x: int,
+        y: int,
+        color: RgbColor,
+        *,
+        effect_eligible: bool = True,
+    ) -> bool:
+        """Write one semantic foreground pixel, returning false if clipped."""
         normalized_x = _strict_integer(x, "pixel x")
         normalized_y = _strict_integer(y, "pixel y")
+        if not isinstance(effect_eligible, bool):
+            raise SurfaceTypeError("effect_eligible must be a boolean.")
         pixel = self._require_color(color).to_bytes()
         if not (
             0 <= normalized_x < self._width
@@ -141,6 +162,8 @@ class RegionSurface:
             (normalized_y * self._width + normalized_x) * RGB_CHANNELS
         )
         self._data[offset : offset + RGB_CHANNELS] = pixel
+        mask_offset = normalized_y * self._width + normalized_x
+        self._foreground_mask[mask_offset] = int(effect_eligible)
         self._verify_storage()
         return True
 
@@ -151,6 +174,8 @@ class RegionSurface:
         width: int,
         height: int,
         color: RgbColor,
+        *,
+        effect_eligible: bool = False,
     ) -> int:
         """Fill the clipped intersection of a local rectangle.
 
@@ -160,6 +185,8 @@ class RegionSurface:
         normalized_y = _strict_integer(y, "rectangle y")
         normalized_width = _strict_integer(width, "rectangle width")
         normalized_height = _strict_integer(height, "rectangle height")
+        if not isinstance(effect_eligible, bool):
+            raise SurfaceTypeError("effect_eligible must be a boolean.")
         pixel = self._require_color(color).to_bytes()
         if normalized_width < 0 or normalized_height < 0:
             raise SurfaceValidationError(
@@ -176,9 +203,14 @@ class RegionSurface:
             return 0
 
         row = pixel * (end_x - start_x)
+        mask_row = bytes((int(effect_eligible),)) * (end_x - start_x)
         for row_y in range(start_y, end_y):
             offset = (row_y * self._width + start_x) * RGB_CHANNELS
             self._data[offset : offset + len(row)] = row
+            mask_offset = row_y * self._width + start_x
+            self._foreground_mask[
+                mask_offset : mask_offset + len(mask_row)
+            ] = mask_row
         self._verify_storage()
         return (end_x - start_x) * (end_y - start_y)
 
@@ -208,7 +240,33 @@ class RegionSurface:
         self._data[offset : offset + len(payload)] = payload
         self._verify_storage()
 
+    def _write_mask_row(self, x: int, y: int, payload: bytes) -> None:
+        """Copy one exact in-bounds mask row segment for the compositor."""
+        normalized_x = _strict_integer(x, "mask row x")
+        normalized_y = _strict_integer(y, "mask row y")
+        if not isinstance(payload, bytes):
+            raise SurfaceTypeError("mask row payload must be bytes.")
+        if any(value not in (0, 1) for value in payload):
+            raise SurfaceValidationError("mask row values must be zero or one.")
+        if (
+            normalized_x < 0
+            or normalized_y < 0
+            or normalized_y >= self._height
+            or normalized_x + len(payload) > self._width
+        ):
+            raise SurfaceValidationError(
+                "mask row payload must fit completely inside the surface."
+            )
+        offset = normalized_y * self._width + normalized_x
+        self._foreground_mask[offset : offset + len(payload)] = payload
+        self._verify_storage()
+
     def to_bytes(self) -> bytes:
         """Return an immutable copy of the local RGB888 framebuffer."""
         self._verify_storage()
         return bytes(self._data)
+
+    def foreground_mask(self) -> bytes:
+        """Return an immutable copy of semantic effect eligibility."""
+        self._verify_storage()
+        return bytes(self._foreground_mask)

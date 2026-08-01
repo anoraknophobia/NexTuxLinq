@@ -41,6 +41,15 @@ preview, Profile, then Validate, Apply, and Save. The full-width region
 inspector remains below the canvas. Moving Profile below the preview changes no
 draft, applied, saved, transfer, preset, or backup state behavior.
 
+The Profile section includes a backend-metadata-driven **Display effect**
+control. Foreground Rainbow reveals direction and cycles-per-second speed plus
+a derived static/cycle-duration description. Changes remain local drafts and
+invalid speeds block Apply and Save. Foreground color controls remain available
+with an override note because their stored values return when the effect is
+disabled. Draft animation reuses the established bounded, page-hidden-aware
+preview loop and complete backend-rendered frames; it does not use a CSS
+gradient or a second request loop. See [Display effects](display-effects.md).
+
 ## Coordinates and preview
 
 Canonical logical X coordinates start with the Front at `x=0`. The editor and

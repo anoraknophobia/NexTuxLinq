@@ -104,6 +104,15 @@ sources and formatting are documented in
 below the physical display preview so the editor and preview remain the primary
 workflow.
 
+Profiles may enable a global **Foreground Rainbow** effect that recolors only
+semantic widget foreground pixels while preserving canvas and region
+backgrounds and empty Metric Bar pixels. Its backend-rendered color field is
+continuous across all 90 physical columns, supports Rear → Front and Front →
+Rear travel, and uses cycles per second; speed zero is static. Widget colors
+remain stored and return when the effect is disabled. Animated effects use the
+existing continuous scheduler and the preview and Matrix900 derive from the
+same framebuffer. See [`docs/display-effects.md`](docs/display-effects.md).
+
 Text widgets use immutable native 3×5, 3×7, 5×7, 4×9, 5×9, and 5×10 bitmap
 fonts. Auto selects the largest fitting native fixture from backend metadata;
 a 25×10 `HH:MM` Clock resolves to the true 5×10 font without scaling.

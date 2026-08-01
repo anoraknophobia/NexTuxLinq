@@ -311,8 +311,17 @@ def test_percentage_auto_font_is_stable_for_one_two_and_three_digits(
         context(90, 10, snapshot(**{metric: 5.0})),
     )
     payload = surface.to_bytes()
+    effect_mask = surface.foreground_mask()
     assert all(
         payload[((y * 90 + x) * 3):][:3] == background.to_bytes()
+        for y in range(
+            hidden.origin_y,
+            hidden.origin_y + layouts[0].glyph_height,
+        )
+        for x in range(hidden.origin_x, hidden.origin_x + hidden.advance)
+    )
+    assert all(
+        effect_mask[y * 90 + x] == 0
         for y in range(
             hidden.origin_y,
             hidden.origin_y + layouts[0].glyph_height,
@@ -554,8 +563,14 @@ def test_temperature_hidden_digit_cell_draws_no_pixels() -> None:
         surface, settings, context(25, 5, snapshot(cpu_temperature=5))
     )
     payload = surface.to_bytes()
+    effect_mask = surface.foreground_mask()
     assert all(
         payload[((y * 25 + x) * 3):][:3] == background.to_bytes()
+        for y in range(hidden.origin_y, hidden.origin_y + layout.glyph_height)
+        for x in range(hidden.origin_x, hidden.origin_x + hidden.advance)
+    )
+    assert all(
+        effect_mask[y * 25 + x] == 0
         for y in range(hidden.origin_y, hidden.origin_y + layout.glyph_height)
         for x in range(hidden.origin_x, hidden.origin_x + hidden.advance)
     )

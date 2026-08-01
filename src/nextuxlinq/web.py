@@ -48,6 +48,7 @@ from nextuxlinq.api_models import (
     MetricDiagnostic,
     MetricDiagnosticsResponse,
     TemperatureUnitEditorDefinition,
+    DisplayEffectEditorDefinition,
     BackupCreateRequest,
     BackupListResponse,
     BackupMetadataResponse,
@@ -71,9 +72,15 @@ from nextuxlinq.config_store import (
 from nextuxlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH
 from nextuxlinq.models import MAX_PROFILES
 from nextuxlinq.models_v2 import (
+    DEFAULT_RAINBOW_SPEED,
+    DISPLAY_EFFECT_SPEED_MAX,
+    DISPLAY_EFFECT_SPEED_MIN,
+    DISPLAY_EFFECT_SPEED_STEP,
     MAX_REGIONS_PER_DOCUMENT,
     MAX_REGIONS_PER_PROFILE,
     ConfigurationDocumentV2,
+    DisplayEffectMode,
+    RainbowDirection,
 )
 from nextuxlinq.profile_presets import get_builtin_presets
 from nextuxlinq.profile_transfer import (
@@ -838,6 +845,31 @@ def create_app(
                     suffix="°F",
                 ),
             ],
+            display_effect=DisplayEffectEditorDefinition(
+                modes=[
+                    {"id": DisplayEffectMode.NONE.value, "label": "Off"},
+                    {
+                        "id": DisplayEffectMode.FOREGROUND_RAINBOW.value,
+                        "label": "Foreground Rainbow",
+                    },
+                ],
+                directions=[
+                    {
+                        "id": RainbowDirection.REAR_TO_FRONT.value,
+                        "label": "Rear → Front",
+                    },
+                    {
+                        "id": RainbowDirection.FRONT_TO_REAR.value,
+                        "label": "Front → Rear",
+                    },
+                ],
+                speed_minimum=DISPLAY_EFFECT_SPEED_MIN,
+                speed_maximum=DISPLAY_EFFECT_SPEED_MAX,
+                speed_step=DISPLAY_EFFECT_SPEED_STEP,
+                default_mode=DisplayEffectMode.NONE.value,
+                default_direction=RainbowDirection.REAR_TO_FRONT.value,
+                default_speed=DEFAULT_RAINBOW_SPEED,
+            ),
             bar_metric_ids=[
                 metric_id.value for metric_id in MetricId
                 if metric_id in BAR_METRICS
