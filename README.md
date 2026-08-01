@@ -2,6 +2,8 @@
 
 Open-source Linux control software for the Phanteks Matrix900 display.
 
+!!! Fully written via ChatGPT 5.6 Sol + Codex !!!
+
 ## Project scope
 
 This project currently targets only the Phanteks Matrix900.
