@@ -79,7 +79,6 @@ nextuxlinqctl brightness 50
 Install the Matrix900 controller as a systemd user service:
 
 ```console
-nextuxlinqctl service openlinkhub-restart enable
 nextuxlinqctl service install
 ```
 
@@ -157,9 +156,9 @@ optionally install a post-start drop-in that waits two seconds and
 `try-restart`s an already-active `OpenLinkHub.service`. It is disabled by
 default, does not affect manual daemon starts, and is documented with its
 enable, disable, and status commands in [`docs/systemd.md`](docs/systemd.md).
-It remains optional project functionality but is enabled explicitly by the
-setup sequence above. OpenLinkHub is restarted only when already active, and
-failure is nonfatal. This does not add Corsair fan or RGB control.
+It remains optional project functionality and must be enabled explicitly.
+OpenLinkHub is restarted only when already active, and failure is nonfatal.
+This does not add Corsair fan or RGB control.
 
 After autostart is configured, direct `nextuxlinqd` execution is reserved for
 development while the user service is stopped. The application lock rejects a

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "nextuxlinq"
 version = "0.1.0"
-description = "Open-source Linux control software for Phanteks NexLinq devices"
+description = "Open-source Linux control software for the Phanteks Matrix900 display"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

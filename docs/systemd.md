@@ -10,12 +10,9 @@ uses `sudo` or installs a system-wide unit.
 
 ## Install
 
-Run the commands from the Python environment that should run the daemon. This
-sequence enables the optional OpenLinkHub recovery before the first managed
-start:
+Run the command from the Python environment that should run the daemon:
 
 ```console
-nextuxlinqctl service openlinkhub-restart enable
 nextuxlinqctl service install
 ```
 
@@ -114,10 +111,10 @@ directory and preserve other drop-ins. Enable and disable perform a user
 does not contain this behavior, and manual `nextuxlinqd --host ...` starts are
 unaffected.
 
-For this installation the workaround is enabled explicitly. It remains
-optional project functionality: other installations keep the default behavior
-until their user runs the enable command. The user journal records the fixed
-post-start command and a sanitized active, inactive, or nonfatal-failure result.
+The workaround remains optional project functionality. Installations keep the
+default disabled behavior until their user runs the enable command. The user
+journal records the fixed post-start command and a sanitized active, inactive,
+or nonfatal-failure result.
 
 This workaround does not add OpenLinkHub or Corsair-device control to
 NexTuxLinq. The Phanteks Matrix900 remains the only hardware supported by this
