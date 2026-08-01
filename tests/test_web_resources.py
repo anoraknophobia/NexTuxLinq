@@ -194,7 +194,7 @@ def test_visual_editor_layout_has_safe_responsive_sizing() -> None:
     assert 'class="editor-workspace"' in page
     assert 'class="region-inspector"' in page
     assert 'class="geometry-grid"' in page
-    assert page.count('data-widget-panel="') == 7
+    assert page.count('data-widget-panel="') == 8
     assert ".editor-workspace {" in css
     workspace = css.split(".editor-workspace {", 1)[1].split("}", 1)[0]
     assert "grid-template-columns: minmax(0, 1fr);" in workspace
@@ -218,6 +218,34 @@ def test_visual_editor_layout_has_safe_responsive_sizing() -> None:
     inspector_grid = css.split(".inspector-grid {", 1)[1].split("}", 1)[0]
     assert "repeat(auto-fit, minmax(min(100%, 13rem), 1fr))" in inspector_grid
     assert ".inspector-grid input:not([type=\"checkbox\"])," in css
+
+
+def test_built_in_icon_and_authoritative_content_preview_controls() -> None:
+    page, _, css = _frontend_source()
+    editor = _editor_source()
+    icon_panel = page.split('data-widget-panel="built_in_icon"', 1)[1].split(
+        "</fieldset>", 1
+    )[0]
+
+    assert "Built-in Icon" in page
+    assert "data-built-in-icon-select" in icon_panel
+    assert 'data-setting="horizontal_alignment"' in icon_panel
+    assert 'data-setting="vertical_alignment"' in icon_panel
+    assert 'type="color"' not in icon_panel
+    assert "Fixed icon color" in icon_panel
+    assert "#1DC7B5" not in icon_panel
+    assert "state.metadata.built_in_icon_definitions" in editor
+    assert "state.metadata.built_in_icon_horizontal_alignments" in editor
+    assert "state.metadata.built_in_icon_vertical_alignments" in editor
+    assert "iconDefinition.fixed_color" in editor
+    assert "#1dc7b5" not in css.lower()
+    assert 'id="fl-content-preview"' in page
+    assert 'id="fl-content-preview-canvas"' in page
+    assert "Authoritative pixel" in page
+    assert 'request("/content-preview"' in editor
+    assert "Use Value only" in editor
+    assert "safeResizeGeometry(" in editor
+    assert "image-rendering: pixelated" in css
     assert "flex: 0 0 1.15rem;" in css
     assert "box-sizing: border-box;" in css
     assert "* { box-sizing: border-box; }" in css

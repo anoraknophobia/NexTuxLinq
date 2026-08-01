@@ -22,6 +22,9 @@ backgrounds, unused pixels, Blank regions, transparent glyph pixels, invisible
 metric digit slots, and the empty part of Metric Bars are not. Eligibility is
 independent of the RGB value, so equal foreground and background colors remain
 unambiguous.
+Built-in icons define eligibility in immutable icon metadata. The native
+CachyOS logo is explicitly ineligible, so its fixed `#1DC7B5` pixels remain
+byte-identical for every Rainbow direction, speed, and phase.
 
 The compositor applies the deterministic integer RGB888 color wheel once,
 after every region has rendered into the complete logical framebuffer and

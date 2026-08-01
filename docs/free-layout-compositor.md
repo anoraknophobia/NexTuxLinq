@@ -21,6 +21,9 @@ are:
 - Static Text
 - Scrolling Text
 - Date
+- System Metric
+- Metric Bar
+- Built-in Icon
 
 `Nothing / Gap` is the schema `blank` widget. It draws no foreground pixels.
 When the region has a background color, that background remains visible.

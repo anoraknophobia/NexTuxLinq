@@ -177,6 +177,33 @@ def test_network_metric_units_scale_deterministically() -> None:
         ) == expected
 
 
+@pytest.mark.parametrize(
+    ("metric", "label", "value", "precision", "expected"),
+    [
+        ("cpu_usage", "CPU", 14.0, 0, "14%"),
+        ("cpu_temperature", "CPU", 43.0, 0, "43°C"),
+        ("gpu_temperature", "GPU", 58.0, 0, "58°C"),
+        ("load_average_1m", "LOAD", 1.24, 2, "1.24"),
+        ("network_receive_rate", "NET RX", 1.2 * 1024 ** 2, 1, "1.2MB/S"),
+        ("network_transmit_rate", "NET TX", 640 * 1024, 0, "640KB/S"),
+        ("uptime", "UPTIME", 3 * 3600 + 41 * 60, 0, "03:41"),
+    ],
+)
+def test_value_only_omits_every_label_but_preserves_required_units(
+    metric: str, label: str, value: float, precision: int, expected: str
+) -> None:
+    settings = SystemMetricSettings(
+        metric=metric,
+        label=label,
+        display_mode="value_only",
+        precision=precision,
+    )  # type: ignore[arg-type]
+    assert metric_text(
+        settings, context(90, 10, snapshot(**{metric: value}))
+    ) == expected
+    assert label not in metric_text_format_envelope(settings)[0]
+
+
 def test_system_metric_unavailable_custom_label_fonts_and_background() -> None:
     settings = SystemMetricSettings(
         label="LOAD", unavailable_text="NA", font="3x5",  # type: ignore[arg-type]

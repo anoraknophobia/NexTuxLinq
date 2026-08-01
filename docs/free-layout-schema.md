@@ -54,6 +54,9 @@ matching `settings` object. Initial types are:
 - `static_text`
 - `scrolling_text`
 - `date`
+- `system_metric`
+- `metric_bar`
+- `built_in_icon`
 
 Unknown widget types, settings for the wrong discriminator, missing required
 settings, and unknown settings fields are rejected. Phase 4 activates the
@@ -115,7 +118,7 @@ This design remains specific to the Phanteks Matrix900. It does not change HID
 transport, protocol reports, physical orientation, or framebuffer generation.
 
 The separate [free-layout compositor foundation](free-layout-compositor.md)
-implements region-local drawing, all five canonical widgets,
+implements region-local drawing for all eight canonical widgets,
 settings-dependent update-policy aggregation, and logical-to-Creator
 orientation. Complete byte comparisons prove that migrated schema-v1 logical
 and device framebuffers remain equivalent to the compatibility renderer. The

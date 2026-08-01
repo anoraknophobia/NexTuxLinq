@@ -108,6 +108,7 @@
                     <option value="date">Date</option>
                     <option value="system_metric">System Metric</option>
                     <option value="metric_bar">Metric Bar</option>
+                    <option value="built_in_icon">Built-in Icon</option>
                   </select>
                 </label>
                 <label class="checkbox-label">
@@ -159,6 +160,29 @@
                 <fieldset data-widget-panel="blank">
                   <legend>Nothing / Gap</legend>
                   <p>This region draws only its optional background.</p>
+                </fieldset>
+
+                <fieldset data-widget-panel="built_in_icon" hidden>
+                  <legend>Built-in Icon</legend>
+                  <div class="inspector-grid">
+                    <label>Icon
+                      <select data-setting="icon" data-built-in-icon-select></select>
+                    </label>
+                    <label>Horizontal alignment
+                      <select data-setting="horizontal_alignment"
+                              data-built-in-icon-horizontal-alignment></select>
+                    </label>
+                    <label>Vertical alignment
+                      <select data-setting="vertical_alignment"
+                              data-built-in-icon-vertical-alignment></select>
+                    </label>
+                    <div class="fixed-icon-color" data-fixed-icon-color>
+                      <span class="fixed-color-swatch" aria-hidden="true"></span>
+                      <span data-fixed-icon-color-label>Fixed icon color</span>
+                      <code data-fixed-icon-color-hex></code>
+                    </div>
+                  </div>
+                  <p class="field-help">Native 15×10 pixels. The icon is never scaled or recolored by display effects.</p>
                 </fieldset>
 
                 <fieldset data-widget-panel="clock" hidden>
@@ -454,6 +478,28 @@
                   Foreground Rainbow overrides this color while the effect is active.
                 </p>
               </div>
+              <section id="fl-content-preview" class="content-preview"
+                       aria-labelledby="fl-content-preview-heading">
+                <h4 id="fl-content-preview-heading">Content preview</h4>
+                <div class="content-preview-layout">
+                  <div class="content-preview-canvas-shell">
+                    <canvas id="fl-content-preview-canvas" width="1" height="1"
+                            aria-label="Authoritative pixel rendering of the selected widget">
+                      Authoritative pixel preview of the selected widget.
+                    </canvas>
+                  </div>
+                  <dl class="content-preview-details">
+                    <div><dt>Fit</dt><dd id="fl-content-preview-fit">Waiting for preview</dd></div>
+                    <div><dt>Current output</dt><dd id="fl-content-preview-output">—</dd></div>
+                    <div><dt>Required size</dt><dd id="fl-content-preview-required">—</dd></div>
+                    <div><dt>Resolved font</dt><dd id="fl-content-preview-font">Not applicable</dd></div>
+                    <div><dt>Current region</dt><dd id="fl-content-preview-current">—</dd></div>
+                  </dl>
+                </div>
+                <div id="fl-content-preview-actions" class="font-fit-actions"
+                     aria-label="Content preview quick actions"></div>
+                <p class="field-help">This backend-rendered preview never applies, saves, or uploads changes.</p>
+              </section>
             </div>
           </aside>
         </div>

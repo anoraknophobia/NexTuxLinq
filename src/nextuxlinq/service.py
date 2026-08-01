@@ -6,7 +6,7 @@ import asyncio
 import threading
 import time
 from collections.abc import Awaitable, Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -31,7 +31,9 @@ from nextuxlinq.legacy_compat import (
 from nextuxlinq.migration import migrate_configuration_v1_to_v2
 from nextuxlinq.models import ConfigurationDocument, ProfileConfig
 from nextuxlinq.models_v2 import (
+    CanvasConfig,
     ConfigurationDocumentV2,
+    DisplayEffect,
     ProfileConfigV2,
     RegionConfig,
 )
@@ -59,9 +61,20 @@ from nextuxlinq.system_metrics import (
     LinuxSystemMetricsProvider,
     MetricAvailability,
     MetricId,
+    MetricReason,
     SystemMetricsSnapshot,
 )
-from nextuxlinq.widget_models import FontChoice, WidgetType
+from nextuxlinq.widget_models import (
+    ClockSettings,
+    DateSettings,
+    FontChoice,
+    MetricBarSettings,
+    MetricDisplayMode,
+    ScrollingTextSettings,
+    StaticTextSettings,
+    SystemMetricSettings,
+    WidgetType,
+)
 
 AsyncSleep = Callable[[float], Awaitable[None]]
 WallClock = Callable[[], datetime]
@@ -131,6 +144,23 @@ class CandidateValidationIssue:
     minimum_width: int | None = None
     minimum_height: int | None = None
     font_fit: FontFitAnalysis | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WidgetContentPreview:
+    framebuffer: bytes
+    preview_width: int
+    preview_height: int
+    current_width: int
+    current_height: int
+    fit_state: str
+    resolved_font: str | None
+    minimum_width: int | None
+    minimum_height: int | None
+    current_output: str | None
+    output_is_example: bool
+    suggested_font: str | None
+    suggest_value_only: bool
 
 
 class CandidateValidationError(ValueError):
@@ -1233,6 +1263,311 @@ class NexTuxLinqService:
                 })
             options[region.id] = region_options
         return resolved, options, analyses
+
+    @staticmethod
+    def _preview_example_value(metric_id: MetricId) -> float:
+        return {
+            MetricId.CPU_USAGE: 14.0,
+            MetricId.MEMORY_USAGE: 14.0,
+            MetricId.CPU_TEMPERATURE: 43.0,
+            MetricId.UPTIME: float(3 * 3600 + 41 * 60),
+            MetricId.LOAD_AVERAGE_1M: 1.24,
+            MetricId.STORAGE_USAGE: 14.0,
+            MetricId.NETWORK_RECEIVE_RATE: 1.2 * 1024.0 ** 2,
+            MetricId.NETWORK_TRANSMIT_RATE: 640.0 * 1024.0,
+            MetricId.GPU_USAGE: 14.0,
+            MetricId.GPU_TEMPERATURE: 58.0,
+            MetricId.GPU_MEMORY_USAGE: 14.0,
+            MetricId.STORAGE_TEMPERATURE: 41.0,
+        }[metric_id]
+
+    def _preview_metrics(
+        self,
+        metric_id: MetricId,
+        wall_clock: datetime,
+    ) -> tuple[SystemMetricsSnapshot, bool]:
+        snapshot = self._last_metrics_snapshot
+        if snapshot is not None and snapshot.value(metric_id) is not None:
+            return snapshot, False
+        availability = {
+            item: (
+                MetricAvailability.AVAILABLE
+                if item is metric_id else MetricAvailability.UNAVAILABLE
+            )
+            for item in MetricId
+        }
+        reasons = {
+            item: (
+                None if item is metric_id else MetricReason.SOURCE_NOT_PRESENT
+            )
+            for item in MetricId
+        }
+        return SystemMetricsSnapshot(
+            sample_monotonic=0.0,
+            sample_time=wall_clock,
+            values={metric_id: self._preview_example_value(metric_id)},
+            availability=availability,
+            source_status="partial",
+            reasons=reasons,
+        ), True
+
+    def _widget_renders_at(
+        self,
+        region: RegionConfig,
+        width: int,
+        height: int,
+        *,
+        wall_clock: datetime,
+        metrics_snapshot: SystemMetricsSnapshot | None,
+    ) -> bool:
+        definition = self._widget_registry.resolve(region.widget.type)
+        if definition.renderer is None:
+            return False
+        try:
+            surface = RegionSurface(width, height, RgbColor(0, 0, 0))
+            context = RenderContext(
+                wall_clock=wall_clock,
+                animation_time=0.0,
+                canvas_width=MATRIX_WIDTH,
+                canvas_height=MATRIX_HEIGHT,
+                region_id=region.id,
+                region_width=width,
+                region_height=height,
+                metrics_snapshot=metrics_snapshot,
+            )
+            definition.renderer(surface, region.widget.settings, context)
+        except Exception:
+            return False
+        return True
+
+    def _widget_intrinsic_size(
+        self,
+        region: RegionConfig,
+        *,
+        wall_clock: datetime,
+        metrics_snapshot: SystemMetricsSnapshot | None,
+    ) -> tuple[int | None, int | None]:
+        """Resolve minimum geometry from canonical analysis, then bounded fallback."""
+        analysis = analyze_widget_font_fit(
+            region.widget.settings,
+            region_width=MATRIX_WIDTH,
+            region_height=MATRIX_HEIGHT,
+        )
+        if analysis is not None:
+            guidance = analysis.selected_candidate
+            if guidance is None:
+                guidance = next(
+                    (
+                        item for item in reversed(analysis.candidates)
+                        if item.compatible_with_widget
+                        and item.complete_glyph_coverage
+                    ),
+                    None,
+                )
+            if guidance is not None:
+                return guidance.minimum_width, guidance.minimum_height
+            return None, None
+        definition = self._widget_registry.resolve(region.widget.type)
+        if definition.minimum_width is not None and definition.minimum_height is not None:
+            return definition.minimum_width, definition.minimum_height
+        for height in range(1, MATRIX_HEIGHT + 1):
+            for width in range(1, MATRIX_WIDTH + 1):
+                if self._widget_renders_at(
+                    region,
+                    width,
+                    height,
+                    wall_clock=wall_clock,
+                    metrics_snapshot=metrics_snapshot,
+                ):
+                    return width, height
+        return None, None
+
+    def get_widget_content_preview(
+        self,
+        region: RegionConfig,
+        canvas: CanvasConfig,
+        effect: DisplayEffect,
+    ) -> WidgetContentPreview:
+        """Render one side-effect-free widget preview through the compositor."""
+        if type(region) is not RegionConfig or type(canvas) is not CanvasConfig:
+            raise TypeError("preview requires canonical region and canvas values.")
+        wall_clock = self._wall_clock()
+        metrics_snapshot: SystemMetricsSnapshot | None = None
+        output_is_example = False
+        settings = region.widget.settings
+        if isinstance(settings, (SystemMetricSettings, MetricBarSettings)):
+            metrics_snapshot, output_is_example = self._preview_metrics(
+                settings.metric, wall_clock
+            )
+
+        current_fits = self._widget_renders_at(
+            region,
+            region.width,
+            region.height,
+            wall_clock=wall_clock,
+            metrics_snapshot=metrics_snapshot,
+        )
+        minimum_width, minimum_height = self._widget_intrinsic_size(
+            region,
+            wall_clock=wall_clock,
+            metrics_snapshot=metrics_snapshot,
+        )
+        current_analysis = analyze_widget_font_fit(
+            settings,
+            region_width=region.width,
+            region_height=region.height,
+        )
+        if current_analysis is not None and current_analysis.no_font_supports_content:
+            fit_state = "no_available_font_supports_content"
+        elif current_fits:
+            fit_state = "fits_current_region"
+        elif (
+            current_analysis is not None
+            and current_analysis.best_smaller_alternative is not None
+        ):
+            fit_state = "would_fit_with_smaller_font"
+        else:
+            fit_state = "current_region_too_small"
+
+        preview_width = region.width if current_fits else minimum_width
+        preview_height = region.height if current_fits else minimum_height
+        preview_geometry_is_renderable = (
+            preview_width is not None
+            and preview_height is not None
+            and 1 <= preview_width <= MATRIX_WIDTH
+            and 1 <= preview_height <= MATRIX_HEIGHT
+        )
+        if not preview_geometry_is_renderable:
+            preview_width, preview_height = region.width, region.height
+            color = RgbColor.from_schema_color(
+                region.background_color or canvas.background_color
+            ).to_bytes()
+            framebuffer = color * (preview_width * preview_height)
+        else:
+            assert preview_width is not None and preview_height is not None
+            preview_region = replace(
+                region, x=0, y=0, width=preview_width, height=preview_height
+            )
+            profile = ProfileConfigV2(
+                brightness=None,
+                canvas=canvas,
+                regions=(preview_region,),
+                effect=effect,
+            )
+            rendered = self._compositor.render(
+                profile,
+                generation_time=wall_clock,
+                animation_time=0.0,
+                metrics_snapshot=metrics_snapshot,
+            )
+            rows = []
+            for y in range(preview_height):
+                start = y * MATRIX_WIDTH * 3
+                rows.append(rendered.logical_framebuffer[
+                    start : start + preview_width * 3
+                ])
+            framebuffer = b"".join(rows)
+
+        preview_analysis = analyze_widget_font_fit(
+            settings,
+            region_width=preview_width,
+            region_height=preview_height,
+        )
+        resolved_font: str | None = None
+        if preview_analysis is not None:
+            resolved = preview_analysis.resolved_auto_font
+            if resolved is None and preview_analysis.selected_candidate is not None:
+                if preview_analysis.selected_candidate.overall_fit:
+                    resolved = preview_analysis.selected_explicit_font
+            resolved_font = None if resolved is None else resolved.value
+
+        current_output: str | None
+        if isinstance(settings, SystemMetricSettings):
+            from nextuxlinq.rendering_v2.widgets.system_metric import metric_text
+
+            current_output = metric_text(settings, RenderContext(
+                wall_clock=wall_clock,
+                animation_time=0.0,
+                canvas_width=MATRIX_WIDTH,
+                canvas_height=MATRIX_HEIGHT,
+                region_id=region.id,
+                region_width=preview_width,
+                region_height=preview_height,
+                metrics_snapshot=metrics_snapshot,
+            ))
+        elif isinstance(settings, ClockSettings):
+            from nextuxlinq.rendering_v2.widgets.clock import format_clock
+            from nextuxlinq.rendering_v2.widgets.timezone import resolve_wall_clock
+
+            current_output = format_clock(
+                resolve_wall_clock(wall_clock, settings.time_zone),
+                settings.format,
+                show_seconds=settings.show_seconds,
+            )
+        elif isinstance(settings, DateSettings):
+            from nextuxlinq.rendering_v2.widgets.date import format_date
+            from nextuxlinq.rendering_v2.widgets.timezone import resolve_wall_clock
+
+            current_output = format_date(
+                resolve_wall_clock(wall_clock, settings.time_zone), settings.format
+            )
+        elif isinstance(settings, (StaticTextSettings, ScrollingTextSettings)):
+            current_output = settings.content.upper() if settings.uppercase else settings.content
+        elif isinstance(settings, MetricBarSettings):
+            assert metrics_snapshot is not None
+            value = metrics_snapshot.value(settings.metric)
+            current_output = None if value is None else f"{value:g}"
+        elif region.widget.type is WidgetType.BUILT_IN_ICON:
+            current_output = "CachyOS Logo"
+        else:
+            current_output = "Blank"
+
+        suggest_value_only = False
+        if (
+            isinstance(settings, SystemMetricSettings)
+            and settings.display_mode is MetricDisplayMode.LABEL_AND_VALUE
+        ):
+            value_only_region = replace(
+                region,
+                widget=replace(
+                    region.widget,
+                    settings=replace(
+                        settings, display_mode=MetricDisplayMode.VALUE_ONLY
+                    ),
+                ),
+            )
+            value_width, _ = self._widget_intrinsic_size(
+                value_only_region,
+                wall_clock=wall_clock,
+                metrics_snapshot=metrics_snapshot,
+            )
+            suggest_value_only = (
+                value_width is not None
+                and minimum_width is not None
+                and value_width < minimum_width
+            )
+
+        suggested = (
+            None
+            if current_analysis is None
+            or current_analysis.best_smaller_alternative is None
+            else current_analysis.best_smaller_alternative.value
+        )
+        return WidgetContentPreview(
+            framebuffer=framebuffer,
+            preview_width=preview_width,
+            preview_height=preview_height,
+            current_width=region.width,
+            current_height=region.height,
+            fit_state=fit_state,
+            resolved_font=resolved_font,
+            minimum_width=minimum_width,
+            minimum_height=minimum_height,
+            current_output=current_output,
+            output_is_example=output_is_example,
+            suggested_font=suggested,
+            suggest_value_only=suggest_value_only,
+        )
 
     def get_preview(self) -> PreviewSnapshot:
         generated_at = self._monotonic()

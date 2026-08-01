@@ -10,7 +10,7 @@ reordered, enabled, disabled, or removed. New profiles start with the default
 canvas background and no regions.
 
 Each region has exactly one widget selection: Nothing / Gap, Clock, Static
-Text, Scrolling Text, Date, System Metric, or Metric Bar. The inspector displays only the canonical
+Text, Scrolling Text, Date, System Metric, Metric Bar, or Built-in Icon. The inspector displays only the canonical
 settings for that widget, including font, alignment, color, timezone, overflow,
 scroll direction, speed, and trailing gap where applicable. Geometry is always
 stored as integer `x`, `y`, `width`, and `height` pixels. Full/half canvas
@@ -35,6 +35,21 @@ draft-only **Use Auto** or concrete-font actions when they are valid. A
 the canvas and does not overlap another region; it never moves the region or a
 neighbor. Every action reruns server validation and performs no Apply, Save,
 upload, or persistence operation.
+
+## Content preview
+
+The full-width **Content preview** in the Selected region inspector is an
+authoritative backend bitmap render, not browser-font or CSS imitation. It
+shows current/sample output, current region, minimum required geometry, fit
+state, and resolved font where applicable. An undersized widget is rendered on
+temporary minimum geometry without changing its draft. Metric previews reuse
+the shared sanitized snapshot and use a deterministic format example when no
+live value is available, without additional sensor sampling.
+
+**Use Value only**, **Use Auto**, suggested-font, and **Resize to W × H** quick
+actions modify only the local draft and rerun validation. Unsafe resize actions
+remain hidden. Preview performs no Apply, Save, persistence, Matrix900 upload,
+or hardware access.
 
 The primary page order is Device status, Free-layout editor, Physical display
 preview, Profile, then Validate, Apply, and Save. The full-width region

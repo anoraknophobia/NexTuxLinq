@@ -263,6 +263,43 @@ BUILTIN_PRESETS = (
         ),
     ),
     BuiltinPreset(
+        "cachyos-system-monitor",
+        "CachyOS System Monitor",
+        "Native CachyOS logo with compact CPU metrics and a clock.",
+        _profile(
+            _region(
+                "cachyos-clock", 0, 0, 25, 10,
+                _settings(WidgetType.CLOCK), "Clock",
+            ),
+            _region(
+                "cachyos-cpu", 25, 0, 20, 10,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="cpu_usage",
+                    label="CPU",
+                    display_mode="value_only",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "CPU Usage",
+            ),
+            _region(
+                "cachyos-temperature", 45, 0, 25, 10,
+                _settings(
+                    WidgetType.SYSTEM_METRIC,
+                    metric="cpu_temperature",
+                    label="CPU",
+                    display_mode="value_only",
+                    font=FontChoice.COMPACT_3X5.value,
+                ),
+                "CPU Temperature",
+            ),
+            _region(
+                "cachyos-logo", 75, 0, 15, 10,
+                _settings(WidgetType.BUILT_IN_ICON), "CachyOS Logo",
+            ),
+        ),
+    ),
+    BuiltinPreset(
         "rainbow-showcase",
         "Rainbow Showcase",
         "A continuous Rear-to-Front rainbow across three foreground regions.",

@@ -9,6 +9,20 @@ orientation remain unchanged.
 The active visual editor provides exactly one widget dropdown per region and
 shows only settings belonging to the selected widget.
 
+## Built-in Icon
+
+`built_in_icon` renders a checked-in native bitmap with no runtime image
+loading, decoding, scaling, antialiasing, or uploaded paths. The initial
+`cachyos` entry is an exact 15×10 fixture whose active pixels use immutable
+CachyOS Turquoise (`#1DC7B5`) metadata. The editor offers icon and
+horizontal/vertical alignment only; there is no persisted or editable icon
+color. Transparent pixels retain the region background.
+
+CachyOS pixels are explicitly effect-ineligible in the semantic foreground
+mask, so Foreground Rainbow cannot recolor them. The bitmap remains unmirrored
+inside its region and preview/device output use the same row orientation. This
+pixel adaptation does not imply CachyOS affiliation or endorsement.
+
 ## System Metric
 
 System Metric formats one immutable render-cycle snapshot as value-only or
@@ -18,6 +32,11 @@ storage temperatures. Percentage values use `%`; temperatures use compact
 `CPU43°`, `CPU43°C`, or `CPU109°F` token layouts; network rates use `KB/S`,
 `MB/S`, or `GB/S`. Unavailable values use configurable safe text, defaulting
 to `--`.
+Value-only mode omits the label token and its width completely while retaining
+the required unit: examples include `14%`, `43°C`, `1.24`, `1.2MB/S`,
+`640KB/S`, and `03:41`. Label-and-value mode preserves the canonical or custom
+short label. Changing mode preserves metric, precision, unit, color, font,
+alignment, overflow, and unavailable text.
 Uptime is `MM:SS` below one hour, `HH:MM` below one day, and
 `<days>D <hours>H` from one day onward, with a two-digit hour. Precision is
 zero to two decimals for numeric values. Existing intrinsic fonts, alignments,
@@ -163,7 +182,7 @@ pixels preserve the region's existing background.
 
 Each call to the canonical registry factory returns a fresh immutable
 registry in stable order: Nothing / Gap, Clock, Static Text, Scrolling Text,
-Date, System Metric, and Metric Bar. Every definition binds exactly one canonical settings model, one
+Date, System Metric, Metric Bar, and Built-in Icon. Every definition binds exactly one canonical settings model, one
 renderer, validated defaults, broad minimum-size editor guidance, and an
 immutable settings-aware update-policy resolver. No registry instance is
 created during package import.

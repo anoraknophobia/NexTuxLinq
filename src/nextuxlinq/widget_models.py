@@ -102,6 +102,11 @@ class WidgetType(StrEnum):
     DATE = "date"
     SYSTEM_METRIC = "system_metric"
     METRIC_BAR = "metric_bar"
+    BUILT_IN_ICON = "built_in_icon"
+
+
+class BuiltInIconId(StrEnum):
+    CACHYOS = "cachyos"
 
 
 class ClockFormat(StrEnum):
@@ -671,6 +676,42 @@ class MetricBarSettings:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class BuiltInIconSettings:
+    """Settings for one immutable native built-in pixel icon."""
+
+    icon: BuiltInIconId = BuiltInIconId.CACHYOS
+    horizontal_alignment: HorizontalAlignment = HorizontalAlignment.CENTER
+    vertical_alignment: VerticalAlignment = VerticalAlignment.CENTER
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "icon", _enum(BuiltInIconId, self.icon, "icon"))
+        object.__setattr__(
+            self,
+            "horizontal_alignment",
+            _enum(HorizontalAlignment, self.horizontal_alignment, "horizontal_alignment"),
+        )
+        object.__setattr__(
+            self,
+            "vertical_alignment",
+            _enum(VerticalAlignment, self.vertical_alignment, "vertical_alignment"),
+        )
+
+    @classmethod
+    def from_dict(cls, raw: object) -> BuiltInIconSettings:
+        values = _mapping(raw, "built_in_icon settings")
+        allowed = {"icon", "horizontal_alignment", "vertical_alignment"}
+        _fields(values, allowed, "built_in_icon settings")
+        return cls(**{key: values[key] for key in allowed})  # type: ignore[arg-type]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "icon": self.icon.value,
+            "horizontal_alignment": self.horizontal_alignment.value,
+            "vertical_alignment": self.vertical_alignment.value,
+        }
+
+
 WidgetSettings: TypeAlias = (
     BlankSettings
     | ClockSettings
@@ -679,6 +720,7 @@ WidgetSettings: TypeAlias = (
     | DateSettings
     | SystemMetricSettings
     | MetricBarSettings
+    | BuiltInIconSettings
 )
 
 CANONICAL_WIDGET_SETTINGS_MODELS: Mapping[
@@ -692,6 +734,7 @@ CANONICAL_WIDGET_SETTINGS_MODELS: Mapping[
         WidgetType.DATE: DateSettings,
         WidgetType.SYSTEM_METRIC: SystemMetricSettings,
         WidgetType.METRIC_BAR: MetricBarSettings,
+        WidgetType.BUILT_IN_ICON: BuiltInIconSettings,
     }
 )
 """Immutable discriminator-to-settings-model mapping used by schema v2."""

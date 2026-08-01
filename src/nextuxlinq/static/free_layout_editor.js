@@ -35,6 +35,7 @@
     "date",
     "system_metric",
     "metric_bar",
+    "built_in_icon",
   ]);
   const REGION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
   const PROFILE_ID = /^[A-Za-z0-9_-]{1,32}$/;
@@ -414,6 +415,14 @@
       && settings.content.length <= 64
     );
     if (widget.type === "blank") return Object.keys(settings).length ? "settings" : null;
+    if (widget.type === "built_in_icon") {
+      const iconIds = new Set(
+        (metadata.built_in_icon_definitions || []).map((item) => item.id),
+      );
+      if (iconIds.size > 0 && !iconIds.has(settings.icon)) return "icon";
+      if (!horizontalValid()) return "horizontal_alignment";
+      return verticalValid() ? null : "vertical_alignment";
+    }
     if (widget.type === "system_metric") {
       const metricIds = new Set(
         (metadata.metric_definitions || []).map((item) => item.id),
@@ -969,6 +978,14 @@
       errors: element("#fl-validation-errors"),
       preview: element("#draft-preview"),
       previewState: element("#fl-preview-state"),
+      contentPreview: element("#fl-content-preview"),
+      contentPreviewCanvas: element("#fl-content-preview-canvas"),
+      contentPreviewFit: element("#fl-content-preview-fit"),
+      contentPreviewOutput: element("#fl-content-preview-output"),
+      contentPreviewRequired: element("#fl-content-preview-required"),
+      contentPreviewFont: element("#fl-content-preview-font"),
+      contentPreviewCurrent: element("#fl-content-preview-current"),
+      contentPreviewActions: element("#fl-content-preview-actions"),
       apply: element("#fl-apply"),
       save: element("#fl-save"),
       validate: element("#fl-validate"),
@@ -997,6 +1014,7 @@
       deleteBackup: element("#fl-delete-backup"),
     };
     const previewContext = elements.preview.getContext("2d");
+    const contentPreviewContext = elements.contentPreviewCanvas?.getContext?.("2d") || null;
     const state = {
       metadata: null,
       defaults: null,
@@ -1029,6 +1047,9 @@
       pendingFullImportBackup: false,
       backupLoading: false,
       regionBackgroundColors: new Map(),
+      contentPreviewResult: null,
+      contentPreviewFingerprint: null,
+      contentPreviewToken: 0,
     };
     let validationTimer = null;
     let animationTimer = null;
@@ -1406,6 +1427,58 @@
         panel.hidden = panel.dataset.widgetPanel !== region.widget.type;
       }
       const settings = region.widget.settings;
+      const iconSelect = elements.settings.querySelector?.(
+        '[data-built-in-icon-select]',
+      );
+      if (iconSelect && region.widget.type === "built_in_icon") {
+        iconSelect.replaceChildren(...(
+          state.metadata.built_in_icon_definitions || []
+        ).map((definition) => {
+          const option = documentObject.createElement("option");
+          option.value = definition.id;
+          option.textContent = definition.label;
+          return option;
+        }));
+        const iconDefinition = state.metadata.built_in_icon_definitions?.find(
+          (definition) => definition.id === settings.icon,
+        );
+        const fixedColor = elements.settings.querySelector?.(
+          '[data-fixed-icon-color]',
+        );
+        const fixedSwatch = fixedColor?.querySelector?.(".fixed-color-swatch");
+        const fixedLabel = fixedColor?.querySelector?.(
+          "[data-fixed-icon-color-label]",
+        );
+        const fixedHex = fixedColor?.querySelector?.(
+          "[data-fixed-icon-color-hex]",
+        );
+        if (fixedSwatch && iconDefinition) {
+          fixedSwatch.style.backgroundColor = iconDefinition.fixed_color;
+          fixedSwatch.title = iconDefinition.fixed_color;
+        }
+        if (fixedLabel && iconDefinition) {
+          fixedLabel.textContent = `Fixed icon color: ${
+            iconDefinition.fixed_color_label
+          }`;
+        }
+        if (fixedHex && iconDefinition) {
+          fixedHex.textContent = iconDefinition.fixed_color;
+        }
+        for (const [selector, definitions] of [
+          ["[data-built-in-icon-horizontal-alignment]",
+            state.metadata.built_in_icon_horizontal_alignments || []],
+          ["[data-built-in-icon-vertical-alignment]",
+            state.metadata.built_in_icon_vertical_alignments || []],
+        ]) {
+          const alignmentSelect = elements.settings.querySelector?.(selector);
+          alignmentSelect?.replaceChildren(...definitions.map((definition) => {
+            const option = documentObject.createElement("option");
+            option.value = definition.id;
+            option.textContent = definition.label;
+            return option;
+          }));
+        }
+      }
       const temperatureUnitSelect = elements.settings.querySelector?.(
         '[data-widget-panel="system_metric"] [data-temperature-unit-select]',
       );
@@ -1548,6 +1621,9 @@
       elements.noSelection.hidden = Boolean(region);
       elements.selectedPanel.hidden = !region;
       if (!region) {
+        state.contentPreviewFingerprint = null;
+        state.contentPreviewResult = null;
+        elements.contentPreviewActions?.replaceChildren();
         if (elements.foregroundEffectNote) {
           elements.foregroundEffectNote.hidden = true;
         }
@@ -1660,9 +1736,10 @@
           : "Foreground Rainbow overrides this color while the effect is active.";
         elements.foregroundEffectNote.hidden = !(
           foregroundRainbowActive(activeProfile())
-          && region.widget.type !== "blank"
+          && !["blank", "built_in_icon"].includes(region.widget.type)
         );
       }
+      void refreshContentPreview(region);
     }
 
     function renderErrors() {
@@ -1886,6 +1963,161 @@
       );
       previewContext.putImageData(image, 0, 0);
       elements.previewState.textContent = `${label} · viewer perspective`;
+    }
+
+    function renderContentPreview(result) {
+      if (!result || !elements.contentPreviewCanvas || !contentPreviewContext) return;
+      let binary;
+      try {
+        binary = decodeBase64(result.framebuffer_base64);
+      } catch (error) {
+        return;
+      }
+      const width = result.preview_width;
+      const height = result.preview_height;
+      if (binary.length !== width * height * 3) return;
+      elements.contentPreviewCanvas.width = width;
+      elements.contentPreviewCanvas.height = height;
+      const image = contentPreviewContext.createImageData(width, height);
+      for (let pixel = 0; pixel < width * height; pixel += 1) {
+        image.data[pixel * 4] = binary.charCodeAt(pixel * 3);
+        image.data[pixel * 4 + 1] = binary.charCodeAt(pixel * 3 + 1);
+        image.data[pixel * 4 + 2] = binary.charCodeAt(pixel * 3 + 2);
+        image.data[pixel * 4 + 3] = 255;
+      }
+      contentPreviewContext.putImageData(image, 0, 0);
+      const fitLabels = {
+        fits_current_region: "Fits current region",
+        would_fit_with_smaller_font: "Would fit with a smaller font",
+        current_region_too_small: "Current region is too small",
+        no_available_font_supports_content: "No available font supports the content",
+      };
+      elements.contentPreviewFit.textContent = fitLabels[result.fit_state]
+        || "Preview unavailable";
+      elements.contentPreviewOutput.textContent = result.current_output === null
+        ? "—"
+        : `${result.output_is_example ? "Example: " : ""}${result.current_output}`;
+      elements.contentPreviewRequired.textContent = (
+        result.minimum_width === null || result.minimum_height === null
+      ) ? "Not available" : `${result.minimum_width} × ${result.minimum_height} px`;
+      elements.contentPreviewFont.textContent = result.resolved_font
+        ? result.resolved_font.replace("x", "×") : "Not applicable";
+      elements.contentPreviewCurrent.textContent = `${result.current_width} × ${
+        result.current_height
+      } px`;
+      elements.contentPreviewCanvas.setAttribute(
+        "aria-label",
+        `Authoritative ${width} by ${height} pixel rendering. ${
+          fitLabels[result.fit_state] || "Fit unavailable"
+        }.`,
+      );
+
+      const region = selectedRegion();
+      const actions = [];
+      const addAction = (label, action) => {
+        const button = documentObject.createElement("button");
+        button.type = "button";
+        button.className = "secondary small";
+        button.textContent = label;
+        button.addEventListener("click", action);
+        actions.push(button);
+      };
+      if (region && result.suggest_value_only
+          && region.widget.type === "system_metric"
+          && region.widget.settings.display_mode === "label_and_value") {
+        addAction("Use Value only", () => mutate((candidate) => {
+          candidate.profiles[candidate.active_profile].regions.find(
+            (item) => item.id === region.id,
+          ).widget.settings.display_mode = "value_only";
+        }));
+      }
+      if (region?.widget.settings.font
+          && ["fits_current_region", "would_fit_with_smaller_font"].includes(
+            result.fit_state,
+          )
+          && region.widget.settings.font !== "auto") {
+        addAction("Use Auto", () => mutate((candidate) => {
+          candidate.profiles[candidate.active_profile].regions.find(
+            (item) => item.id === region.id,
+          ).widget.settings.font = "auto";
+        }));
+      }
+      if (region && result.suggested_font
+          && result.suggested_font !== region.widget.settings.font) {
+        addAction(`Use ${result.suggested_font.replace("x", "×")}`, () => mutate(
+          (candidate) => {
+            candidate.profiles[candidate.active_profile].regions.find(
+              (item) => item.id === region.id,
+            ).widget.settings.font = result.suggested_font;
+          },
+        ));
+      }
+      if (region && result.minimum_width && result.minimum_height) {
+        const resized = safeResizeGeometry(
+          activeProfile(), region.id, result.minimum_width, result.minimum_height,
+        );
+        if (resized && (region.width !== result.minimum_width
+            || region.height !== result.minimum_height)) {
+          addAction(`Resize to ${result.minimum_width} × ${result.minimum_height}`,
+            () => mutate((candidate) => {
+              candidate.profiles[candidate.active_profile] = safeResizeGeometry(
+                candidate.profiles[candidate.active_profile],
+                region.id,
+                result.minimum_width,
+                result.minimum_height,
+              );
+            }));
+        }
+      }
+      elements.contentPreviewActions?.replaceChildren(...actions);
+    }
+
+    async function refreshContentPreview(region) {
+      if (!region || !state.metadata || !elements.contentPreviewCanvas) return;
+      const profile = activeProfile();
+      const payload = {
+        widget: region.widget,
+        region_background: region.background_color,
+        canvas_background: profile.canvas.background_color,
+        effect: profile.effect || effectDefault(state.metadata),
+        current_width: region.width,
+        current_height: region.height,
+      };
+      const signature = fingerprint(payload);
+      if (signature === state.contentPreviewFingerprint) {
+        if (state.contentPreviewResult) renderContentPreview(state.contentPreviewResult);
+        return;
+      }
+      state.contentPreviewFingerprint = signature;
+      const token = ++state.contentPreviewToken;
+      state.contentPreviewResult = null;
+      elements.contentPreviewCanvas.width = 1;
+      elements.contentPreviewCanvas.height = 1;
+      elements.contentPreviewActions?.replaceChildren();
+      if (elements.contentPreviewOutput) elements.contentPreviewOutput.textContent = "—";
+      if (elements.contentPreviewRequired) elements.contentPreviewRequired.textContent = "—";
+      if (elements.contentPreviewFont) elements.contentPreviewFont.textContent = "Not applicable";
+      if (elements.contentPreviewCurrent) {
+        elements.contentPreviewCurrent.textContent = `${region.width} × ${region.height} px`;
+      }
+      if (elements.contentPreviewFit) elements.contentPreviewFit.textContent = "Rendering…";
+      try {
+        const result = await request("/content-preview", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        if (token !== state.contentPreviewToken) return;
+        state.contentPreviewResult = result;
+        renderContentPreview(result);
+      } catch (error) {
+        if (token !== state.contentPreviewToken) return;
+        state.contentPreviewFingerprint = null;
+        state.contentPreviewResult = null;
+        if (elements.contentPreviewFit) {
+          elements.contentPreviewFit.textContent = "Preview unavailable";
+        }
+      }
     }
 
     function clearValidationTimer() {
@@ -3005,6 +3237,14 @@
         ]);
         state.metadata = metadata;
         state.defaults = widgetDefaultMap(metadata);
+        elements.widget.replaceChildren(...metadata.widget_definitions.map(
+          (definition) => {
+            const option = documentObject.createElement("option");
+            option.value = definition.type;
+            option.textContent = definition.label;
+            return option;
+          },
+        ));
         state.applied = clone(configuration.configuration);
         state.draft = clone(configuration.configuration);
         state.activeRevision = configuration.active_revision;

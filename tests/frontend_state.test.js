@@ -23,6 +23,19 @@ const widgetMetadata = {
     {id: "3x7", label: "3×7", glyph_height: 7, maximum_glyph_width: 3},
     {id: "3x5", label: "3×5", glyph_height: 5, maximum_glyph_width: 3},
   ],
+  built_in_icon_definitions: [
+    {id: "cachyos", label: "CachyOS Logo", width: 15, height: 10,
+      fixed_color: "#1DC7B5", fixed_color_label: "CachyOS Turquoise",
+      effect_eligible: false},
+  ],
+  built_in_icon_horizontal_alignments: [
+    {id: "start", label: "Start"}, {id: "center", label: "Center"},
+    {id: "end", label: "End"},
+  ],
+  built_in_icon_vertical_alignments: [
+    {id: "top", label: "Top"}, {id: "center", label: "Center"},
+    {id: "bottom", label: "Bottom"},
+  ],
   widget_definitions: [
     {
       type: "blank", label: "Nothing / Gap", default_settings: {},
@@ -84,6 +97,14 @@ const widgetMetadata = {
         border_enabled: false, border_color: "#FFFFFF",
       },
       minimum_width: 1, minimum_height: 1,
+    },
+    {
+      type: "built_in_icon", label: "Built-in Icon",
+      default_settings: {
+        icon: "cachyos", horizontal_alignment: "center",
+        vertical_alignment: "center",
+      },
+      minimum_width: 15, minimum_height: 10,
     },
   ],
   metric_definitions: [
@@ -202,6 +223,7 @@ function freeEditorFixture({
   profiles = null,
   validationFrames = null,
   validationPolicy = "static",
+  contentPreviewResult = null,
 } = {}) {
   const ids = [
     "#fl-profile",
@@ -246,6 +268,16 @@ function freeEditorFixture({
     "#fl-region-later",
     "#fl-toggle-region",
   ];
+  if (contentPreviewResult) ids.push(
+    "#fl-content-preview",
+    "#fl-content-preview-canvas",
+    "#fl-content-preview-fit",
+    "#fl-content-preview-output",
+    "#fl-content-preview-required",
+    "#fl-content-preview-font",
+    "#fl-content-preview-current",
+    "#fl-content-preview-actions",
+  );
   const elements = new Map(ids.map((id) => [id, new FakeElement()]));
   for (const [id, field] of [
     ["#fl-region-name", "name"],
@@ -336,6 +368,9 @@ function freeEditorFixture({
   const fetch = async (url, options = {}) => {
     calls.push({url, options});
     if (url.endsWith("/metadata")) return response(widgetMetadata);
+    if (url.endsWith("/content-preview") && contentPreviewResult) {
+      return response(contentPreviewResult);
+    }
     if (url.endsWith("/validate")) {
       const validationFrame = validationFrames
         ? validationFrames[Math.min(
@@ -2447,10 +2482,63 @@ test("small invalid regions use an accessible message below the canvas", async (
   assert.equal(fixture.editor.state.selectedRegionId, "region-1");
 });
 
-test("widget selection uses exactly seven canonical defaults", () => {
+test("content preview value-only action changes only the local draft", async () => {
+  const metricSettings = widgetMetadata.widget_definitions.find(
+    (definition) => definition.type === "system_metric",
+  ).default_settings;
+  const source = freeRegion({
+    width: 25,
+    height: 5,
+    widget: {type: "system_metric", settings: {...metricSettings}},
+  });
+  const fixture = freeEditorFixture({
+    profiles: {default: freeProfile([source])},
+    contentPreviewResult: {
+      framebuffer_base64: Buffer.from([0x10, 0x20, 0x30]).toString("base64"),
+      preview_width: 1,
+      preview_height: 1,
+      current_width: 25,
+      current_height: 5,
+      fit_state: "current_region_too_small",
+      resolved_font: "3x5",
+      minimum_width: 17,
+      minimum_height: 5,
+      current_output: "CPU 14%",
+      output_is_example: true,
+      suggested_font: null,
+      suggest_value_only: true,
+    },
+  });
+  await fixture.editor.initialize();
+  fixture.editor.state.selectedRegionId = source.id;
+  fixture.editor.render();
+  await new Promise((resolve) => setImmediate(resolve));
+  const actions = fixture.elements.get("#fl-content-preview-actions");
+  const valueOnly = actions.children.find(
+    (button) => button.textContent === "Use Value only",
+  );
+  assert.ok(valueOnly);
+  valueOnly.dispatch("click");
+  assert.equal(
+    fixture.editor.state.draft.profiles.default.regions[0].widget.settings.display_mode,
+    "value_only",
+  );
+  assert.equal(
+    fixture.editor.state.applied.profiles.default.regions[0].widget.settings.display_mode,
+    "label_and_value",
+  );
+  assert.equal(
+    fixture.calls.some(({url, options}) => url.endsWith("/apply") || (
+      url.endsWith("/config") && options.method === "PUT"
+    )),
+    false,
+  );
+});
+
+test("widget selection uses exactly eight canonical defaults", () => {
   assert.deepEqual(freeLayout.WIDGET_TYPES, [
     "blank", "clock", "static_text", "scrolling_text", "date",
-    "system_metric", "metric_bar",
+    "system_metric", "metric_bar", "built_in_icon",
   ]);
   const defaults = freeLayout.widgetDefaultMap(widgetMetadata);
   const source = freeRegion({
@@ -2532,6 +2620,13 @@ test("widget settings validate exact models and German date formats", () => {
       settings: {...defaults.date, format: "MM/DD/YYYY"},
     }, widgetMetadata),
     "settings",
+  );
+  assert.equal(
+    freeLayout.validateWidgetSettings({
+      type: "built_in_icon",
+      settings: {...defaults.built_in_icon, icon: "unknown"},
+    }, widgetMetadata),
+    "icon",
   );
 });
 

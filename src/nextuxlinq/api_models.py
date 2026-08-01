@@ -7,7 +7,15 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
 from nextuxlinq.models import ConfigurationDocument, LayoutConfig, ProfileConfig
-from nextuxlinq.models_v2 import ConfigurationDocumentV2, ProfileConfigV2
+from nextuxlinq.models_v2 import (
+    CanvasConfig,
+    ConfigurationDocumentV2,
+    DisplayEffect,
+    NoDisplayEffect,
+    ProfileConfigV2,
+    RegionConfig,
+    display_effect_from_dict,
+)
 
 
 class DomainValidationError(ValueError):
@@ -31,6 +39,7 @@ def _domain_failure(message: str, default_field: str) -> tuple[str, str]:
         if marker in normalized:
             return category, f"{default_field}.{setting}"
     mappings = (
+        ("icon must be one of", "unknown_icon", "icon"),
         ("metric must be one of", "unknown_metric", "metric"),
         ("metric does not support a bar", "unsupported_metric_for_bar", "metric"),
         ("precision must", "invalid_precision", "precision"),
@@ -271,6 +280,16 @@ class WidgetEditorDefinition(StrictModel):
     minimum_height: int | None
 
 
+class BuiltInIconEditorDefinition(StrictModel):
+    id: str
+    label: str
+    width: int
+    height: int
+    fixed_color: str
+    fixed_color_label: str
+    effect_eligible: bool
+
+
 class FontEditorDefinition(StrictModel):
     id: str
     label: str
@@ -369,11 +388,69 @@ class FreeLayoutMetadataResponse(StrictModel):
     max_regions_per_document: int
     max_import_bytes: int
     widget_definitions: list[WidgetEditorDefinition]
+    built_in_icon_definitions: list[BuiltInIconEditorDefinition]
+    built_in_icon_horizontal_alignments: list[dict[str, str]]
+    built_in_icon_vertical_alignments: list[dict[str, str]]
     font_definitions: list[FontEditorDefinition]
     metric_definitions: list[MetricEditorDefinition]
     temperature_unit_definitions: list[TemperatureUnitEditorDefinition]
     display_effect: DisplayEffectEditorDefinition
     bar_metric_ids: list[str]
+
+
+class WidgetContentPreviewRequest(StrictModel):
+    widget: dict[str, Any]
+    region_background: str | None = None
+    canvas_background: str = "#000000"
+    effect: dict[str, Any] | None = None
+    current_width: StrictInt = Field(ge=1, le=90)
+    current_height: StrictInt = Field(ge=1, le=10)
+
+    def to_domain(self) -> tuple[RegionConfig, CanvasConfig, DisplayEffect]:
+        region = _convert_domain(
+            RegionConfig.from_dict,
+            {
+                "id": "content-preview",
+                "name": None,
+                "x": 0,
+                "y": 0,
+                "width": self.current_width,
+                "height": self.current_height,
+                "enabled": True,
+                "background_color": self.region_background,
+                "widget": self.widget,
+            },
+            field="preview",
+        )
+        canvas = _convert_domain(
+            CanvasConfig.from_dict,
+            {"width": 90, "height": 10, "background_color": self.canvas_background},
+            field="preview.canvas",
+        )
+        effect = (
+            NoDisplayEffect()
+            if self.effect is None
+            else _convert_domain(
+                display_effect_from_dict, self.effect, field="preview"
+            )
+        )
+        return region, canvas, effect
+
+
+class WidgetContentPreviewResponse(StrictModel):
+    framebuffer_base64: str
+    preview_width: int
+    preview_height: int
+    current_width: int
+    current_height: int
+    fit_state: str
+    resolved_font: str | None
+    minimum_width: int | None
+    minimum_height: int | None
+    current_output: str | None
+    output_is_example: bool
+    suggested_font: str | None
+    suggest_value_only: bool
 
 
 class ImportFileRequest(StrictModel):

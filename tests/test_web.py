@@ -366,8 +366,33 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
         "date",
         "system_metric",
         "metric_bar",
+        "built_in_icon",
     ]
     assert definitions[0]["default_settings"] == {}
+    assert definitions[-1]["default_settings"] == {
+        "icon": "cachyos",
+        "horizontal_alignment": "center",
+        "vertical_alignment": "center",
+    }
+    assert body["built_in_icon_definitions"] == [{
+        "id": "cachyos",
+        "label": "CachyOS Logo",
+        "width": 15,
+        "height": 10,
+        "fixed_color": "#1DC7B5",
+        "fixed_color_label": "CachyOS Turquoise",
+        "effect_eligible": False,
+    }]
+    assert body["built_in_icon_horizontal_alignments"] == [
+        {"id": "start", "label": "Start"},
+        {"id": "center", "label": "Center"},
+        {"id": "end", "label": "End"},
+    ]
+    assert body["built_in_icon_vertical_alignments"] == [
+        {"id": "top", "label": "Top"},
+        {"id": "center", "label": "Center"},
+        {"id": "bottom", "label": "Bottom"},
+    ]
     assert body["font_definitions"] == [
         {
             "id": "auto", "label": "Auto — largest fitting",
@@ -487,6 +512,65 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
         "day_month_full_year"
     )
     assert service.get_configuration() == before
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_widget_content_preview_is_authoritative_and_side_effect_free(api_client) -> None:
+    client, service, store, worker = api_client
+    before = service.get_configuration()
+    saved_before = list(store.saved)
+    frames_before = list(worker.frames)
+
+    response = client.post("/api/v1/free-layout/content-preview", json={
+        "widget": {
+            "type": "built_in_icon",
+            "settings": {
+                "icon": "cachyos",
+                "horizontal_alignment": "center",
+                "vertical_alignment": "center",
+            },
+        },
+        "region_background": "#102030",
+        "canvas_background": "#000000",
+        "effect": {
+            "mode": "foreground_rainbow",
+            "direction": "rear_to_front",
+            "speed": 0.1,
+        },
+        "current_width": 10,
+        "current_height": 5,
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["preview_width"], body["preview_height"]) == (15, 10)
+    assert (body["minimum_width"], body["minimum_height"]) == (15, 10)
+    assert body["fit_state"] == "current_region_too_small"
+    assert body["current_output"] == "CachyOS Logo"
+    assert body["resolved_font"] is None
+    assert service.get_configuration() == before
+    assert store.saved == saved_before
+    assert worker.frames == frames_before
+
+
+def test_widget_content_preview_rejects_unknown_icon_safely(api_client) -> None:
+    client, service, store, worker = api_client
+    response = client.post("/api/v1/free-layout/content-preview", json={
+        "widget": {
+            "type": "built_in_icon",
+            "settings": {
+                "icon": "PRIVATE_ICON_PATH",
+                "horizontal_alignment": "center",
+                "vertical_alignment": "center",
+            },
+        },
+        "current_width": 15,
+        "current_height": 10,
+    })
+    assert response.status_code == 422
+    assert response.json()["code"] == "unknown_icon"
+    assert "PRIVATE_ICON_PATH" not in str(response.json())
     assert store.saved == []
     assert worker.frames == []
 

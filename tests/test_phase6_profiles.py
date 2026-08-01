@@ -209,6 +209,7 @@ def test_full_configuration_round_trip_preserves_order_and_active_profile() -> N
         "system-bars",
         "extended-system-monitor",
         "temperature-monitor",
+        "cachyos-system-monitor",
     ],
 )
 def test_metric_widgets_round_trip_through_profile_transfer(preset_id: str) -> None:
@@ -291,6 +292,38 @@ def test_temperature_unit_round_trips_through_transfer_and_backup(
     restored = store.restore_backup(backup.id)
     assert restored.to_dict() == document.to_dict()
 
+
+def test_built_in_icon_round_trips_without_configurable_color(
+    tmp_path: Path,
+) -> None:
+    profile = next(
+        item.profile for item in get_builtin_presets()
+        if item.id == "cachyos-system-monitor"
+    )
+    document = ConfigurationDocumentV2(
+        schema_version=2,
+        active_profile="cachyos",
+        profiles={"cachyos": profile},
+    )
+    imported = import_profile(export_profile("cachyos", profile), ())
+    assert imported.profile.to_dict() == profile.to_dict()
+    icon_settings = next(
+        region.widget.settings.to_dict() for region in imported.profile.regions
+        if region.widget.type.value == "built_in_icon"
+    )
+    assert icon_settings == {
+        "icon": "cachyos",
+        "horizontal_alignment": "center",
+        "vertical_alignment": "center",
+    }
+    store = ConfigStore(
+        tmp_path / "nextuxlinq" / "config.json",
+        backup_id_factory=lambda: "4" * 32,
+        backup_clock=lambda: datetime(2026, 8, 1, tzinfo=timezone.utc),
+    )
+    backup = store.create_backup("CachyOS icon", document)
+    assert store.restore_backup(backup.id).to_dict() == document.to_dict()
+
     old_envelope = export_profile("temperature", document.active)
     old_region = next(
         region for region in old_envelope["profile"]["regions"]
@@ -350,7 +383,7 @@ def test_safe_filename_does_not_change_embedded_profile_name() -> None:
 def test_every_builtin_preset_validates_and_renders_without_mutation() -> None:
     compositor = Compositor(create_widget_registry())
     presets = get_builtin_presets()
-    expected_counts = [0, 2, 3, 2, 2, 1, 3, 3, 4, 3, 3]
+    expected_counts = [0, 2, 3, 2, 2, 1, 3, 3, 4, 3, 4, 3]
     before = [preset.profile.to_dict() for preset in presets]
 
     for preset, expected in zip(presets, expected_counts, strict=True):
@@ -519,7 +552,7 @@ def test_phase6_api_operations_are_side_effect_free_until_explicit_mutation(
     assert "nextuxlinq-profile-default.json" in profile_export.headers["content-disposition"]
     assert config_export.status_code == 200
     assert list(json.loads(config_export.content)["profiles"]) == ["default"]
-    assert len(presets.json()["presets"]) == 11
+    assert len(presets.json()["presets"]) == 12
     assert profile_import.status_code == 200
     assert profile_import.json()["profile_name"] == "default_Imported"
     assert full_import.json()["summary"] == {

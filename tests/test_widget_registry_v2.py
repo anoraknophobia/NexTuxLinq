@@ -34,6 +34,7 @@ from nextuxlinq.rendering_v2.update_policy import (
 )
 from nextuxlinq.widget_models import (
     BlankSettings,
+    BuiltInIconSettings,
     CANONICAL_WIDGET_SETTINGS_MODELS,
     ClockSettings,
     DateSettings,
@@ -108,6 +109,7 @@ def canonical_defaults() -> dict[WidgetType, object]:
         WidgetType.DATE: date_settings(),
         WidgetType.SYSTEM_METRIC: SystemMetricSettings(),
         WidgetType.METRIC_BAR: MetricBarSettings(),
+        WidgetType.BUILT_IN_ICON: BuiltInIconSettings(),
     }
 
 
@@ -158,16 +160,16 @@ def blank_definition(**changes: object) -> WidgetDefinition:
     return WidgetDefinition(**values)  # type: ignore[arg-type]
 
 
-def test_registry_contains_seven_canonical_definitions_in_stable_order() -> None:
+def test_registry_contains_eight_canonical_definitions_in_stable_order() -> None:
     registry = create_widget_registry()
 
     assert tuple(
         definition.widget_type for definition in registry.definitions
     ) == tuple(WidgetType)
-    assert len(registry.definitions) == 7
+    assert len(registry.definitions) == 8
     assert len(
         {definition.widget_type for definition in registry.definitions}
-    ) == 7
+    ) == 8
     for definition in registry.definitions:
         assert definition.settings_model is (
             CANONICAL_WIDGET_SETTINGS_MODELS[definition.widget_type]
@@ -297,6 +299,7 @@ def test_minimum_geometry_is_editor_guidance_only() -> None:
         WidgetType.DATE: (19, 5),
         WidgetType.SYSTEM_METRIC: (1, 5),
         WidgetType.METRIC_BAR: (1, 1),
+        WidgetType.BUILT_IN_ICON: (15, 10),
     }
 
 

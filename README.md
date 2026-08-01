@@ -90,7 +90,8 @@ writer.
 
 The GUI provides a visual 90×10 free-layout editor for canonical schema-v2
 profiles. Regions can be added, moved, resized, reordered, and assigned one of
-seven widgets, including live System Metric text and Metric Bars. **Apply**
+eight widgets, including live System Metric text, Metric Bars, and a native
+Built-in Icon. **Apply**
 validates and updates the running profile, while
 **Save applied configuration** persists only the already-applied state.
 Browser drafts and revision conflicts remain explicit. The editor and preview
@@ -116,6 +117,14 @@ same framebuffer. See [`docs/display-effects.md`](docs/display-effects.md).
 Text widgets use immutable native 3×5, 3×7, 5×7, 4×9, 5×9, and 5×10 bitmap
 fonts. Auto selects the largest fitting native fixture from backend metadata;
 a 25×10 `HH:MM` Clock resolves to the true 5×10 font without scaling.
+
+The initial Built-in Icon is a checked-in, unscaled 15×10 CachyOS logo. Its
+active pixels always use CachyOS Turquoise (`#1DC7B5`), transparent pixels keep
+the region background, and display effects do not recolor it. This pixel
+adaptation does not claim CachyOS affiliation or endorsement. The Selected
+region inspector also includes a backend-rendered Content preview for every
+widget, including undersized drafts; its quick actions change only the local
+draft and previewing never applies, saves, persists, or uploads a frame.
 
 Live telemetry includes CPU, memory, uptime, load, fixed-root storage, network
 rates, and generic kernel-exposed GPU, VRAM, and temperature data. Sensor

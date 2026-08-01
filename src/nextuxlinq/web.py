@@ -44,6 +44,8 @@ from nextuxlinq.api_models import (
     SaveResponse,
     StatusResponse,
     WidgetEditorDefinition,
+    WidgetContentPreviewRequest,
+    WidgetContentPreviewResponse,
     MetricEditorDefinition,
     MetricDiagnostic,
     MetricDiagnosticsResponse,
@@ -53,6 +55,7 @@ from nextuxlinq.api_models import (
     BackupListResponse,
     BackupMetadataResponse,
     BackupRestoreResponse,
+    BuiltInIconEditorDefinition,
     ConfigurationImportResponse,
     ConfigurationImportSummary,
     DeleteResponse,
@@ -83,6 +86,7 @@ from nextuxlinq.models_v2 import (
     RainbowDirection,
 )
 from nextuxlinq.profile_presets import get_builtin_presets
+from nextuxlinq.rendering_v2.icons import BUILT_IN_ICON_CATALOG
 from nextuxlinq.profile_transfer import (
     TransferValidationError,
     decode_import_content,
@@ -109,7 +113,11 @@ from nextuxlinq.system_metrics import (
     METRIC_EDITOR_ORDER,
     MetricId,
 )
-from nextuxlinq.widget_models import TemperatureUnit
+from nextuxlinq.widget_models import (
+    HorizontalAlignment,
+    TemperatureUnit,
+    VerticalAlignment,
+)
 from nextuxlinq.legacy_compat import LegacyEditorUnsupportedError
 
 LOGGER = logging.getLogger(__name__)
@@ -433,6 +441,7 @@ def create_app(
             )
         except DomainValidationError as error:
             messages = {
+                "unknown_icon": "The built-in icon identifier is not supported.",
                 "unknown_metric": "The metric identifier is not supported.",
                 "unsupported_metric_for_bar": "The selected metric does not support a bar.",
                 "invalid_precision": "Metric precision must be between zero and two.",
@@ -790,6 +799,28 @@ def create_app(
                 )
                 for definition in service.get_widget_definitions()
             ],
+            built_in_icon_definitions=[
+                BuiltInIconEditorDefinition(
+                    id=definition.icon_id.value,
+                    label=definition.display_label,
+                    width=definition.width,
+                    height=definition.height,
+                    fixed_color=definition.fixed_color,
+                    fixed_color_label=definition.fixed_color_label,
+                    effect_eligible=definition.effect_eligible,
+                )
+                for definition in BUILT_IN_ICON_CATALOG.values()
+            ],
+            built_in_icon_horizontal_alignments=[
+                {"id": HorizontalAlignment.START.value, "label": "Start"},
+                {"id": HorizontalAlignment.CENTER.value, "label": "Center"},
+                {"id": HorizontalAlignment.END.value, "label": "End"},
+            ],
+            built_in_icon_vertical_alignments=[
+                {"id": VerticalAlignment.TOP.value, "label": "Top"},
+                {"id": VerticalAlignment.CENTER.value, "label": "Center"},
+                {"id": VerticalAlignment.BOTTOM.value, "label": "Bottom"},
+            ],
             font_definitions=[
                 FontEditorDefinition(
                     id="auto",
@@ -1108,6 +1139,31 @@ def create_app(
             resolved_fonts=resolved_fonts,
             font_options=font_options,
             font_fit=font_fit,
+        )
+
+    @app.post(
+        f"{API_PREFIX}/free-layout/content-preview",
+        response_model=WidgetContentPreviewResponse,
+    )
+    async def widget_content_preview(
+        request: WidgetContentPreviewRequest,
+    ) -> WidgetContentPreviewResponse:
+        region, canvas, effect = request.to_domain()
+        result = service.get_widget_content_preview(region, canvas, effect)
+        return WidgetContentPreviewResponse(
+            framebuffer_base64=base64.b64encode(result.framebuffer).decode("ascii"),
+            preview_width=result.preview_width,
+            preview_height=result.preview_height,
+            current_width=result.current_width,
+            current_height=result.current_height,
+            fit_state=result.fit_state,
+            resolved_font=result.resolved_font,
+            minimum_width=result.minimum_width,
+            minimum_height=result.minimum_height,
+            current_output=result.current_output,
+            output_is_example=result.output_is_example,
+            suggested_font=result.suggested_font,
+            suggest_value_only=result.suggest_value_only,
         )
 
     @app.post(

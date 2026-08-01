@@ -33,6 +33,7 @@ The immutable preset library contains:
 - System Bars
 - Extended System Monitor
 - Temperature Monitor
+- CachyOS System Monitor
 
 Every preset is a normal schema-v2 profile and is validated and rendered by the
 same registry and compositor as user profiles. Selecting a preset previews it;
@@ -52,9 +53,11 @@ Complete exports are canonical schema-v2 documents named
 brightness, canvas settings, regions, and widget settings are preserved.
 Profile-level display effects are preserved as well; old exports without the
 field remain valid and resolve to Off.
-System Metric and Metric Bar settings use the existing transfer format version
+System Metric, Metric Bar, and Built-in Icon settings use the existing transfer format version
 and round-trip exactly; unknown metric identifiers and invalid bar ranges fail
-strict validation. Managed backups preserve and validate them identically.
+strict validation. Unknown built-in icon identifiers fail, and the CachyOS
+entry serializes no configurable color. Managed backups preserve and validate
+them identically.
 
 Imports accept JSON files up to 256 KiB. The backend strictly decodes base64
 transport data, UTF-8 and JSON, rejects duplicate JSON keys, validates the

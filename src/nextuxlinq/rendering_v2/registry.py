@@ -21,6 +21,7 @@ from nextuxlinq.widget_models import (
     BarDirection,
     BarOrientation,
     BlankSettings,
+    BuiltInIconSettings,
     CANONICAL_WIDGET_SETTINGS_MODELS,
     ClockFormat,
     ClockSettings,
@@ -332,6 +333,7 @@ def render_blank(
 def create_widget_registry() -> WidgetRegistry:
     """Create a fresh deterministic registry of all canonical widgets."""
     from nextuxlinq.rendering_v2.widgets.clock import render_clock
+    from nextuxlinq.rendering_v2.widgets.built_in_icon import render_built_in_icon
     from nextuxlinq.rendering_v2.widgets.date import render_date
     from nextuxlinq.rendering_v2.widgets.scrolling_text import (
         render_scrolling_text,
@@ -464,6 +466,18 @@ def create_widget_registry() -> WidgetRegistry:
             ),
             minimum_width=1,
             minimum_height=1,
+        ),
+        WidgetDefinition(
+            widget_type=WidgetType.BUILT_IN_ICON,
+            display_label="Built-in Icon",
+            settings_model=BuiltInIconSettings,
+            default_settings=BuiltInIconSettings(),
+            renderer=render_built_in_icon,
+            update_policy_resolver=UpdatePolicyResolver.fixed(
+                BuiltInIconSettings, UpdatePolicy.STATIC
+            ),
+            minimum_width=15,
+            minimum_height=10,
         ),
     )
     return WidgetRegistry(definitions)  # type: ignore[arg-type]
