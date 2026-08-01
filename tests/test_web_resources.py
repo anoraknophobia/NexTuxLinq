@@ -185,8 +185,29 @@ def test_visual_editor_layout_has_safe_responsive_sizing() -> None:
     assert 'class="geometry-grid"' in page
     assert page.count('data-widget-panel="') == 5
     assert ".editor-workspace {" in css
+    workspace = css.split(".editor-workspace {", 1)[1].split("}", 1)[0]
+    assert "grid-template-columns: minmax(0, 1fr);" in workspace
     assert ".layout-canvas-shell {" in css
+    assert "width: 100%; min-width: 0; overflow-x: auto;" in css
     assert ".region-inspector {" in css
+    inspector = css.split(".region-inspector {", 1)[1].split("}", 1)[0]
+    assert "width: 100%;" in inspector
+    assert "max-height: none;" in inspector
+    assert "overflow: visible;" in inspector
+    workspace_markup = page.split('<div class="editor-workspace">', 1)[1].split(
+        "</section>", 1
+    )[0]
+    assert workspace_markup.index('class="layout-canvas-shell"') < (
+        workspace_markup.index('id="fl-region-inspector"')
+    )
+    compact = css.split(".compact-controls {", 1)[1].split("}", 1)[0]
+    assert "repeat(2, minmax(10rem, 1fr))" in compact
+    assert ".profile-actions {\n  grid-column: 1 / -1;" in css
+    assert ".profile-actions button { flex: 0 1 auto; white-space: nowrap; }" in css
+    inspector_grid = css.split(".inspector-grid {", 1)[1].split("}", 1)[0]
+    assert "repeat(auto-fit, minmax(min(100%, 13rem), 1fr))" in inspector_grid
+    assert ".inspector-grid input:not([type=\"checkbox\"])," in css
+    assert "flex: 0 0 1.15rem;" in css
     assert "box-sizing: border-box;" in css
     assert "* { box-sizing: border-box; }" in css
     assert ".actions { display: flex; flex-wrap: wrap;" in css
