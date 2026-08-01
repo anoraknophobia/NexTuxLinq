@@ -64,6 +64,12 @@ class MetricDefinition:
     bar_maximum: float | None
 
 
+@dataclass(frozen=True, slots=True)
+class MetricDisplayDefinition:
+    label: str
+    group: str
+
+
 METRIC_DEFINITIONS: Mapping[MetricId, MetricDefinition] = MappingProxyType({
     MetricId.CPU_USAGE: MetricDefinition(
         MetricId.CPU_USAGE, "CPU", MetricValueType.PERCENTAGE,
@@ -114,6 +120,37 @@ METRIC_DEFINITIONS: Mapping[MetricId, MetricDefinition] = MappingProxyType({
         "C", 0, True, 0.0, 100.0,
     ),
 })
+METRIC_DISPLAY_DEFINITIONS: Mapping[
+    MetricId, MetricDisplayDefinition
+] = MappingProxyType({
+    MetricId.CPU_USAGE: MetricDisplayDefinition("CPU Usage", "System"),
+    MetricId.MEMORY_USAGE: MetricDisplayDefinition("RAM Usage", "System"),
+    MetricId.LOAD_AVERAGE_1M: MetricDisplayDefinition(
+        "System Load", "System"
+    ),
+    MetricId.UPTIME: MetricDisplayDefinition("Uptime", "System"),
+    MetricId.CPU_TEMPERATURE: MetricDisplayDefinition(
+        "CPU Temperature", "Temperatures"
+    ),
+    MetricId.GPU_TEMPERATURE: MetricDisplayDefinition(
+        "GPU Temperature", "Temperatures"
+    ),
+    MetricId.STORAGE_TEMPERATURE: MetricDisplayDefinition(
+        "Storage Temperature", "Temperatures"
+    ),
+    MetricId.STORAGE_USAGE: MetricDisplayDefinition(
+        "Storage Usage", "Storage"
+    ),
+    MetricId.NETWORK_RECEIVE_RATE: MetricDisplayDefinition(
+        "Network Receive", "Network"
+    ),
+    MetricId.NETWORK_TRANSMIT_RATE: MetricDisplayDefinition(
+        "Network Transmit", "Network"
+    ),
+    MetricId.GPU_USAGE: MetricDisplayDefinition("GPU Usage", "GPU"),
+    MetricId.GPU_MEMORY_USAGE: MetricDisplayDefinition("VRAM Usage", "GPU"),
+})
+METRIC_EDITOR_ORDER = tuple(METRIC_DISPLAY_DEFINITIONS)
 LEGACY_TEMPERATURE_LABELS: Mapping[MetricId, str] = MappingProxyType({
     MetricId.CPU_TEMPERATURE: "CPU TEMP",
     MetricId.GPU_TEMPERATURE: "GPU TEMP",

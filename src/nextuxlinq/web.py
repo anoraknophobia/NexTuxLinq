@@ -95,7 +95,13 @@ from nextuxlinq.service import (
     font_fit_payload,
 )
 from nextuxlinq.service_manager import UserServiceStatus
-from nextuxlinq.system_metrics import BAR_METRICS, METRIC_DEFINITIONS, MetricId
+from nextuxlinq.system_metrics import (
+    BAR_METRICS,
+    METRIC_DEFINITIONS,
+    METRIC_DISPLAY_DEFINITIONS,
+    METRIC_EDITOR_ORDER,
+    MetricId,
+)
 from nextuxlinq.widget_models import TemperatureUnit
 from nextuxlinq.legacy_compat import LegacyEditorUnsupportedError
 
@@ -799,17 +805,21 @@ def create_app(
             metric_definitions=[
                 MetricEditorDefinition(
                     id=metric_id.value,
-                    label=definition.label,
-                    value_type=definition.value_type.value,
-                    unit=definition.unit,
-                    default_precision=definition.default_precision,
-                    supports_bar=definition.supports_bar,
-                    default_minimum=definition.bar_minimum,
-                    default_maximum=definition.bar_maximum,
+                    label=METRIC_DISPLAY_DEFINITIONS[metric_id].label,
+                    default_label=METRIC_DEFINITIONS[metric_id].label,
+                    group=METRIC_DISPLAY_DEFINITIONS[metric_id].group,
+                    value_type=METRIC_DEFINITIONS[metric_id].value_type.value,
+                    unit=METRIC_DEFINITIONS[metric_id].unit,
+                    default_precision=(
+                        METRIC_DEFINITIONS[metric_id].default_precision
+                    ),
+                    supports_bar=METRIC_DEFINITIONS[metric_id].supports_bar,
+                    default_minimum=METRIC_DEFINITIONS[metric_id].bar_minimum,
+                    default_maximum=METRIC_DEFINITIONS[metric_id].bar_maximum,
                     availability=metric_status[metric_id.value],
                     availability_reason=diagnostics[metric_id.value][1],
                 )
-                for metric_id, definition in METRIC_DEFINITIONS.items()
+                for metric_id in METRIC_EDITOR_ORDER
             ],
             temperature_unit_definitions=[
                 TemperatureUnitEditorDefinition(
@@ -843,11 +853,11 @@ def create_app(
         return MetricDiagnosticsResponse(metrics=[
             MetricDiagnostic(
                 id=metric_id.value,
-                label=definition.label,
+                label=METRIC_DISPLAY_DEFINITIONS[metric_id].label,
                 state=diagnostics[metric_id.value][0],
                 reason=diagnostics[metric_id.value][1],
             )
-            for metric_id, definition in METRIC_DEFINITIONS.items()
+            for metric_id in METRIC_EDITOR_ORDER
         ])
 
     def backup_response(backup: ManagedBackup) -> BackupMetadataResponse:

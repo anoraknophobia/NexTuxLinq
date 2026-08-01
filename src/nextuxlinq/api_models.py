@@ -311,6 +311,8 @@ class FontFitStatus(StrictModel):
 class MetricEditorDefinition(StrictModel):
     id: str
     label: str
+    default_label: str
+    group: str
     value_type: str
     unit: str
     default_precision: int

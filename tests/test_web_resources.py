@@ -414,6 +414,10 @@ def test_metric_dropdowns_are_backend_driven_without_extended_id_duplication() -
     assert 'data-metric-select="bar"' in page
     assert "state.metadata.metric_definitions" in editor
     assert "state.metadata.bar_metric_ids" in editor
+    assert 'createElement("optgroup")' in editor
+    assert "metricDefinitionGroups(" in editor
+    assert "option.textContent = metric.label" in editor
+    assert "definition.default_label" in editor
     for metric_id in (
         "load_average_1m",
         "storage_usage",

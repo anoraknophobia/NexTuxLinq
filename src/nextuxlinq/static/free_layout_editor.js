@@ -330,6 +330,23 @@
     );
   }
 
+  function metricDefinitionGroups(metricDefinitions = [], eligibleIds = null) {
+    const allowed = eligibleIds === null ? null : new Set(eligibleIds);
+    const groups = [];
+    const byName = new Map();
+    for (const definition of metricDefinitions) {
+      if (allowed && !allowed.has(definition.id)) continue;
+      let group = byName.get(definition.group);
+      if (!group) {
+        group = {label: definition.group, metrics: []};
+        byName.set(definition.group, group);
+        groups.push(group);
+      }
+      group.metrics.push(definition);
+    }
+    return groups;
+  }
+
   function totalRegionCount(configuration) {
     return Object.values(configuration.profiles).reduce(
       (total, profile) => total + profile.regions.length,
@@ -1342,16 +1359,22 @@
         "[data-metric-select]"
       )) {
         const barOnly = select.dataset.metricSelect === "bar";
-        const allowed = new Set(state.metadata.bar_metric_ids || []);
-        const options = (state.metadata.metric_definitions || [])
-          .filter((metric) => !barOnly || allowed.has(metric.id))
-          .map((metric) => {
+        const groups = metricDefinitionGroups(
+          state.metadata.metric_definitions || [],
+          barOnly ? state.metadata.bar_metric_ids || [] : null,
+        ).map((group) => {
+          const optgroup = documentObject.createElement("optgroup");
+          optgroup.label = group.label;
+          const options = group.metrics.map((metric) => {
             const option = documentObject.createElement("option");
             option.value = metric.id;
             option.textContent = metric.label;
             return option;
           });
-        select.replaceChildren(...options);
+          optgroup.append(...options);
+          return optgroup;
+        });
+        select.replaceChildren(...groups);
       }
       for (const control of elements.settings.querySelectorAll("[data-setting]")) {
         if (control.closest("[data-widget-panel]").dataset.widgetPanel
@@ -2111,7 +2134,7 @@
               (item) => item.id === control.value,
             );
             if (region.widget.type === "system_metric" && definition) {
-              region.widget.settings.label = definition.label;
+              region.widget.settings.label = definition.default_label;
               region.widget.settings.precision = definition.default_precision;
             }
             if (region.widget.type === "metric_bar" && definition) {
@@ -2890,6 +2913,7 @@
     resolvedFontExplanation,
     temperatureFormatExample,
     temperatureUnitVisible,
+    metricDefinitionGroups,
     validateLocalCandidate,
     validateWidgetSettings,
     nextStableId,

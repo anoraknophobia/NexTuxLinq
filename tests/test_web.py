@@ -399,15 +399,47 @@ def test_free_layout_metadata_exposes_canonical_widget_defaults(
     metric_labels = {
         metric["id"]: metric["label"] for metric in body["metric_definitions"]
     }
-    assert metric_labels["cpu_temperature"] == "CPU"
-    assert metric_labels["gpu_temperature"] == "GPU"
-    assert metric_labels["storage_temperature"] == "DISK"
+    assert metric_labels == {
+        "cpu_usage": "CPU Usage",
+        "memory_usage": "RAM Usage",
+        "load_average_1m": "System Load",
+        "uptime": "Uptime",
+        "cpu_temperature": "CPU Temperature",
+        "gpu_temperature": "GPU Temperature",
+        "storage_temperature": "Storage Temperature",
+        "storage_usage": "Storage Usage",
+        "network_receive_rate": "Network Receive",
+        "network_transmit_rate": "Network Transmit",
+        "gpu_usage": "GPU Usage",
+        "gpu_memory_usage": "VRAM Usage",
+    }
+    assert len(set(metric_labels.values())) == len(metric_labels)
+    assert metric_labels["cpu_usage"] != metric_labels["cpu_temperature"]
+    assert metric_labels["gpu_usage"] != metric_labels["gpu_temperature"]
+    assert metric_labels["storage_usage"] != metric_labels["storage_temperature"]
     assert [metric["id"] for metric in body["metric_definitions"]] == [
-        "cpu_usage", "memory_usage", "cpu_temperature", "uptime",
-        "load_average_1m", "storage_usage", "network_receive_rate",
-        "network_transmit_rate", "gpu_usage", "gpu_temperature",
-        "gpu_memory_usage", "storage_temperature",
+        "cpu_usage", "memory_usage", "load_average_1m", "uptime",
+        "cpu_temperature", "gpu_temperature", "storage_temperature",
+        "storage_usage", "network_receive_rate", "network_transmit_rate",
+        "gpu_usage", "gpu_memory_usage",
     ]
+    assert [metric["group"] for metric in body["metric_definitions"]] == [
+        "System", "System", "System", "System",
+        "Temperatures", "Temperatures", "Temperatures",
+        "Storage", "Network", "Network", "GPU", "GPU",
+    ]
+    assert {
+        metric["id"]: metric["default_label"]
+        for metric in body["metric_definitions"]
+    } == {
+        "cpu_usage": "CPU", "memory_usage": "RAM",
+        "load_average_1m": "LOAD", "uptime": "UPTIME",
+        "cpu_temperature": "CPU", "gpu_temperature": "GPU",
+        "storage_temperature": "DISK", "storage_usage": "DISK",
+        "network_receive_rate": "NET RX",
+        "network_transmit_rate": "NET TX", "gpu_usage": "GPU",
+        "gpu_memory_usage": "VRAM",
+    }
     assert all("path" not in metric for metric in body["metric_definitions"])
     assert all("availability_reason" in metric for metric in body["metric_definitions"])
     assert {
@@ -483,10 +515,11 @@ def test_metric_diagnostics_response_is_sanitized_and_read_only(api_client) -> N
     assert metrics["cpu_usage"]["reason"] is None
     assert metrics["network_receive_rate"] == {
         "id": "network_receive_rate",
-        "label": "NET RX",
+        "label": "Network Receive",
         "state": "awaiting_initial_delta",
         "reason": "awaiting_initial_sample",
     }
+    assert len({item["label"] for item in metrics.values()}) == len(metrics)
     serialized = response.text
     for forbidden in ("/proc", "/sys", "0000:", "serial", "traceback"):
         assert forbidden not in serialized

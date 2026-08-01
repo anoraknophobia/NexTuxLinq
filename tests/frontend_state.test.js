@@ -87,41 +87,52 @@ const widgetMetadata = {
     },
   ],
   metric_definitions: [
-    {id: "cpu_usage", label: "CPU", value_type: "percentage",
+    {id: "cpu_usage", label: "CPU Usage", default_label: "CPU", group: "System",
+      value_type: "percentage",
       unit: "%", default_precision: 0, supports_bar: true,
       default_minimum: 0, default_maximum: 100},
-    {id: "memory_usage", label: "RAM", value_type: "percentage",
+    {id: "memory_usage", label: "RAM Usage", default_label: "RAM", group: "System",
+      value_type: "percentage",
       unit: "%", default_precision: 0, supports_bar: true,
       default_minimum: 0, default_maximum: 100},
-    {id: "cpu_temperature", label: "CPU", value_type: "temperature",
-      unit: "C", default_precision: 0, supports_bar: true,
-      default_minimum: 0, default_maximum: 100},
-    {id: "uptime", label: "UPTIME", value_type: "duration", unit: "",
-      default_precision: 0, supports_bar: false,
-      default_minimum: null, default_maximum: null},
-    {id: "load_average_1m", label: "LOAD", value_type: "number", unit: "",
+    {id: "load_average_1m", label: "System Load", default_label: "LOAD",
+      group: "System", value_type: "number", unit: "",
       default_precision: 2, supports_bar: false,
       default_minimum: null, default_maximum: null},
-    {id: "storage_usage", label: "DISK", value_type: "percentage", unit: "%",
-      default_precision: 0, supports_bar: true,
-      default_minimum: 0, default_maximum: 100},
-    {id: "network_receive_rate", label: "NET RX", value_type: "rate", unit: "B/S",
-      default_precision: 1, supports_bar: false,
-      default_minimum: null, default_maximum: null},
-    {id: "network_transmit_rate", label: "NET TX", value_type: "rate", unit: "B/S",
-      default_precision: 1, supports_bar: false,
-      default_minimum: null, default_maximum: null},
-    {id: "gpu_usage", label: "GPU", value_type: "percentage", unit: "%",
-      default_precision: 0, supports_bar: true,
-      default_minimum: 0, default_maximum: 100},
-    {id: "gpu_temperature", label: "GPU", value_type: "temperature", unit: "C",
-      default_precision: 0, supports_bar: true,
-      default_minimum: 0, default_maximum: 100},
-    {id: "gpu_memory_usage", label: "VRAM", value_type: "percentage", unit: "%",
-      default_precision: 0, supports_bar: true,
-      default_minimum: 0, default_maximum: 100},
-    {id: "storage_temperature", label: "DISK", value_type: "temperature",
+    {id: "uptime", label: "Uptime", default_label: "UPTIME", group: "System",
+      value_type: "duration", unit: "", default_precision: 0,
+      supports_bar: false, default_minimum: null, default_maximum: null},
+    {id: "cpu_temperature", label: "CPU Temperature", default_label: "CPU",
+      group: "Temperatures", value_type: "temperature", unit: "C",
+      default_precision: 0, supports_bar: true, default_minimum: 0,
+      default_maximum: 100},
+    {id: "gpu_temperature", label: "GPU Temperature", default_label: "GPU",
+      group: "Temperatures", value_type: "temperature", unit: "C",
+      default_precision: 0, supports_bar: true, default_minimum: 0,
+      default_maximum: 100},
+    {id: "storage_temperature", label: "Storage Temperature",
+      default_label: "DISK", group: "Temperatures", value_type: "temperature",
       unit: "C", default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "storage_usage", label: "Storage Usage", default_label: "DISK",
+      group: "Storage", value_type: "percentage", unit: "%",
+      default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "network_receive_rate", label: "Network Receive", default_label: "NET RX",
+      group: "Network", value_type: "rate", unit: "B/S",
+      default_precision: 1, supports_bar: false,
+      default_minimum: null, default_maximum: null},
+    {id: "network_transmit_rate", label: "Network Transmit", default_label: "NET TX",
+      group: "Network", value_type: "rate", unit: "B/S",
+      default_precision: 1, supports_bar: false,
+      default_minimum: null, default_maximum: null},
+    {id: "gpu_usage", label: "GPU Usage", default_label: "GPU", group: "GPU",
+      value_type: "percentage", unit: "%",
+      default_precision: 0, supports_bar: true,
+      default_minimum: 0, default_maximum: 100},
+    {id: "gpu_memory_usage", label: "VRAM Usage", default_label: "VRAM",
+      group: "GPU", value_type: "percentage", unit: "%",
+      default_precision: 0, supports_bar: true,
       default_minimum: 0, default_maximum: 100},
   ],
   temperature_unit_definitions: [
@@ -2542,6 +2553,47 @@ test("temperature unit examples and visibility use backend metadata", () => {
   ), false);
 });
 
+test("metric groups and order come directly from backend metadata", () => {
+  const groups = freeLayout.metricDefinitionGroups(
+    widgetMetadata.metric_definitions,
+  );
+  assert.deepEqual(groups.map((group) => group.label), [
+    "System", "Temperatures", "Storage", "Network", "GPU",
+  ]);
+  assert.deepEqual(groups.map((group) => group.metrics.map(
+    (metric) => metric.id
+  )), [
+    ["cpu_usage", "memory_usage", "load_average_1m", "uptime"],
+    ["cpu_temperature", "gpu_temperature", "storage_temperature"],
+    ["storage_usage"],
+    ["network_receive_rate", "network_transmit_rate"],
+    ["gpu_usage", "gpu_memory_usage"],
+  ]);
+  const barGroups = freeLayout.metricDefinitionGroups(
+    widgetMetadata.metric_definitions,
+    widgetMetadata.bar_metric_ids,
+  );
+  assert.deepEqual(barGroups.map((group) => group.label), [
+    "System", "Temperatures", "Storage", "GPU",
+  ]);
+  assert.deepEqual(barGroups.flatMap((group) => group.metrics.map(
+    (metric) => metric.id
+  )), [
+    "cpu_usage", "memory_usage", "cpu_temperature", "gpu_temperature",
+    "storage_temperature", "storage_usage", "gpu_usage", "gpu_memory_usage",
+  ]);
+  const labels = widgetMetadata.metric_definitions.map((metric) => metric.label);
+  assert.equal(new Set(labels).size, labels.length);
+  assert.notEqual(
+    widgetMetadata.metric_definitions.find(
+      (metric) => metric.id === "cpu_usage"
+    ).label,
+    widgetMetadata.metric_definitions.find(
+      (metric) => metric.id === "cpu_temperature"
+    ).label,
+  );
+});
+
 test("profile actions keep canonical layouts and new profiles empty", () => {
   const original = freeConfiguration(freeProfile([freeRegion()]));
   const created = freeLayout.profileAction(
@@ -2627,11 +2679,9 @@ test("metric availability diagnostics render backend labels and sanitized states
     (row) => [row.children[0].textContent, row.children[1].textContent]
   );
   const rows = Object.fromEntries(rowEntries);
-  assert.equal(rowEntries.some(
-    ([label, status]) => label === "CPU" && status === "Available"
-  ), true);
-  assert.equal(rows["NET RX"], "Awaiting sample");
-  assert.equal(rows.GPU, "Unavailable");
+  assert.equal(rows["CPU Usage"], "Available");
+  assert.equal(rows["Network Receive"], "Awaiting sample");
+  assert.equal(rows["GPU Temperature"], "Unavailable");
   assert.equal(JSON.stringify(rows).includes("/sys"), false);
   assert.equal(JSON.stringify(rows).includes("/proc"), false);
   assert.equal(fixture.metricAvailability.replaceCalls, 1);
