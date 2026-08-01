@@ -43,6 +43,7 @@ from nextuxlinq.rendering_v2.compositor import (
 from nextuxlinq.rendering_v2.fonts import (
     AUTO_FONT_PRIORITY,
     FontDefinition,
+    FontFitAnalysis,
     create_builtin_font_registry,
 )
 from nextuxlinq.rendering_v2.registry import (
@@ -51,6 +52,7 @@ from nextuxlinq.rendering_v2.registry import (
 )
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.update_policy import UpdatePolicy
+from nextuxlinq.rendering_v2.widgets.font_fit import analyze_widget_font_fit
 from nextuxlinq.scheduler import update_policy_delay
 from nextuxlinq.state import DaemonState, DaemonSnapshot
 from nextuxlinq.system_metrics import (
@@ -65,6 +67,43 @@ AsyncSleep = Callable[[float], Awaitable[None]]
 WallClock = Callable[[], datetime]
 TaskFactory = Callable[[Coroutine[Any, Any, None]], asyncio.Task[None]]
 MutationGate = Callable[[str, int], Awaitable[None]]
+
+
+def font_fit_payload(analysis: FontFitAnalysis) -> dict[str, object]:
+    """Serialize immutable font diagnostics without content or implementation data."""
+    def font_value(value: FontChoice | None) -> str | None:
+        return None if value is None else value.value
+
+    return {
+        "actual_width": analysis.actual_width,
+        "actual_height": analysis.actual_height,
+        "selected_explicit_font": font_value(analysis.selected_explicit_font),
+        "resolved_auto_font": font_value(analysis.resolved_auto_font),
+        "largest_fitting_font": font_value(analysis.largest_fitting_font),
+        "smallest_fitting_font": font_value(analysis.smallest_fitting_font),
+        "best_smaller_alternative": font_value(
+            analysis.best_smaller_alternative
+        ),
+        "no_font_fits": analysis.no_font_fits,
+        "no_font_supports_content": analysis.no_font_supports_content,
+        "candidates": tuple(
+            {
+                "font_id": item.font_id.value,
+                "display_label": item.display_label,
+                "glyph_width": item.glyph_width,
+                "glyph_height": item.glyph_height,
+                "compatible_with_widget": item.compatible_with_widget,
+                "complete_glyph_coverage": item.complete_glyph_coverage,
+                "fits_height": item.fits_height,
+                "fits_width": item.fits_width,
+                "overall_fit": item.overall_fit,
+                "minimum_width": item.minimum_width,
+                "minimum_height": item.minimum_height,
+                "rejection_category": item.rejection_category,
+            }
+            for item in analysis.candidates
+        ),
+    }
 
 
 class RevisionConflictError(RuntimeError):
@@ -91,6 +130,7 @@ class CandidateValidationIssue:
     actual_height: int | None = None
     minimum_width: int | None = None
     minimum_height: int | None = None
+    font_fit: FontFitAnalysis | None = None
 
 
 class CandidateValidationError(ValueError):
@@ -107,6 +147,7 @@ class CandidateValidationError(ValueError):
         actual_height: int | None = None,
         minimum_width: int | None = None,
         minimum_height: int | None = None,
+        font_fit: FontFitAnalysis | None = None,
         issues: tuple[CandidateValidationIssue, ...] | None = None,
     ) -> None:
         self.category = category
@@ -117,6 +158,7 @@ class CandidateValidationError(ValueError):
         self.actual_height = actual_height
         self.minimum_width = minimum_width
         self.minimum_height = minimum_height
+        self.font_fit = font_fit
         self.issues = issues or (CandidateValidationIssue(
             category=category,
             region_id=region_id,
@@ -126,6 +168,7 @@ class CandidateValidationError(ValueError):
             actual_height=actual_height,
             minimum_width=minimum_width,
             minimum_height=minimum_height,
+            font_fit=font_fit,
         ),)
         super().__init__("The free-layout candidate could not be rendered.")
 
@@ -694,6 +737,7 @@ class NexTuxLinqService:
                 actual_height=primary.actual_height,
                 minimum_width=primary.minimum_width,
                 minimum_height=primary.minimum_height,
+                font_fit=primary.font_fit,
                 issues=issues or (primary,),
             )
         assert result is not None
@@ -721,15 +765,36 @@ class NexTuxLinqService:
             if failure is None:
                 continue
             category, region_id, widget_type, field = failure
+            font_fit = analyze_widget_font_fit(
+                region.widget.settings,
+                region_width=region.width,
+                region_height=region.height,
+            )
             minimum_width: int | None = None
             minimum_height: int | None = None
             if category in {"content_too_wide", "content_too_tall"}:
-                minimum_width, minimum_height = self._minimum_render_size(
-                    region,
-                    wall_clock=wall_clock,
-                    animation_time=animation_time,
-                    metrics_snapshot=metrics_snapshot,
-                )
+                guidance = None
+                if font_fit is not None:
+                    guidance = font_fit.selected_candidate
+                    if guidance is None:
+                        guidance = next(
+                            (
+                                item for item in reversed(font_fit.candidates)
+                                if item.compatible_with_widget
+                                and item.complete_glyph_coverage
+                            ),
+                            None,
+                        )
+                if guidance is not None:
+                    minimum_width = guidance.minimum_width
+                    minimum_height = guidance.minimum_height
+                else:
+                    minimum_width, minimum_height = self._minimum_render_size(
+                        region,
+                        wall_clock=wall_clock,
+                        animation_time=animation_time,
+                        metrics_snapshot=metrics_snapshot,
+                    )
             issues.append(CandidateValidationIssue(
                 category=category,
                 region_id=region_id,
@@ -739,6 +804,7 @@ class NexTuxLinqService:
                 actual_height=region.height,
                 minimum_width=minimum_width,
                 minimum_height=minimum_height,
+                font_fit=font_fit,
             ))
         return tuple(issues)
 
@@ -1122,62 +1188,51 @@ class NexTuxLinqService:
     def get_font_validation(
         self,
         profile: ProfileConfigV2,
-    ) -> tuple[dict[str, str], dict[str, list[dict[str, object]]]]:
+    ) -> tuple[
+        dict[str, str],
+        dict[str, list[dict[str, object]]],
+        dict[str, dict[str, object]],
+    ]:
         """Return authoritative resolved fonts and explicit-option status."""
         if type(profile) is not ProfileConfigV2:
             raise TypeError("profile must be a ProfileConfigV2.")
-        wall_clock = self._wall_clock()
-        animation_time = max(0.0, self._monotonic() - self._started_at)
-        snapshot = self._last_metrics_snapshot
         resolved: dict[str, str] = {}
         options: dict[str, list[dict[str, object]]] = {}
+        analyses: dict[str, dict[str, object]] = {}
         for region in profile.regions:
-            if (
-                not region.enabled
-                or "font" not in region.widget.settings.to_dict()
-            ):
+            if not region.enabled:
                 continue
-            region_options: list[dict[str, object]] = []
-            for font_id in AUTO_FONT_PRIORITY:
-                raw = region.to_dict()
-                raw["widget"]["settings"]["font"] = font_id.value
-                candidate = RegionConfig.from_dict(raw)
-                failure = self._isolated_region_failure(
-                    profile,
-                    candidate,
-                    wall_clock=wall_clock,
-                    animation_time=animation_time,
-                    metrics_snapshot=snapshot,
-                )
-                option: dict[str, object] = {
-                    "id": font_id.value,
-                    "available": failure is None,
-                    "category": None,
-                    "minimum_width": None,
-                    "minimum_height": None,
-                }
-                if failure is None:
-                    if region.widget.settings.font is FontChoice.AUTO and (
-                        region.id not in resolved
-                    ):
-                        resolved[region.id] = font_id.value
-                    elif region.widget.settings.font is font_id:
-                        resolved[region.id] = font_id.value
-                else:
-                    category, _, _, _ = failure
-                    option["category"] = category
-                    if category in {"content_too_wide", "content_too_tall"}:
-                        minimum_width, minimum_height = self._minimum_render_size(
-                            candidate,
-                            wall_clock=wall_clock,
-                            animation_time=animation_time,
-                            metrics_snapshot=snapshot,
-                        )
-                        option["minimum_width"] = minimum_width
-                        option["minimum_height"] = minimum_height
-                region_options.append(option)
+            analysis = analyze_widget_font_fit(
+                region.widget.settings,
+                region_width=region.width,
+                region_height=region.height,
+            )
+            if analysis is None:
+                continue
+            analyses[region.id] = font_fit_payload(analysis)
+            concrete = analysis.resolved_auto_font
+            if concrete is None and analysis.selected_candidate is not None:
+                if analysis.selected_candidate.overall_fit:
+                    concrete = analysis.selected_explicit_font
+            if concrete is not None:
+                resolved[region.id] = concrete.value
+            region_options = []
+            category_map = {
+                "too_wide": "content_too_wide",
+                "too_tall": "content_too_tall",
+                "unsupported_characters": "unsupported_glyph",
+                "unsupported_by_widget": "unsupported_by_widget",
+            }
+            for item in analysis.candidates:
+                region_options.append({
+                    "id": item.font_id.value,
+                    "available": item.overall_fit,
+                    "category": category_map.get(item.rejection_category),
+                    "minimum_width": item.minimum_width,
+                    "minimum_height": item.minimum_height,
+                })
             options[region.id] = region_options
-        return resolved, options
+        return resolved, options, analyses
 
     def get_preview(self) -> PreviewSnapshot:
         generated_at = self._monotonic()

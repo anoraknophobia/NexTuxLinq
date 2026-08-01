@@ -91,6 +91,7 @@ from nextuxlinq.service import (
     NexTuxLinqService,
     RevisionConflictError,
     ServiceUnavailableError,
+    font_fit_payload,
 )
 from nextuxlinq.service_manager import UserServiceStatus
 from nextuxlinq.system_metrics import BAR_METRICS, METRIC_DEFINITIONS, MetricId
@@ -333,6 +334,8 @@ def create_app(
                        if issue.minimum_width is not None else {}),
                     **({"minimum_height": issue.minimum_height}
                        if issue.minimum_height is not None else {}),
+                    **({"font_fit": font_fit_payload(issue.font_fit)}
+                       if issue.font_fit is not None else {}),
                 })
             return _error(
                 request,
@@ -1031,7 +1034,7 @@ def create_app(
     ) -> CanonicalValidateResponse:
         configuration = request.configuration.to_domain()
         result = service.validate_configuration(configuration)
-        resolved_fonts, font_options = service.get_font_validation(
+        resolved_fonts, font_options, font_fit = service.get_font_validation(
             configuration.active
         )
         return CanonicalValidateResponse(
@@ -1043,6 +1046,7 @@ def create_app(
             ).decode("ascii"),
             resolved_fonts=resolved_fonts,
             font_options=font_options,
+            font_fit=font_fit,
         )
 
     @app.post(

@@ -5,13 +5,16 @@ from __future__ import annotations
 from datetime import datetime
 
 from nextuxlinq.rendering_v2.fonts import (
-    AUTO_FONT_PRIORITY,
     FontDefinition,
+    FontFitAnalysis,
+    FontFitRequirement,
     FontRegistry,
     FontTextError,
+    analyze_font_fit,
     create_builtin_font_registry,
     draw_text,
     measure_normalized_text,
+    resolve_analyzed_font,
 )
 from nextuxlinq.rendering_v2.registry import RenderContext
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
@@ -88,28 +91,45 @@ def _font_failure(error: FontTextError) -> tuple[str, str]:
     return category, field
 
 
-def _font_fits(
-    font: FontDefinition,
+def analyze_date_font_fit(
+    registry: FontRegistry,
+    settings: DateSettings,
     *,
-    candidates: tuple[str, ...],
     region_width: int,
     region_height: int,
-    require_complete_width: bool,
-) -> bool:
+) -> FontFitAnalysis:
+    """Analyze every configured German date representation."""
+    candidates = _date_candidates(settings.format)
     required_characters = (
         _NUMERIC_DATE_CHARACTERS | frozenset("".join(candidates))
     )
-    if not required_characters.issubset(font.supported_characters):
-        raise WidgetRenderingError("unsupported_glyph", field="font")
-    if font.glyph_height > region_height:
-        raise WidgetRenderingError("content_too_tall", field="font")
-    widest = max(
-        measure_normalized_text(font, candidate).width
-        for candidate in candidates
+    require_width = settings.overflow.value == "error"
+
+    def requirement(font: FontDefinition) -> FontFitRequirement:
+        coverage = required_characters.issubset(font.supported_characters)
+        minimum_width = None
+        if coverage:
+            minimum_width = (
+                max(
+                    measure_normalized_text(font, value).width
+                    for value in candidates
+                )
+                if require_width else 1
+            )
+        return FontFitRequirement(
+            compatible_with_widget=True,
+            complete_glyph_coverage=coverage,
+            minimum_width=minimum_width,
+            minimum_height=font.glyph_height,
+        )
+
+    return analyze_font_fit(
+        registry,
+        settings.font,
+        region_width=region_width,
+        region_height=region_height,
+        requirement_for=requirement,
     )
-    if require_complete_width and widest > region_width:
-        raise WidgetRenderingError("content_too_wide", field="content")
-    return True
 
 
 def resolve_date_font(
@@ -119,62 +139,27 @@ def resolve_date_font(
     region_width: int,
     region_height: int,
 ) -> FontDefinition:
-    candidates = _date_candidates(settings.format)
-    require_width = settings.overflow.value == "error"
-    if settings.font is not FontChoice.AUTO:
-        failure: tuple[str, str] | None = None
-        try:
-            font = registry.resolve(settings.font)
-        except FontTextError as error:
-            failure = _font_failure(error)
-            font = None
-        if failure is not None:
-            category, field = failure
-            raise WidgetRenderingError(category, field=field)
-        assert font is not None
-        _font_fits(
-            font,
-            candidates=candidates,
-            region_width=region_width,
-            region_height=region_height,
-            require_complete_width=require_width,
+    failure: tuple[str, str] | None = None
+    try:
+        if settings.font is not FontChoice.AUTO:
+            registry.resolve(settings.font)
+        resolved = resolve_analyzed_font(
+            registry,
+            analyze_date_font_fit(
+                registry,
+                settings,
+                region_width=region_width,
+                region_height=region_height,
+            ),
         )
-        return font
-
-    supported = False
-    vertically_valid = False
-    required_characters = (
-        _NUMERIC_DATE_CHARACTERS | frozenset("".join(candidates))
-    )
-    for font_id in AUTO_FONT_PRIORITY:
-        try:
-            font = registry.resolve(font_id)
-        except FontTextError:
-            continue
-        if not required_characters.issubset(font.supported_characters):
-            continue
-        supported = True
-        if font.glyph_height > region_height:
-            continue
-        vertically_valid = True
-        if require_width:
-            widest = max(
-                measure_normalized_text(font, candidate).width
-                for candidate in candidates
-            )
-            if widest > region_width:
-                continue
-        return font
-    if vertically_valid and require_width:
-        category = "content_too_wide"
-        field = "content"
-    elif supported:
-        category = "content_too_tall"
-        field = "font"
-    else:
-        category = "unsupported_glyph"
-        field = "font"
-    raise WidgetRenderingError(category, field=field)
+    except FontTextError as error:
+        failure = _font_failure(error)
+        resolved = None
+    if failure is not None:
+        category, field = failure
+        raise WidgetRenderingError(category, field=field)
+    assert resolved is not None
+    return resolved
 
 
 def _validate_inputs(

@@ -572,6 +572,11 @@ def test_clock_validation_reports_largest_resolved_font_and_option_reasons(
 
     assert fitting.status_code == 200
     assert fitting.json()["resolved_fonts"] == {"legacy-front-clock": "5x10"}
+    fit = fitting.json()["font_fit"]["legacy-front-clock"]
+    assert fit["resolved_auto_font"] == "5x10"
+    assert fit["largest_fitting_font"] == "5x10"
+    assert fit["smallest_fitting_font"] == "3x5"
+    assert fit["no_font_fits"] is False
     statuses = {
         item["id"]: item
         for item in fitting.json()["font_options"]["legacy-front-clock"]
@@ -586,6 +591,9 @@ def test_clock_validation_reports_largest_resolved_font_and_option_reasons(
 
     assert narrower.status_code == 200
     assert narrower.json()["resolved_fonts"] == {"legacy-front-clock": "4x9"}
+    assert narrower.json()["font_fit"]["legacy-front-clock"][
+        "resolved_auto_font"
+    ] == "4x9"
     statuses = {
         item["id"]: item
         for item in narrower.json()["font_options"]["legacy-front-clock"]
@@ -604,7 +612,8 @@ def test_clock_validation_reports_largest_resolved_font_and_option_reasons(
         json={"configuration": candidate},
     )
     assert explicit_failure.status_code == 422
-    assert explicit_failure.json()["field_errors"][0] == {
+    explicit_error = explicit_failure.json()["field_errors"][0]
+    assert {key: value for key, value in explicit_error.items() if key != "font_fit"} == {
         "field": "regions.legacy-front-clock.content",
         "message": "The widget settings cannot be rendered.",
         "region_id": "legacy-front-clock",
@@ -616,7 +625,74 @@ def test_clock_validation_reports_largest_resolved_font_and_option_reasons(
         "minimum_width": 25,
         "minimum_height": 10,
     }
+    assert explicit_error["font_fit"]["selected_explicit_font"] == "5x10"
+    assert explicit_error["font_fit"]["best_smaller_alternative"] == "4x9"
+    assert explicit_error["font_fit"]["candidates"][0] == {
+        "font_id": "5x10",
+        "display_label": "5×10",
+        "glyph_width": 5,
+        "glyph_height": 10,
+        "compatible_with_widget": True,
+        "complete_glyph_coverage": True,
+        "fits_height": True,
+        "fits_width": False,
+        "overall_fit": False,
+        "minimum_width": 25,
+        "minimum_height": 10,
+        "rejection_category": "too_wide",
+    }
     assert service.snapshot().active_configuration_revision == 1
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_validation_distinguishes_no_fitting_font_from_no_supported_font(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    candidate = legacy_equivalent_configuration_v2().to_dict()
+    profile = candidate["profiles"]["default"]
+    clock = profile["regions"][0]
+    clock["x"] = 0
+    clock["width"] = 16
+    clock["widget"]["settings"]["font"] = "auto"
+    profile["regions"] = [clock]
+
+    no_fit = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+    assert no_fit.status_code == 422
+    fit_error = no_fit.json()["field_errors"][0]
+    assert fit_error["font_fit"]["no_font_fits"] is True
+    assert fit_error["font_fit"]["no_font_supports_content"] is False
+    smallest = fit_error["font_fit"]["candidates"][-1]
+    assert (smallest["font_id"], smallest["minimum_width"],
+            smallest["minimum_height"]) == ("3x5", 17, 5)
+
+    static_definition = next(
+        item for item in service.get_widget_definitions()
+        if item.widget_type.value == "static_text"
+    )
+    clock["widget"] = {
+        "type": "static_text",
+        "settings": {
+            **static_definition.default_settings.to_dict(),
+            "content": "PRIVATE Ä CONTENT",
+            "font": "auto",
+        },
+    }
+    clock["width"] = 90
+    unsupported = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+    assert unsupported.status_code == 422
+    unsupported_error = unsupported.json()["field_errors"][0]
+    assert unsupported_error["font_fit"]["no_font_supports_content"] is True
+    assert "minimum_width" not in unsupported_error
+    serialized = json.dumps(unsupported.json())
+    assert "PRIVATE Ä CONTENT" not in serialized
     assert store.saved == []
     assert worker.frames == []
 
@@ -779,7 +855,7 @@ def test_candidate_error_exposes_only_safe_authoritative_geometry_metadata(
 
     assert response.status_code == 422
     error = response.json()["field_errors"][0]
-    assert error == {
+    assert {key: value for key, value in error.items() if key != "font_fit"} == {
         "field": "regions.metric.content",
         "message": "The widget settings cannot be rendered.",
         "region_id": "metric",
@@ -791,6 +867,8 @@ def test_candidate_error_exposes_only_safe_authoritative_geometry_metadata(
         "minimum_width": 35,
         "minimum_height": 10,
     }
+    assert error["font_fit"]["selected_explicit_font"] == "5x10"
+    assert error["font_fit"]["best_smaller_alternative"] == "4x9"
     serialized = json.dumps(response.json())
     assert "/proc" not in serialized
     assert "/sys" not in serialized

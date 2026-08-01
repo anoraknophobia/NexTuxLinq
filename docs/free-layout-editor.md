@@ -29,7 +29,12 @@ using the configured widget's real content, geometry, and overflow rules. The
 inspector shows the currently resolved Auto font. Concrete fonts remain visible;
 an unavailable choice is disabled where practical with a concise height, width,
 or character-coverage reason. An explicit saved choice is retained while its
-draft geometry is invalid rather than silently replaced.
+draft geometry is invalid rather than silently replaced. The inspector offers
+draft-only **Use Auto** or concrete-font actions when they are valid. A
+**Resize to W × H** action appears only when that exact geometry remains inside
+the canvas and does not overlap another region; it never moves the region or a
+neighbor. Every action reruns server validation and performs no Apply, Save,
+upload, or persistence operation.
 
 The primary page order is Device status, Free-layout editor, Physical display
 preview, Profile, then Validate, Apply, and Save. The full-width region
@@ -73,15 +78,17 @@ known sanitized error and marks the responsible geometry or widget control.
 The canvas message prioritizes bounds, overlap, height, width, settings, and
 content errors in that order.
 
-For renderer geometry failures, the validation API returns only safe numeric
-metadata: actual and authoritative minimum width and height when known. The
-service obtains these limits by probing the configured canonical widget
-renderer within the fixed canvas bounds; it does not parse exception text.
-Consequently font choice, Clock seconds, Date format, System Metric fixed digit
-slots, labels, and overflow behavior are reflected accurately. Clip,
-Truncate, Scrolling Text, and Metric Bar do not inherit a generic full-content
-width. Validation labels never include widget content, host paths, or raw
-exceptions.
+For font failures, the validation API returns immutable, content-free candidate
+metadata from the same authoritative fitting analysis used by rendering. It
+includes actual geometry, required dimensions, coverage and compatibility,
+resolved Auto font, and safe rejection categories. Consequently font choice,
+Clock seconds, Date format, System Metric fixed digit slots, labels, and
+overflow behavior are reflected accurately. Clip, Truncate, and Scrolling Text
+do not inherit a generic full-content width, while Metric Bar and Blank receive
+no font advice. The UI distinguishes **No available font fits this region**
+from **No available font supports the configured characters**; only the former
+can produce resize guidance. Validation labels never include widget content,
+host paths, raw sensor or timezone details, or exceptions.
 
 **Apply** publishes the validated candidate to runtime state. **Save applied
 configuration** persists only that applied state; it never saves a different

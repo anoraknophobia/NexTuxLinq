@@ -22,6 +22,10 @@ selection means **largest fitting native font**. Its explicit order is 5×10,
 fit the region height, and satisfy the widget's real width and overflow rules.
 Equal-height choices therefore prefer 5×9 over 4×9 only when 5×9 fits. Glyphs
 are never scaled, stretched, antialiased, or simulated by the browser.
+Auto tries every compatible candidate in that order before failing; a rejected
+larger font does not make the region invalid when a smaller native font fits.
+An explicit font is evaluated by the same rules but is never replaced or
+persisted as a different font automatically.
 
 The `3x7` font contains only digits and the colon, matching the active legacy
 clock font. The `5x7` font preserves every character, variable glyph width,
@@ -75,7 +79,9 @@ does not shrink just to avoid horizontal overflow. Scrolling Text likewise
 ignores region width during font selection. Clock and Date use their configured
 required representation. System Metric uses its snapshot-independent format
 envelope and fixed numeric slots, so changing a sampled value never changes the
-resolved font.
+resolved font. This includes one-, two-, and three-digit percentages and
+available/unavailable transitions; an actual `100%` retains the chosen font and
+uses the configured Error, Truncate, or Clip behavior.
 
 Unset glyph pixels preserve the surface's existing background. The text layer
 does not fill backgrounds, scale glyphs, rotate content, apply device
@@ -93,6 +99,11 @@ alignment, colors, and scrolling framebuffers.
 The service exposes the canonical choices, each concrete option's current
 availability, and the resolved Auto font through the local metadata and
 validation APIs. The visual editor shows the resolved font beside each Font
-dropdown and retains explicit saved choices while a draft is invalid.
+dropdown and retains explicit saved choices while a draft is invalid. When an
+explicit font fails, the inspector can recommend a smaller fitting native font
+or a safe required size. When Auto has no fitting candidate, the editor says
+that no available font fits and reports the smallest compatible font's required
+geometry where known. Unsupported characters are reported separately because
+resizing cannot add missing glyphs.
 Migration-equivalence tests preserve schema-v1 framebuffer behavior, and
 physical Matrix900 validation remains a separate operational step.

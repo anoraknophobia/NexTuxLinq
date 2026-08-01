@@ -2074,7 +2074,84 @@ test("region validation explanations expose exact safe geometry guidance", () =>
     category: "content_too_wide", region_id: explicitClock.id,
     actual_width: 24, actual_height: 10,
     minimum_width: 25, minimum_height: 10,
-  }, freeProfile([explicitClock])), "Clock with 5×10 needs minimum width 25 px");
+  }, freeProfile([explicitClock])), "Selected 5×10 is too wide · needs 25 px");
+});
+
+test("font-fit explanations distinguish alternatives, no fit, and no coverage", () => {
+  const explicit = freeRegion({
+    width: 24,
+    widget: {type: "clock", settings: {
+      ...widgetMetadata.widget_definitions.find(
+        (definition) => definition.type === "clock"
+      ).default_settings,
+      font: "5x10",
+    }},
+  });
+  const analysis = {
+    selected_explicit_font: "5x10",
+    best_smaller_alternative: "4x9",
+    no_font_fits: false,
+    no_font_supports_content: false,
+    candidates: [{
+      font_id: "5x10", compatible_with_widget: true,
+      complete_glyph_coverage: true, overall_fit: false,
+      minimum_width: 25, minimum_height: 10,
+    }],
+  };
+  const error = {
+    category: "content_too_wide", region_id: explicit.id,
+    actual_width: 24, actual_height: 10,
+    minimum_width: 25, minimum_height: 10,
+    font_fit: analysis,
+  };
+  assert.equal(
+    freeLayout.validationExplanation(error, freeProfile([explicit])),
+    "Selected 5×10 is too wide · needs 25 px",
+  );
+  assert.deepEqual(
+    freeLayout.fontGuidanceLines(error, freeProfile([explicit])),
+    ["4×9 would fit"],
+  );
+
+  const noFit = {...analysis, selected_explicit_font: null,
+    best_smaller_alternative: null, no_font_fits: true,
+    candidates: [{
+      font_id: "3x5", compatible_with_widget: true,
+      complete_glyph_coverage: true, overall_fit: false,
+      minimum_width: 17, minimum_height: 5,
+    }]};
+  assert.equal(freeLayout.validationExplanation({
+    category: "content_too_wide", font_fit: noFit,
+  }), "No available font fits this region");
+  assert.deepEqual(freeLayout.fontGuidanceLines({font_fit: noFit}), [
+    "Smallest compatible font needs at least 17 × 5 px",
+  ]);
+  assert.equal(freeLayout.validationExplanation({font_fit: {
+    ...noFit, no_font_supports_content: true,
+  }}), "No available font supports the configured characters");
+});
+
+test("font resize suggestions preserve coordinates and reject bounds or overlap", () => {
+  const region = freeRegion({x: 10, width: 20, height: 7});
+  const analysis = {
+    selected_explicit_font: "5x10",
+    candidates: [{
+      font_id: "5x10", compatible_with_widget: true,
+      complete_glyph_coverage: true, overall_fit: false,
+      minimum_width: 25, minimum_height: 10,
+    }],
+  };
+  assert.deepEqual(
+    freeLayout.fontResizeSuggestion(freeProfile([region]), region, analysis),
+    {width: 25, height: 10},
+  );
+  assert.equal(freeLayout.safeResizeGeometry(
+    freeProfile([{...region, x: 70}]), region.id, 25, 10,
+  ), null);
+  const blocker = freeRegion({id: "region-2", x: 32, width: 10});
+  assert.equal(freeLayout.safeResizeGeometry(
+    freeProfile([region, blocker]), region.id, 25, 10,
+  ), null);
 });
 
 test("font option reasons and resolved labels use backend metadata", () => {
@@ -2187,6 +2264,125 @@ test("inline region error selects the region and inspector shows every error", a
     (child) => child.className === "region-validation-badge"
   ), false);
   assert.equal(details.hidden, true);
+});
+
+test("font quick actions change only the local draft and rerun validation", async () => {
+  const clockSettings = widgetMetadata.widget_definitions.find(
+    (definition) => definition.type === "clock"
+  ).default_settings;
+  const region = freeRegion({
+    width: 24, height: 10,
+    widget: {type: "clock", settings: {...clockSettings, font: "5x10"}},
+  });
+  const fixture = freeEditorFixture({
+    profiles: {default: freeProfile([region])},
+  });
+  await fixture.editor.initialize();
+  const callsBefore = fixture.calls.length;
+  const analysis = {
+    actual_width: 24, actual_height: 10,
+    selected_explicit_font: "5x10", resolved_auto_font: null,
+    largest_fitting_font: "4x9", smallest_fitting_font: "3x5",
+    best_smaller_alternative: "4x9", no_font_fits: false,
+    no_font_supports_content: false,
+    candidates: [
+      {font_id: "5x10", compatible_with_widget: true,
+        complete_glyph_coverage: true, overall_fit: false,
+        minimum_width: 25, minimum_height: 10},
+      {font_id: "4x9", compatible_with_widget: true,
+        complete_glyph_coverage: true, overall_fit: true,
+        minimum_width: 21, minimum_height: 9},
+    ],
+  };
+  fixture.editor.state.serverValidation = "invalid";
+  fixture.editor.state.selectedRegionId = region.id;
+  fixture.editor.state.serverErrors = [{
+    category: "content_too_wide", field: "content", region_id: region.id,
+    actual_width: 24, actual_height: 10,
+    minimum_width: 25, minimum_height: 10, font_fit: analysis,
+  }];
+  fixture.editor.state.fontFit = {[region.id]: analysis};
+  fixture.editor.render();
+  const details = fixture.elements.get("#fl-region-validation-details");
+  const actionRow = details.children.find(
+    (item) => item.className === "font-fit-actions"
+  );
+  assert.deepEqual(actionRow.children.map((button) => button.textContent), [
+    "Use Auto", "Use 4×9", "Resize to 25 × 10",
+  ]);
+  actionRow.children[1].dispatch("click");
+  assert.equal(
+    fixture.editor.state.draft.profiles.default.regions[0].widget.settings.font,
+    "4x9",
+  );
+  assert.equal(
+    fixture.editor.state.applied.profiles.default.regions[0].widget.settings.font,
+    "5x10",
+  );
+  assert.equal(fixture.calls.length, callsBefore);
+  assert.equal(fixture.editor.state.serverValidation, "pending");
+  assert.deepEqual(fixture.editor.state.serverErrors, []);
+  assert.equal(
+    fixture.elements.get("#fl-region-layer").children[0].className.includes(
+      "invalid",
+    ),
+    false,
+  );
+  assert.equal(fixture.elements.get("#fl-apply").disabled, true);
+  assert.equal(fixture.elements.get("#fl-save").disabled, true);
+  assert.deepEqual(fixture.editor.state.resolvedFonts, {});
+  assert.equal(freeLayout.resolvedFontExplanation(
+    "4x9", null, widgetMetadata.font_definitions,
+    fixture.editor.state.serverValidation,
+  ), "Selected font: 4×9");
+});
+
+test("resize quick action changes only selected geometry and is hidden when unsafe", async () => {
+  const clockSettings = widgetMetadata.widget_definitions.find(
+    (definition) => definition.type === "clock"
+  ).default_settings;
+  const region = freeRegion({
+    width: 24, height: 10,
+    widget: {type: "clock", settings: {...clockSettings, font: "5x10"}},
+  });
+  const analysis = {
+    selected_explicit_font: "5x10", largest_fitting_font: "4x9",
+    best_smaller_alternative: null, no_font_fits: false,
+    no_font_supports_content: false,
+    candidates: [{font_id: "5x10", compatible_with_widget: true,
+      complete_glyph_coverage: true, overall_fit: false,
+      minimum_width: 25, minimum_height: 10}],
+  };
+  const fixture = freeEditorFixture({
+    profiles: {default: freeProfile([region])},
+  });
+  await fixture.editor.initialize();
+  fixture.editor.state.serverValidation = "invalid";
+  fixture.editor.state.selectedRegionId = region.id;
+  fixture.editor.state.serverErrors = [{
+    category: "content_too_wide", region_id: region.id,
+    actual_width: 24, actual_height: 10,
+    minimum_width: 25, minimum_height: 10, font_fit: analysis,
+  }];
+  fixture.editor.state.fontFit = {[region.id]: analysis};
+  fixture.editor.render();
+  const details = fixture.elements.get("#fl-region-validation-details");
+  const resizeButton = details.children.find(
+    (item) => item.className === "font-fit-actions"
+  ).children.find((button) => button.textContent.startsWith("Resize"));
+  resizeButton.dispatch("click");
+  const draftRegion = fixture.editor.state.draft.profiles.default.regions[0];
+  const appliedRegion = fixture.editor.state.applied.profiles.default.regions[0];
+  assert.deepEqual(
+    {x: draftRegion.x, y: draftRegion.y, width: draftRegion.width,
+      height: draftRegion.height},
+    {x: region.x, y: region.y, width: 25, height: 10},
+  );
+  assert.equal(appliedRegion.width, 24);
+
+  assert.equal(freeLayout.fontResizeSuggestion(
+    freeProfile([{...region, x: 70}]), {...region, x: 70}, analysis,
+  ), null);
 });
 
 test("small invalid regions use an accessible message below the canvas", async () => {

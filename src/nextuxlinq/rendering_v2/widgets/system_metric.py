@@ -6,15 +6,18 @@ import math
 from dataclasses import dataclass
 
 from nextuxlinq.rendering_v2.fonts import (
-    AUTO_FONT_PRIORITY,
     FontDefinition,
+    FontFitAnalysis,
+    FontFitRequirement,
     FontRegistry,
     FontTextError,
     GlyphBitmap,
+    analyze_font_fit,
     create_builtin_font_registry,
     draw_glyph,
     horizontal_origin,
     measure_normalized_text,
+    resolve_analyzed_font,
     vertical_origin,
 )
 from nextuxlinq.rendering_v2.registry import RenderContext
@@ -327,42 +330,53 @@ def resolve_system_metric_font(
 ) -> FontDefinition:
     """Resolve a concrete font from the widget's complete format envelope."""
     registry = _metric_font_registry()
-    choices = (
-        (settings.font,)
-        if settings.font is not FontChoice.AUTO
-        else AUTO_FONT_PRIORITY
+    return resolve_analyzed_font(
+        registry,
+        analyze_system_metric_font_fit(
+            settings,
+            region_width=region_width,
+            region_height=region_height,
+            registry=registry,
+        ),
     )
-    supported_but_tall = False
-    supported_and_vertical = False
-    for choice in choices:
-        font = registry.resolve(choice)
+
+
+def analyze_system_metric_font_fit(
+    settings: SystemMetricSettings,
+    *,
+    region_width: int,
+    region_height: int,
+    registry: FontRegistry | None = None,
+) -> FontFitAnalysis:
+    """Analyze the complete snapshot-independent compact metric envelope."""
+    font_registry = registry or _metric_font_registry()
+
+    def requirement(font: FontDefinition) -> FontFitRequirement:
         try:
             widths = _font_envelope_widths(font, settings)
         except FontTextError:
-            if settings.font is not FontChoice.AUTO:
-                raise
-            continue
-        supported_but_tall = True
-        if font.glyph_height > region_height:
-            continue
-        supported_and_vertical = True
-        if (
-            settings.overflow is TextOverflow.ERROR
-            and max(widths) > region_width
-        ):
-            if settings.font is not FontChoice.AUTO:
-                raise FontTextError(
-                    "content_too_wide", field="content", font_id=font.font_id
-                )
-            continue
-        return font
-    if supported_and_vertical and settings.overflow is TextOverflow.ERROR:
-        category = "content_too_wide"
-    elif supported_but_tall:
-        category = "content_too_tall"
-    else:
-        category = "unsupported_glyph"
-    raise FontTextError(category, field="font")
+            return FontFitRequirement(
+                compatible_with_widget=True,
+                complete_glyph_coverage=False,
+                minimum_width=None,
+                minimum_height=font.glyph_height,
+            )
+        return FontFitRequirement(
+            compatible_with_widget=True,
+            complete_glyph_coverage=True,
+            minimum_width=(
+                max(widths) if settings.overflow is TextOverflow.ERROR else 1
+            ),
+            minimum_height=font.glyph_height,
+        )
+
+    return analyze_font_fit(
+        font_registry,
+        settings.font,
+        region_width=region_width,
+        region_height=region_height,
+        requirement_for=requirement,
+    )
 
 
 def _layout_system_metric_text(

@@ -431,6 +431,13 @@ button:hover:not(:disabled) { border-color: #65ded5; }
 .region-validation-details p + p { margin-top: .3rem; }
 .region-validation-primary { color: #fff; font-weight: 700; }
 .region-validation-secondary { font-size: .85rem; }
+.font-fit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-top: .6rem;
+}
+.font-fit-actions .small { padding: .3rem .55rem; }
 .font-field [data-resolved-font] {
   display: block;
   min-height: 1rem;

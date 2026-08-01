@@ -276,6 +276,38 @@ class FontOptionStatus(StrictModel):
     minimum_height: int | None
 
 
+class FontFitCandidateStatus(StrictModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    font_id: str
+    display_label: str
+    glyph_width: int
+    glyph_height: int
+    compatible_with_widget: bool
+    complete_glyph_coverage: bool
+    fits_height: bool
+    fits_width: bool
+    overall_fit: bool
+    minimum_width: int | None
+    minimum_height: int | None
+    rejection_category: str | None
+
+
+class FontFitStatus(StrictModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    actual_width: int
+    actual_height: int
+    selected_explicit_font: str | None
+    resolved_auto_font: str | None
+    largest_fitting_font: str | None
+    smallest_fitting_font: str | None
+    best_smaller_alternative: str | None
+    no_font_fits: bool
+    no_font_supports_content: bool
+    candidates: tuple[FontFitCandidateStatus, ...]
+
+
 class MetricEditorDefinition(StrictModel):
     id: str
     label: str
@@ -400,6 +432,7 @@ class CanonicalValidateResponse(StrictModel):
     framebuffer_base64: str
     resolved_fonts: dict[str, str]
     font_options: dict[str, list[FontOptionStatus]]
+    font_fit: dict[str, FontFitStatus]
 
 
 class CanonicalApplyRequest(StrictModel):

@@ -6,14 +6,17 @@ import math
 from datetime import datetime
 
 from nextuxlinq.rendering_v2.fonts import (
-    AUTO_FONT_PRIORITY,
     FontDefinition,
+    FontFitAnalysis,
+    FontFitRequirement,
     FontRegistry,
     FontTextError,
+    analyze_font_fit,
     create_builtin_font_registry,
     draw_glyph,
     horizontal_origin,
     measure_normalized_text,
+    resolve_analyzed_font,
     vertical_origin,
 )
 from nextuxlinq.rendering_v2.registry import RenderContext
@@ -80,9 +83,24 @@ def clock_separator_is_visible(
     return not blink_separator or normalized % 1.0 < 0.5
 
 
-def _widest_clock_text(settings: ClockSettings) -> str:
-    suffix = ":88" if settings.show_seconds else ""
-    return f"88:88{suffix}"
+def _clock_minimum_width(font: FontDefinition, settings: ClockSettings) -> int:
+    """Measure the widest reachable configured Clock representation."""
+    hours = (
+        tuple(f"{hour:02d}" for hour in range(24))
+        if settings.format is ClockFormat.HOUR_24
+        else tuple(str(hour) for hour in range(1, 13))
+    )
+    two_digit_values = tuple(f"{value:02d}" for value in range(60))
+    hour_width = max(measure_normalized_text(font, value).width for value in hours)
+    minute_width = max(
+        measure_normalized_text(font, value).width for value in two_digit_values
+    )
+    separator_width = font.glyphs[":"].width
+    width = hour_width + separator_width + minute_width
+    width += font.character_spacing * 2
+    if settings.show_seconds:
+        width += separator_width + minute_width + font.character_spacing * 2
+    return width
 
 
 def _font_failure(error: FontTextError) -> tuple[str, str]:
@@ -99,30 +117,35 @@ def _font_failure(error: FontTextError) -> tuple[str, str]:
     return category, field
 
 
-def _validate_font(
-    font: FontDefinition,
+def analyze_clock_font_fit(
+    registry: FontRegistry,
+    settings: ClockSettings,
     *,
-    widest_text: str,
     region_width: int,
     region_height: int,
-) -> FontDefinition:
-    if any(character not in font.glyphs for character in _CLOCK_CHARACTERS):
-        raise WidgetRenderingError("unsupported_glyph", field="font")
-    if font.glyph_height > region_height:
-        raise WidgetRenderingError("content_too_tall", field="font")
-    failure: tuple[str, str] | None = None
-    try:
-        measurement = measure_normalized_text(font, widest_text)
-    except FontTextError as error:
-        failure = _font_failure(error)
-        measurement = None
-    if failure is not None:
-        category, field = failure
-        raise WidgetRenderingError(category, field=field)
-    assert measurement is not None
-    if measurement.width > region_width:
-        raise WidgetRenderingError("content_too_wide", field="content")
-    return font
+) -> FontFitAnalysis:
+    """Analyze the stable widest configured Clock representation."""
+    def requirement(font: FontDefinition) -> FontFitRequirement:
+        coverage = all(
+            character in font.glyphs for character in _CLOCK_CHARACTERS
+        )
+        return FontFitRequirement(
+            compatible_with_widget=True,
+            complete_glyph_coverage=coverage,
+            minimum_width=(
+                _clock_minimum_width(font, settings)
+                if coverage else None
+            ),
+            minimum_height=font.glyph_height,
+        )
+
+    return analyze_font_fit(
+        registry,
+        settings.font,
+        region_width=region_width,
+        region_height=region_height,
+        requirement_for=requirement,
+    )
 
 
 def resolve_clock_font(
@@ -132,54 +155,27 @@ def resolve_clock_font(
     region_width: int,
     region_height: int,
 ) -> FontDefinition:
-    widest_text = _widest_clock_text(settings)
-    if settings.font is not FontChoice.AUTO:
-        failure: tuple[str, str] | None = None
-        try:
-            font = registry.resolve(settings.font)
-        except FontTextError as error:
-            failure = _font_failure(error)
-            font = None
-        if failure is not None:
-            category, field = failure
-            raise WidgetRenderingError(category, field=field)
-        assert font is not None
-        return _validate_font(
-            font,
-            widest_text=widest_text,
-            region_width=region_width,
-            region_height=region_height,
+    failure: tuple[str, str] | None = None
+    try:
+        if settings.font is not FontChoice.AUTO:
+            registry.resolve(settings.font)
+        resolved = resolve_analyzed_font(
+            registry,
+            analyze_clock_font_fit(
+                registry,
+                settings,
+                region_width=region_width,
+                region_height=region_height,
+            ),
         )
-
-    supported = False
-    vertically_valid = False
-    for font_id in AUTO_FONT_PRIORITY:
-        try:
-            font = registry.resolve(font_id)
-        except FontTextError:
-            continue
-        if any(
-            character not in font.glyphs
-            for character in _CLOCK_CHARACTERS
-        ):
-            continue
-        supported = True
-        if font.glyph_height > region_height:
-            continue
-        vertically_valid = True
-        if measure_normalized_text(font, widest_text).width > region_width:
-            continue
-        return font
-    if vertically_valid:
-        category = "content_too_wide"
-        field = "content"
-    elif supported:
-        category = "content_too_tall"
-        field = "font"
-    else:
-        category = "unsupported_glyph"
-        field = "font"
-    raise WidgetRenderingError(category, field=field)
+    except FontTextError as error:
+        failure = _font_failure(error)
+        resolved = None
+    if failure is not None:
+        category, field = failure
+        raise WidgetRenderingError(category, field=field)
+    assert resolved is not None
+    return resolved
 
 
 def _validate_inputs(

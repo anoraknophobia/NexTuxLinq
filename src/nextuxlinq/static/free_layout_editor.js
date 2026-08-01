@@ -149,6 +149,13 @@
     const selectedFont = affectedRegion?.widget?.settings?.font;
     const explicitFont = selectedFont && selectedFont !== "auto"
       ? selectedFont.replace("x", "×") : null;
+    const fit = error?.font_fit;
+    if (fit?.no_font_supports_content) {
+      return "No available font supports the configured characters";
+    }
+    if (fit?.no_font_fits && !explicitFont) {
+      return "No available font fits this region";
+    }
     const actualWidth = Number.isInteger(error?.actual_width)
       ? error.actual_width : null;
     const actualHeight = Number.isInteger(error?.actual_height)
@@ -178,16 +185,14 @@
       return minimumHeight === null
         ? "Text is too tall"
         : explicitFont
-          ? `${explicitFont} needs minimum height ${minimumHeight} px`
+          ? `Selected ${explicitFont} is too tall · needs height ${minimumHeight} px`
           : `Too short · minimum height ${minimumHeight} px`;
     }
     if (widthFails || error?.category === "content_too_wide") {
       return minimumWidth === null
         ? "Text does not fit"
         : explicitFont
-          ? `${affectedRegion.widget.type === "clock" ? "Clock with " : ""}${
-            explicitFont
-          } needs minimum width ${minimumWidth} px`
+          ? `Selected ${explicitFont} is too wide · needs ${minimumWidth} px`
           : `Too narrow · minimum width ${minimumWidth} px`;
     }
     return {
@@ -201,6 +206,64 @@
       renderer_invariant: "Invalid widget setting",
       unexpected_renderer_failure: "Widget cannot be rendered",
     }[error?.category] || "Invalid region";
+  }
+
+  function fontFitCandidate(analysis, fontId) {
+    return analysis?.candidates?.find((item) => item.font_id === fontId) || null;
+  }
+
+  function smallestCompatibleCandidate(analysis) {
+    return [...(analysis?.candidates || [])].reverse().find(
+      (item) => item.compatible_with_widget && item.complete_glyph_coverage,
+    ) || null;
+  }
+
+  function fontGuidanceLines(error) {
+    const analysis = error?.font_fit;
+    if (!analysis) return [];
+    const lines = [];
+    if (analysis.best_smaller_alternative) {
+      lines.push(`${analysis.best_smaller_alternative.replace("x", "×")} would fit`);
+    }
+    if (analysis.no_font_fits && !analysis.no_font_supports_content) {
+      const smallest = smallestCompatibleCandidate(analysis);
+      if (Number.isInteger(smallest?.minimum_width)
+          && Number.isInteger(smallest?.minimum_height)) {
+        lines.push(
+          `Smallest compatible font needs at least ${smallest.minimum_width} × ${
+            smallest.minimum_height
+          } px`,
+        );
+      }
+    }
+    return lines;
+  }
+
+  function safeResizeGeometry(profile, regionId, width, height) {
+    if (!Number.isInteger(width) || width <= 0
+        || !Number.isInteger(height) || height <= 0) return null;
+    const region = profile?.regions?.find((item) => item.id === regionId);
+    if (!region || region.x + width > CANVAS_WIDTH
+        || region.y + height > CANVAS_HEIGHT) return null;
+    const resized = {...region, width, height};
+    if (profile.regions.some(
+      (other) => other.id !== regionId && rectanglesOverlap(resized, other),
+    )) return null;
+    return {width, height};
+  }
+
+  function fontResizeSuggestion(profile, region, analysis) {
+    if (!analysis || !region) return null;
+    const candidate = analysis.selected_explicit_font
+      ? fontFitCandidate(analysis, analysis.selected_explicit_font)
+      : smallestCompatibleCandidate(analysis);
+    if (!candidate || candidate.complete_glyph_coverage !== true
+        || !Number.isInteger(candidate.minimum_width)
+        || !Number.isInteger(candidate.minimum_height)
+        || candidate.overall_fit) return null;
+    return safeResizeGeometry(
+      profile, region.id, candidate.minimum_width, candidate.minimum_height,
+    );
   }
 
   function regionValidationErrors(localErrors, serverErrors, regionId) {
@@ -854,6 +917,7 @@
       serverErrors: [],
       resolvedFonts: {},
       fontOptions: {},
+      fontFit: {},
       conflict: false,
       submitting: false,
       lastValidPreview: null,
@@ -996,6 +1060,7 @@
       state.serverErrors = [];
       state.resolvedFonts = {};
       state.fontOptions = {};
+      state.fontFit = {};
       state.inputErrors.clear();
       if (!state.conflict) setMessage("");
       updateDerivedState();
@@ -1320,18 +1385,67 @@
         region.id,
       );
       if (elements.regionValidationDetails) {
-        elements.regionValidationDetails.hidden = regionErrors.length === 0;
-        elements.regionValidationDetails.replaceChildren(
-          ...regionErrors.map((error, index) => {
+        const detailItems = regionErrors.flatMap((error, index) => {
             const item = documentObject.createElement("p");
             item.className = index === 0
               ? "region-validation-primary" : "region-validation-secondary";
             item.textContent = `${index === 0 ? "Error" : "Also"} · ${
               validationExplanation(error, activeProfile())
             }`;
-            return item;
-          }),
-        );
+            return [item, ...fontGuidanceLines(error).map(
+              (line) => {
+                const guidance = documentObject.createElement("p");
+                guidance.className = "region-validation-secondary";
+                guidance.textContent = line;
+                return guidance;
+              },
+            )];
+          });
+        const analysis = state.fontFit[region.id]
+          || regionErrors.find((error) => error.font_fit)?.font_fit;
+        const actions = documentObject.createElement("div");
+        actions.className = "font-fit-actions";
+        const addAction = (label, action) => {
+          const button = documentObject.createElement("button");
+          button.type = "button";
+          button.className = "secondary small";
+          button.textContent = label;
+          button.addEventListener("click", action);
+          actions.append(button);
+        };
+        if (analysis?.largest_fitting_font
+            && region.widget.settings.font !== "auto") {
+          addAction("Use Auto", () => mutate((candidate) => {
+            candidate.profiles[candidate.active_profile].regions.find(
+              (item) => item.id === region.id,
+            ).widget.settings.font = "auto";
+          }));
+        }
+        const alternative = analysis?.best_smaller_alternative;
+        if (alternative && alternative !== region.widget.settings.font) {
+          addAction(`Use ${alternative.replace("x", "×")}`, () => mutate(
+            (candidate) => {
+              candidate.profiles[candidate.active_profile].regions.find(
+                (item) => item.id === region.id,
+              ).widget.settings.font = alternative;
+            },
+          ));
+        }
+        const resize = fontResizeSuggestion(activeProfile(), region, analysis);
+        if (resize) {
+          addAction(`Resize to ${resize.width} × ${resize.height}`, () => mutate(
+            (candidate) => {
+              const target = candidate.profiles[
+                candidate.active_profile
+              ].regions.find((item) => item.id === region.id);
+              target.width = resize.width;
+              target.height = resize.height;
+            },
+          ));
+        }
+        if (actions.children.length > 0) detailItems.push(actions);
+        elements.regionValidationDetails.hidden = detailItems.length === 0;
+        elements.regionValidationDetails.replaceChildren(...detailItems);
       }
       elements.name.value = region.name || "";
       elements.enabled.checked = region.enabled;
@@ -1624,6 +1738,7 @@
           state.serverErrors = [];
           state.resolvedFonts = {};
           state.fontOptions = {};
+          state.fontFit = {};
           state.selectedRegionId = selectionForProfile(
             selectedRegionId,
             activeProfile(),
@@ -1685,6 +1800,7 @@
         state.serverErrors = [];
         state.resolvedFonts = result.resolved_fonts || {};
         state.fontOptions = result.font_options || {};
+        state.fontFit = result.font_fit || {};
         state.inputErrors.clear();
         state.lastValidPreview = result.framebuffer_base64;
         state.previewPolicy = result.update_policy;
@@ -1698,6 +1814,31 @@
         state.serverValidation = "invalid";
         state.serverErrors = error instanceof EditorRequestError
           ? error.fieldErrors : [];
+        state.fontFit = {};
+        state.fontOptions = {};
+        state.resolvedFonts = {};
+        for (const fieldError of state.serverErrors) {
+          if (!fieldError.region_id || !fieldError.font_fit) continue;
+          state.fontFit[fieldError.region_id] = fieldError.font_fit;
+          state.fontOptions[fieldError.region_id] = (
+            fieldError.font_fit.candidates || []
+          ).map((item) => ({
+            id: item.font_id,
+            available: item.overall_fit,
+            category: {
+              too_wide: "content_too_wide",
+              too_tall: "content_too_tall",
+              unsupported_characters: "unsupported_glyph",
+              unsupported_by_widget: "unsupported_by_widget",
+            }[item.rejection_category] || null,
+            minimum_width: item.minimum_width,
+            minimum_height: item.minimum_height,
+          }));
+          if (fieldError.font_fit.resolved_auto_font) {
+            state.resolvedFonts[fieldError.region_id] =
+              fieldError.font_fit.resolved_auto_font;
+          }
+        }
         if (state.lastValidPreview) renderPreview(state.lastValidPreview,
           "Last valid");
         setMessage(
@@ -1842,6 +1983,7 @@
       state.serverErrors = [];
       state.resolvedFonts = {};
       state.fontOptions = {};
+      state.fontFit = {};
       updateDerivedState();
       state.serverValidation = "idle";
       render();
@@ -2047,6 +2189,7 @@
       state.serverErrors = [];
       state.resolvedFonts = {};
       state.fontOptions = {};
+      state.fontFit = {};
       state.inputErrors.clear();
       state.pendingFullImportBackup = fullImport;
       state.conflict = false;
@@ -2108,6 +2251,7 @@
         state.serverErrors = [];
         state.resolvedFonts = {};
         state.fontOptions = {};
+        state.fontFit = {};
         state.inputErrors.clear();
         updateDerivedState();
         state.serverValidation = "idle";
@@ -2574,6 +2718,7 @@
         state.serverErrors = [];
         state.resolvedFonts = {};
         state.fontOptions = {};
+        state.fontFit = {};
         state.inputErrors.clear();
         state.pendingRemote = null;
         state.pendingFullImportBackup = false;
@@ -2674,6 +2819,9 @@
     rectanglesOverlap,
     validationPriority,
     validationExplanation,
+    fontGuidanceLines,
+    safeResizeGeometry,
+    fontResizeSuggestion,
     regionValidationErrors,
     fontOptionReason,
     resolvedFontExplanation,

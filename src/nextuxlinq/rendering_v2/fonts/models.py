@@ -210,6 +210,63 @@ class ResolvedFont:
 
 
 @dataclass(frozen=True, slots=True)
+class FontFitRequirement:
+    """Safe widget-specific requirements for one concrete native font."""
+
+    compatible_with_widget: bool
+    complete_glyph_coverage: bool
+    minimum_width: int | None
+    minimum_height: int
+
+
+@dataclass(frozen=True, slots=True)
+class FontCandidateFit:
+    """Immutable, content-free fit result for one native font."""
+
+    font_id: FontChoice
+    display_label: str
+    glyph_width: int
+    glyph_height: int
+    compatible_with_widget: bool
+    complete_glyph_coverage: bool
+    fits_height: bool
+    fits_width: bool
+    overall_fit: bool
+    minimum_width: int | None
+    minimum_height: int | None
+    rejection_category: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class FontFitAnalysis:
+    """One authoritative selection and guidance result for a text widget."""
+
+    actual_width: int
+    actual_height: int
+    selected_explicit_font: FontChoice | None
+    resolved_auto_font: FontChoice | None
+    largest_fitting_font: FontChoice | None
+    smallest_fitting_font: FontChoice | None
+    best_smaller_alternative: FontChoice | None
+    no_font_fits: bool
+    no_font_supports_content: bool
+    candidates: tuple[FontCandidateFit, ...]
+
+    def candidate(self, font_id: FontChoice) -> FontCandidateFit:
+        """Return one candidate without exposing mutable lookup state."""
+        for candidate in self.candidates:
+            if candidate.font_id is font_id:
+                return candidate
+        raise FontTextError("unknown_font", font_id=font_id)
+
+    @property
+    def selected_candidate(self) -> FontCandidateFit | None:
+        if self.selected_explicit_font is None:
+            return None
+        return self.candidate(self.selected_explicit_font)
+
+
+@dataclass(frozen=True, slots=True)
 class DrawTextResult:
     """Immutable summary of one local text-drawing operation."""
 

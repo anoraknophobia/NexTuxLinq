@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from nextuxlinq.rendering_v2.fonts.builtin import AUTO_FONT_PRIORITY
+from nextuxlinq.rendering_v2.fonts.fit import (
+    analyze_font_fit,
+    resolve_analyzed_font,
+)
 from nextuxlinq.rendering_v2.fonts.models import (
     DrawTextResult,
     FontDefinition,
+    FontFitAnalysis,
+    FontFitRequirement,
     FontRegistry,
     FontTextError,
     MeasuredText,
@@ -102,45 +107,61 @@ def resolve_font(
         raise FontTextError("renderer_invariant", field="require_complete_width")
     width, height = _validate_region_size(region_width, region_height)
     normalized = normalize_text(content, uppercase=uppercase)
-
     if choice is not FontChoice.AUTO:
-        font = registry.resolve(choice)
-        measurement = measure_normalized_text(font, normalized)
-        if font.glyph_height > height:
-            raise FontTextError(
-                "content_too_tall", field="font", font_id=font.font_id
-            )
-        if require_complete_width and measurement.width > width:
-            raise FontTextError(
-                "content_too_wide", field="content", font_id=font.font_id
-            )
-        return ResolvedFont(font, normalized, measurement)
+        registry.resolve(choice)
+    analysis = analyze_text_font_fit(
+        registry,
+        choice,
+        normalized,
+        region_width=width,
+        region_height=height,
+        require_complete_width=require_complete_width,
+    )
+    font = resolve_analyzed_font(registry, analysis)
+    return ResolvedFont(
+        font,
+        normalized,
+        measure_normalized_text(font, normalized),
+    )
 
-    supported_but_tall = False
-    supported_and_vertical = False
-    for font_id in AUTO_FONT_PRIORITY:
-        try:
-            font = registry.resolve(font_id)
-        except FontTextError:
-            continue
-        if any(character not in font.glyphs for character in normalized):
-            continue
-        supported_but_tall = True
-        if font.glyph_height > height:
-            continue
-        supported_and_vertical = True
-        measurement = measure_normalized_text(font, normalized)
-        if require_complete_width and measurement.width > width:
-            continue
-        return ResolvedFont(font, normalized, measurement)
 
-    if supported_and_vertical and require_complete_width:
-        category = "content_too_wide"
-    elif supported_but_tall:
-        category = "content_too_tall"
-    else:
-        category = "unsupported_glyph"
-    raise FontTextError(category, field="font")
+def analyze_text_font_fit(
+    registry: FontRegistry,
+    choice: FontChoice,
+    normalized_text: str,
+    *,
+    region_width: int,
+    region_height: int,
+    require_complete_width: bool,
+) -> FontFitAnalysis:
+    """Analyze static or scrolling text with its real overflow width rule."""
+    if not isinstance(normalized_text, str):
+        raise FontTextError("renderer_invariant", field="content")
+
+    def requirement(font: FontDefinition) -> FontFitRequirement:
+        coverage = all(
+            character in font.glyphs for character in normalized_text
+        )
+        minimum_width = None
+        if coverage:
+            minimum_width = (
+                measure_normalized_text(font, normalized_text).width
+                if require_complete_width else 1
+            )
+        return FontFitRequirement(
+            compatible_with_widget=True,
+            complete_glyph_coverage=coverage,
+            minimum_width=minimum_width,
+            minimum_height=font.glyph_height,
+        )
+
+    return analyze_font_fit(
+        registry,
+        choice,
+        region_width=region_width,
+        region_height=region_height,
+        requirement_for=requirement,
+    )
 
 
 def horizontal_origin(
