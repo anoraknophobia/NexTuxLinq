@@ -11,15 +11,16 @@ from nextuxlinq.rendering_v2.fonts import (
     GlyphBitmap,
     create_builtin_font_registry,
     draw_text,
-    resolve_font,
+    measure_normalized_text,
 )
 from nextuxlinq.rendering_v2.registry import RenderContext
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.widgets.errors import WidgetRenderingError
-from nextuxlinq.system_metrics import format_metric_value
+from nextuxlinq.system_metrics import format_metric_value, metric_value_format_envelope
 from nextuxlinq.widget_models import (
     BarDirection,
     BarOrientation,
+    FontChoice,
     MetricBarSettings,
     MetricDisplayMode,
     SystemMetricSettings,
@@ -54,6 +55,9 @@ def _metric_font_registry() -> FontRegistry:
             glyph.width for glyph in definition.glyphs.values()
         ) <= 3:
             rows = ("101", "001", "010", "010", "010", "100", "101")
+            glyphs["-"] = GlyphBitmap.from_strings(
+                ("000", "000", "000", "111", "000", "000", "000")
+            )
         glyphs["%"] = GlyphBitmap.from_strings(rows)
         definitions.append(FontDefinition(
             font_id=definition.font_id,
@@ -78,6 +82,69 @@ def metric_text(settings: SystemMetricSettings, context: RenderContext) -> str:
     return rendered
 
 
+_AUTO_FONT_PRIORITY = (
+    FontChoice.LEGACY_5X7,
+    FontChoice.LEGACY_3X7,
+    FontChoice.COMPACT_3X5,
+)
+
+
+def metric_text_format_envelope(settings: SystemMetricSettings) -> tuple[str, ...]:
+    """Return snapshot-independent text forms used to choose one stable font."""
+    values = (
+        *metric_value_format_envelope(settings.metric, settings.precision),
+        settings.unavailable_text,
+    )
+    if settings.display_mode is MetricDisplayMode.LABEL_AND_VALUE:
+        values = tuple(f"{settings.label} {value}" for value in values)
+    return tuple(dict.fromkeys(values))
+
+
+def resolve_system_metric_font(
+    settings: SystemMetricSettings,
+    *,
+    region_width: int,
+    region_height: int,
+) -> FontDefinition:
+    """Resolve a concrete font from the widget's complete format envelope."""
+    registry = _metric_font_registry()
+    contents = metric_text_format_envelope(settings)
+    choices = (
+        (settings.font,)
+        if settings.font is not FontChoice.AUTO
+        else _AUTO_FONT_PRIORITY
+    )
+    supported_but_tall = False
+    supported_and_vertical = False
+    for choice in choices:
+        font = registry.resolve(choice)
+        try:
+            measurements = tuple(
+                measure_normalized_text(font, content) for content in contents
+            )
+        except FontTextError:
+            if settings.font is not FontChoice.AUTO:
+                raise
+            continue
+        supported_but_tall = True
+        if font.glyph_height > region_height:
+            continue
+        supported_and_vertical = True
+        if (
+            settings.overflow is TextOverflow.ERROR
+            and max(measurement.width for measurement in measurements) > region_width
+        ):
+            continue
+        return font
+    if supported_and_vertical and settings.overflow is TextOverflow.ERROR:
+        category = "content_too_wide"
+    elif supported_but_tall:
+        category = "content_too_tall"
+    else:
+        category = "unsupported_glyph"
+    raise FontTextError(category, field="font")
+
+
 def render_system_metric(
     surface: RegionSurface,
     settings: SystemMetricSettings,
@@ -96,19 +163,15 @@ def render_system_metric(
         ):
             raise WidgetRenderingError("renderer_invariant", field="context")
         content = metric_text(settings, context)
-        resolved = resolve_font(
-            _metric_font_registry(),
-            settings.font,
-            content,
-            uppercase=False,
+        font = resolve_system_metric_font(
+            settings,
             region_width=surface.width,
             region_height=surface.height,
-            require_complete_width=settings.overflow is TextOverflow.ERROR,
         )
         draw_text(
             surface,
             content,
-            font=resolved.font,
+            font=font,
             color=RgbColor.from_schema_color(settings.color),
             horizontal_alignment=settings.horizontal_alignment,
             vertical_alignment=settings.vertical_alignment,

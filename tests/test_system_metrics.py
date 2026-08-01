@@ -22,6 +22,7 @@ from nextuxlinq.system_metrics import (
     TemperatureReading,
     format_metric_value,
     format_uptime,
+    metric_value_format_envelope,
 )
 
 NOW = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
@@ -107,6 +108,31 @@ def test_memory_uptime_and_impossible_values_are_isolated() -> None:
     assert unavailable.value(MetricId.UPTIME) is None
     reader.memory = "MemTotal: 100 kB\nMemAvailable: 101 kB\n"
     assert metrics.sample().value(MetricId.MEMORY_USAGE) is None
+
+
+def test_metric_value_format_envelopes_are_deterministic_and_include_precision() -> None:
+    assert metric_value_format_envelope(MetricId.CPU_USAGE, 0) == ("100%",)
+    assert metric_value_format_envelope(MetricId.GPU_USAGE, 2) == ("100.00%",)
+    assert metric_value_format_envelope(MetricId.CPU_TEMPERATURE, 1) == (
+        "-20.0C", "150.0C",
+    )
+    assert metric_value_format_envelope(MetricId.LOAD_AVERAGE_1M, 2) == (
+        "9999.00",
+    )
+    assert metric_value_format_envelope(MetricId.NETWORK_RECEIVE_RATE, 1) == (
+        "1024.0KB/S", "1024.0MB/S", "9999.0GB/S",
+    )
+    assert metric_value_format_envelope(MetricId.UPTIME, 0) == (
+        "59:59", "23:59", "999999D 23H",
+    )
+
+
+def test_unbounded_metric_formatters_observe_the_documented_display_ceiling() -> None:
+    assert format_metric_value(MetricId.LOAD_AVERAGE_1M, 1e100, 2) == "9999.00"
+    assert format_metric_value(
+        MetricId.NETWORK_RECEIVE_RATE, 1e100, 1
+    ) == "9999.0GB/S"
+    assert format_metric_value(MetricId.UPTIME, 1e100, 0) == "999999D 23H"
 
 
 def test_fixed_temperature_discovery_is_deterministic(tmp_path: Path) -> None:

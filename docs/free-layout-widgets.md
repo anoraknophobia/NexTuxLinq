@@ -22,6 +22,13 @@ Uptime is `MM:SS` below one hour, `HH:MM` below one day, and
 zero to two decimals for numeric values. Existing intrinsic fonts, alignments,
 and overflow modes apply, and five-pixel rows can use `3x5`.
 
+Font selection never depends on the current sample. Auto resolves
+deterministically from the configured metric's widest formatting envelope,
+effective label, precision, and unavailable text; the same region therefore
+uses identical glyph dimensions for one-, two-, and three-digit values.
+Explicit fonts remain authoritative. An Error-overflow candidate whose stable
+envelope does not fit fails with `content_too_wide` instead of shrinking later.
+
 ## Metric Bar
 
 Metric Bar supports CPU, memory, fixed-root storage, GPU, and VRAM usage plus

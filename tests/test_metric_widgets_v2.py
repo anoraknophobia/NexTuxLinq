@@ -6,14 +6,17 @@ from datetime import datetime, timezone
 
 import pytest
 
+import nextuxlinq.rendering_v2.widgets.system_metric as system_metric_module
 from nextuxlinq.rendering_v2.registry import RenderContext, create_widget_registry
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.widgets.errors import WidgetRenderingError
 from nextuxlinq.rendering_v2.widgets.system_metric import (
     metric_bar_fill_length,
     metric_text,
+    metric_text_format_envelope,
     render_metric_bar,
     render_system_metric,
+    resolve_system_metric_font,
 )
 from nextuxlinq.rendering_v2.update_policy import UpdatePolicy
 from nextuxlinq.system_metrics import (
@@ -55,6 +58,19 @@ def context(width: int, height: int, metrics=None) -> RenderContext:
         region_height=height,
         metrics_snapshot=metrics,
     )
+
+
+def capture_draw_results(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    original_draw_text = system_metric_module.draw_text
+    results: list[object] = []
+
+    def capture_draw_text(*args, **kwargs):
+        result = original_draw_text(*args, **kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(system_metric_module, "draw_text", capture_draw_text)
+    return results
 
 
 @pytest.mark.parametrize(
@@ -167,11 +183,158 @@ def test_system_metric_supports_automatic_and_explicit_fonts(font: str, height: 
     render_system_metric(
         surface,
         SystemMetricSettings(
-            metric="uptime", display_mode="value_only", font=font,  # type: ignore[arg-type]
+            metric="cpu_usage", display_mode="value_only", font=font,  # type: ignore[arg-type]
         ),
-        context(40, height, snapshot(uptime=221)),
+        context(40, height, snapshot(cpu_usage=9)),
     )
     assert bytes.fromhex("FFFFFF") in surface.to_bytes()
+
+
+@pytest.mark.parametrize(
+    ("metric", "label"),
+    [
+        ("cpu_usage", "CPU"),
+        ("memory_usage", "RAM"),
+        ("gpu_usage", "GPU"),
+    ],
+)
+def test_percentage_auto_font_is_stable_for_one_two_and_three_digits(
+    metric: str,
+    label: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SystemMetricSettings(metric=metric, label=label)  # type: ignore[arg-type]
+    results = capture_draw_results(monkeypatch)
+    for value in (9.0, 19.0, 100.0):
+        render_system_metric(
+            RegionSurface(40, 10),
+            settings,
+            context(40, 10, snapshot(**{metric: value})),
+        )
+
+    assert [result.font_id.value for result in results] == ["3x5"] * 3
+    assert [result.measured_height for result in results] == [5] * 3
+    assert [result.normalized_text for result in results] == [
+        f"{label} 9%", f"{label} 19%", f"{label} 100%",
+    ]
+    assert all(
+        result.origin_x == (40 - result.measured_width) // 2
+        for result in results
+    )
+
+
+@pytest.mark.parametrize(
+    ("metric", "label", "values"),
+    [
+        ("cpu_temperature", "CPU TEMP", (9.0, 54.0, 150.0)),
+        ("gpu_temperature", "GPU TEMP", (-20.0, 64.0, 150.0)),
+        ("storage_temperature", "DISK TEMP", (20.0, 38.0, 100.0)),
+    ],
+)
+def test_temperature_auto_font_is_snapshot_independent(
+    metric: str,
+    label: str,
+    values: tuple[float, ...],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SystemMetricSettings(
+        metric=metric, label=label, precision=1  # type: ignore[arg-type]
+    )
+    results = capture_draw_results(monkeypatch)
+    for value in values:
+        render_system_metric(
+            RegionSurface(90, 10),
+            settings,
+            context(90, 10, snapshot(**{metric: value})),
+        )
+    assert len({result.font_id for result in results}) == 1
+    assert len({result.measured_height for result in results}) == 1
+
+
+def test_unavailable_and_available_snapshots_use_the_same_auto_font(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SystemMetricSettings(
+        metric="gpu_usage", label="GPU", unavailable_text="NO DATA",  # type: ignore[arg-type]
+    )
+    results = capture_draw_results(monkeypatch)
+    assert metric_text(settings, context(55, 10, snapshot())) == "GPU NO DATA"
+    render_system_metric(
+        RegionSurface(55, 10), settings, context(55, 10, snapshot())
+    )
+    assert metric_text(
+        settings, context(55, 10, snapshot(gpu_usage=19))
+    ) == "GPU 19%"
+    render_system_metric(
+        RegionSurface(55, 10),
+        settings,
+        context(55, 10, snapshot(gpu_usage=19)),
+    )
+    assert results[0].font_id is results[1].font_id
+    assert results[0].measured_height == results[1].measured_height
+
+
+@pytest.mark.parametrize("font", ["3x5", "5x7"])
+def test_explicit_system_metric_font_never_changes(
+    font: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SystemMetricSettings(
+        metric="memory_usage", label="RAM", font=font,  # type: ignore[arg-type]
+        overflow="clip",  # type: ignore[arg-type]
+    )
+    results = capture_draw_results(monkeypatch)
+    for value in (9.0, 19.0, 100.0):
+        render_system_metric(
+            RegionSurface(20, 10),
+            settings,
+            context(20, 10, snapshot(memory_usage=value)),
+        )
+    assert {result.font_id.value for result in results} == {font}
+
+
+def test_auto_font_and_alignment_are_stable_across_repeated_snapshots() -> None:
+    settings = SystemMetricSettings(
+        metric="cpu_usage", label="CPU", horizontal_alignment="center",  # type: ignore[arg-type]
+    )
+    font = resolve_system_metric_font(
+        settings, region_width=40, region_height=10
+    )
+    surfaces = []
+    for value in (9.0, 19.0, 9.0):
+        surface = RegionSurface(40, 10)
+        render_system_metric(
+            surface, settings, context(40, 10, snapshot(cpu_usage=value))
+        )
+        surfaces.append(surface.to_bytes())
+        assert resolve_system_metric_font(
+            settings, region_width=40, region_height=10
+        ).font_id is font.font_id
+    assert surfaces[0] == surfaces[2]
+    assert surfaces[0] != surfaces[1]
+
+
+def test_stable_auto_envelope_fails_before_current_short_value_can_fit() -> None:
+    settings = SystemMetricSettings(metric="cpu_usage", label="CPU")  # type: ignore[arg-type]
+    assert metric_text(
+        settings, context(30, 10, snapshot(cpu_usage=9))
+    ) == "CPU 9%"
+    assert "CPU 100%" in metric_text_format_envelope(settings)
+    with pytest.raises(WidgetRenderingError) as raised:
+        render_system_metric(
+            RegionSurface(30, 10),
+            settings,
+            context(30, 10, snapshot(cpu_usage=9)),
+        )
+    assert raised.value.category == "content_too_wide"
+
+
+def test_value_only_envelope_excludes_label_and_includes_unavailable_text() -> None:
+    settings = SystemMetricSettings(
+        metric="cpu_usage", display_mode="value_only",  # type: ignore[arg-type]
+        precision=2, unavailable_text="UNAVAILABLE",
+    )
+    assert metric_text_format_envelope(settings) == ("100.00%", "UNAVAILABLE")
 
 
 @pytest.mark.parametrize("horizontal", ["start", "center", "end"])

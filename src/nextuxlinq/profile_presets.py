@@ -192,7 +192,7 @@ BUILTIN_PRESETS = (
                 "Memory Usage",
             ),
             _region(
-                "extended-gpu-temperature", 0, 5, 45, 5,
+                "extended-gpu-temperature", 0, 5, 35, 5,
                 _settings(
                     WidgetType.SYSTEM_METRIC,
                     metric="gpu_temperature",
@@ -202,7 +202,7 @@ BUILTIN_PRESETS = (
                 "GPU Temperature",
             ),
             _region(
-                "extended-network-receive", 45, 5, 45, 5,
+                "extended-network-receive", 35, 5, 55, 5,
                 _settings(
                     WidgetType.SYSTEM_METRIC,
                     metric="network_receive_rate",
@@ -224,7 +224,7 @@ BUILTIN_PRESETS = (
                 _settings(
                     WidgetType.SYSTEM_METRIC,
                     metric="cpu_temperature",
-                    label="CPU TEMP",
+                    label="CPU",
                     font=FontChoice.COMPACT_3X5.value,
                 ),
                 "CPU Temperature",
@@ -234,7 +234,7 @@ BUILTIN_PRESETS = (
                 _settings(
                     WidgetType.SYSTEM_METRIC,
                     metric="gpu_temperature",
-                    label="GPU TEMP",
+                    label="GPU",
                     font=FontChoice.COMPACT_3X5.value,
                 ),
                 "GPU Temperature",

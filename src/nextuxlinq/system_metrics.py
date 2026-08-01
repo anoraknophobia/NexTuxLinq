@@ -120,6 +120,13 @@ BAR_METRICS = frozenset(
 )
 _FALLBACK_SAMPLE_TIME = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
+# These display ceilings keep intrinsically unbounded metrics inside a stable,
+# documented bitmap-font representation. Values above a ceiling retain the
+# ceiling text instead of growing the display width without limit.
+MAX_DISPLAY_LOAD_AVERAGE = 9999.0
+MAX_DISPLAY_NETWORK_RATE = 9999.0 * 1024.0 ** 3
+MAX_DISPLAY_UPTIME_SECONDS = float((999999 * 24 + 23) * 3600 + 3599)
+
 
 @dataclass(frozen=True, slots=True)
 class SystemMetricsSnapshot:
@@ -248,20 +255,62 @@ def format_metric_value(metric_id: MetricId, value: float, precision: int) -> st
     metric = MetricId(metric_id)
     if isinstance(precision, bool) or not isinstance(precision, int) or not 0 <= precision <= 2:
         raise ValueError("precision must be between zero and two.")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+    ):
+        raise ValueError("metric value must be finite and numeric.")
+    normalized = float(value)
     if metric is MetricId.UPTIME:
-        return format_uptime(value)
+        return format_uptime(min(normalized, MAX_DISPLAY_UPTIME_SECONDS))
     if metric in {
         MetricId.NETWORK_RECEIVE_RATE,
         MetricId.NETWORK_TRANSMIT_RATE,
     }:
+        normalized = min(normalized, MAX_DISPLAY_NETWORK_RATE)
         divisor, suffix = (1024.0, "KB/S")
-        if value >= 1024.0 ** 3:
+        if normalized >= 1024.0 ** 3:
             divisor, suffix = (1024.0 ** 3, "GB/S")
-        elif value >= 1024.0 ** 2:
+        elif normalized >= 1024.0 ** 2:
             divisor, suffix = (1024.0 ** 2, "MB/S")
-        return f"{value / divisor:.{precision}f}{suffix}"
+        return f"{normalized / divisor:.{precision}f}{suffix}"
+    if metric is MetricId.LOAD_AVERAGE_1M:
+        normalized = min(normalized, MAX_DISPLAY_LOAD_AVERAGE)
     suffix = METRIC_DEFINITIONS[metric].unit
-    return f"{value:.{precision}f}{suffix}"
+    return f"{normalized:.{precision}f}{suffix}"
+
+
+def metric_value_format_envelope(
+    metric_id: MetricId,
+    precision: int,
+) -> tuple[str, ...]:
+    """Return every width-relevant maximum form for stable font selection."""
+    metric = MetricId(metric_id)
+    if isinstance(precision, bool) or not isinstance(precision, int) or not 0 <= precision <= 2:
+        raise ValueError("precision must be between zero and two.")
+    if METRIC_DEFINITIONS[metric].value_type is MetricValueType.PERCENTAGE:
+        return (format_metric_value(metric, 100.0, precision),)
+    if METRIC_DEFINITIONS[metric].value_type is MetricValueType.TEMPERATURE:
+        return (
+            format_metric_value(metric, -20.0, precision),
+            format_metric_value(metric, 150.0, precision),
+        )
+    if metric is MetricId.UPTIME:
+        return ("59:59", "23:59", "999999D 23H")
+    if metric is MetricId.LOAD_AVERAGE_1M:
+        return (format_metric_value(metric, MAX_DISPLAY_LOAD_AVERAGE, precision),)
+    if metric in {
+        MetricId.NETWORK_RECEIVE_RATE,
+        MetricId.NETWORK_TRANSMIT_RATE,
+    }:
+        decimals = f".{('0' * precision)}" if precision else ""
+        return (
+            f"1024{decimals}KB/S",
+            f"1024{decimals}MB/S",
+            f"9999{decimals}GB/S",
+        )
+    raise ValueError("metric format envelope is unavailable.")
 
 
 @dataclass(frozen=True, slots=True)
