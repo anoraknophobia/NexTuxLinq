@@ -20,6 +20,12 @@ GUI_ADDRESS = "http://127.0.0.1:8765"
 GENERATED_MARKER = "# X-NexTuxLinq-Managed: nextuxlinqctl-service-v1"
 MAX_UNIT_BYTES = 256 * 1024
 MANAGER_LOCK_NAME = ".nextuxlinq-service-manager.lock"
+OPENLINKHUB_SERVICE_NAME = "OpenLinkHub.service"
+OPENLINKHUB_DROPIN_DIRECTORY = f"{SERVICE_NAME}.d"
+OPENLINKHUB_DROPIN_NAME = "openlinkhub-restart.conf"
+OPENLINKHUB_DROPIN_MARKER = (
+    "# X-NexTuxLinq-Managed: openlinkhub-startup-recovery-v1"
+)
 HELPER_SERVICES = (
     "nextuxlinq-display.service",
     "nextuxlinq-telemetry.service",
@@ -207,6 +213,18 @@ def generate_unit(executable: str) -> str:
     )
 
 
+def generate_openlinkhub_restart_dropin() -> str:
+    """Generate the fixed, opt-in OpenLinkHub post-start recovery drop-in."""
+    return (
+        f"{OPENLINKHUB_DROPIN_MARKER}\n"
+        "# Optional workaround managed by nextuxlinqctl.\n"
+        "[Service]\n"
+        "ExecStartPost=/usr/bin/sleep 2\n"
+        "ExecStartPost=-/usr/bin/systemctl --user try-restart "
+        f"{OPENLINKHUB_SERVICE_NAME}\n"
+    )
+
+
 class ServiceManager:
     """Install and control the nextuxlinqd systemd user unit."""
 
@@ -223,6 +241,11 @@ class ServiceManager:
         self.config_root, self.user_anchor = _resolve_config_paths(self.environ)
         self.unit_directory = self.config_root / "systemd" / "user"
         self.unit_path = self.unit_directory / SERVICE_NAME
+        self.openlinkhub_dropin_path = (
+            self.unit_directory
+            / OPENLINKHUB_DROPIN_DIRECTORY
+            / OPENLINKHUB_DROPIN_NAME
+        )
 
     @staticmethod
     def _close_once(descriptor: int | None) -> bool:
@@ -1020,6 +1043,311 @@ class ServiceManager:
         if primary_error is not None:
             raise primary_error
         return result
+
+    @staticmethod
+    def _open_openlinkhub_dropin_directory(
+        unit_directory_descriptor: int,
+        *,
+        create: bool,
+    ) -> int | None:
+        try:
+            descriptor = os.open(
+                OPENLINKHUB_DROPIN_DIRECTORY,
+                _DIRECTORY_FLAGS,
+                dir_fd=unit_directory_descriptor,
+            )
+        except FileNotFoundError:
+            if not create:
+                return None
+            try:
+                os.mkdir(
+                    OPENLINKHUB_DROPIN_DIRECTORY,
+                    mode=0o700,
+                    dir_fd=unit_directory_descriptor,
+                )
+            except FileExistsError:
+                pass
+            try:
+                descriptor = os.open(
+                    OPENLINKHUB_DROPIN_DIRECTORY,
+                    _DIRECTORY_FLAGS,
+                    dir_fd=unit_directory_descriptor,
+                )
+            except OSError as error:
+                raise ServiceManagerError(
+                    "The OpenLinkHub recovery drop-in directory is unsafe."
+                ) from error
+        except OSError as error:
+            raise ServiceManagerError(
+                "The OpenLinkHub recovery drop-in directory is unsafe."
+            ) from error
+        try:
+            details = os.fstat(descriptor)
+            if (
+                not stat.S_ISDIR(details.st_mode)
+                or details.st_uid != os.getuid()
+                or stat.S_IMODE(details.st_mode) & 0o022
+            ):
+                raise ServiceManagerError(
+                    "The OpenLinkHub recovery drop-in directory is unsafe."
+                )
+            return descriptor
+        except BaseException:
+            ServiceManager._close_once(descriptor)
+            raise
+
+    @staticmethod
+    def _inspect_openlinkhub_dropin(
+        directory_descriptor: int,
+    ) -> _UnitInspection:
+        descriptor: int | None = None
+        try:
+            try:
+                descriptor = os.open(
+                    OPENLINKHUB_DROPIN_NAME,
+                    _FILE_READ_FLAGS,
+                    dir_fd=directory_descriptor,
+                )
+            except FileNotFoundError:
+                return _UnitInspection("absent")
+            except OSError as error:
+                raise ServiceManagerError(
+                    "The OpenLinkHub recovery drop-in path is unsafe."
+                ) from error
+            details = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(details.st_mode)
+                or details.st_uid != os.getuid()
+                or stat.S_IMODE(details.st_mode) & 0o022
+                or details.st_size > MAX_UNIT_BYTES
+            ):
+                raise ServiceManagerError(
+                    "The OpenLinkHub recovery drop-in is unsafe."
+                )
+            chunks: list[bytes] = []
+            remaining = MAX_UNIT_BYTES + 1
+            while remaining:
+                chunk = os.read(descriptor, min(65536, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            contents = b"".join(chunks)
+            expected = generate_openlinkhub_restart_dropin().encode("utf-8")
+            state = "managed" if contents == expected else "foreign"
+            return _UnitInspection(
+                state,
+                (details.st_dev, details.st_ino),
+                stat.S_IMODE(details.st_mode),
+            )
+        finally:
+            if descriptor is not None and not ServiceManager._close_once(descriptor):
+                raise ServiceManagerError(
+                    "The OpenLinkHub recovery drop-in could not be inspected "
+                    "safely."
+                )
+
+    def _enable_openlinkhub_dropin_locked(
+        self,
+        unit_directory_descriptor: int,
+    ) -> bool:
+        dropin_descriptor = self._open_openlinkhub_dropin_directory(
+            unit_directory_descriptor,
+            create=True,
+        )
+        assert dropin_descriptor is not None
+        temporary_name: str | None = None
+        try:
+            inspection = self._inspect_openlinkhub_dropin(dropin_descriptor)
+            if inspection.state == "managed":
+                return False
+            if inspection.state != "absent":
+                raise ServiceManagerError(
+                    "Refusing to overwrite an OpenLinkHub recovery drop-in "
+                    "not managed by NexTuxLinq."
+                )
+            temporary_name = self._create_temporary_unit(
+                dropin_descriptor,
+                generate_openlinkhub_restart_dropin(),
+            )
+            os.link(
+                temporary_name,
+                OPENLINKHUB_DROPIN_NAME,
+                src_dir_fd=dropin_descriptor,
+                dst_dir_fd=dropin_descriptor,
+                follow_symlinks=False,
+            )
+            os.unlink(temporary_name, dir_fd=dropin_descriptor)
+            temporary_name = None
+            os.fsync(dropin_descriptor)
+            return True
+        except FileExistsError as error:
+            raise ServiceManagerError(
+                "The OpenLinkHub recovery drop-in changed during enable."
+            ) from error
+        except ServiceManagerError:
+            raise
+        except OSError as error:
+            raise ServiceManagerError(
+                "Could not safely enable OpenLinkHub startup recovery."
+            ) from error
+        finally:
+            if temporary_name is not None:
+                try:
+                    os.unlink(temporary_name, dir_fd=dropin_descriptor)
+                except OSError:
+                    pass
+            if not self._close_once(dropin_descriptor):
+                raise ServiceManagerError(
+                    "OpenLinkHub recovery descriptor cleanup failed."
+                )
+
+    def _disable_openlinkhub_dropin_locked(
+        self,
+        unit_directory_descriptor: int,
+    ) -> bool:
+        dropin_descriptor = self._open_openlinkhub_dropin_directory(
+            unit_directory_descriptor,
+            create=False,
+        )
+        if dropin_descriptor is None:
+            return False
+        try:
+            inspection = self._inspect_openlinkhub_dropin(dropin_descriptor)
+            if inspection.state == "absent":
+                return False
+            if inspection.state != "managed":
+                raise ServiceManagerError(
+                    "Refusing to remove an OpenLinkHub recovery drop-in not "
+                    "managed by NexTuxLinq."
+                )
+            current = os.stat(
+                OPENLINKHUB_DROPIN_NAME,
+                dir_fd=dropin_descriptor,
+                follow_symlinks=False,
+            )
+            if (current.st_dev, current.st_ino) != inspection.identity:
+                raise ServiceManagerError(
+                    "The OpenLinkHub recovery drop-in changed during disable."
+                )
+            os.unlink(OPENLINKHUB_DROPIN_NAME, dir_fd=dropin_descriptor)
+            os.fsync(dropin_descriptor)
+        except ServiceManagerError:
+            raise
+        except OSError as error:
+            raise ServiceManagerError(
+                "Could not safely disable OpenLinkHub startup recovery."
+            ) from error
+        finally:
+            if not self._close_once(dropin_descriptor):
+                raise ServiceManagerError(
+                    "OpenLinkHub recovery descriptor cleanup failed."
+                )
+        try:
+            os.rmdir(
+                OPENLINKHUB_DROPIN_DIRECTORY,
+                dir_fd=unit_directory_descriptor,
+            )
+            os.fsync(unit_directory_descriptor)
+        except OSError as error:
+            if error.errno not in {errno.ENOTEMPTY, errno.EEXIST}:
+                raise ServiceManagerError(
+                    "The managed OpenLinkHub recovery drop-in was removed, "
+                    "but its directory could not be finalized safely."
+                ) from error
+        return True
+
+    def _openlinkhub_dropin_status(self) -> ServiceOperationResult:
+        unit_descriptor: int | None = None
+        dropin_descriptor: int | None = None
+        try:
+            unit_descriptor = self._open_unit_directory(create=False)
+            if unit_descriptor is None:
+                inspection = _UnitInspection("absent")
+            else:
+                dropin_descriptor = self._open_openlinkhub_dropin_directory(
+                    unit_descriptor,
+                    create=False,
+                )
+                inspection = (
+                    _UnitInspection("absent")
+                    if dropin_descriptor is None
+                    else self._inspect_openlinkhub_dropin(dropin_descriptor)
+                )
+            if inspection.state == "foreign":
+                return ServiceOperationResult(
+                    False,
+                    error=(
+                        "An unmanaged OpenLinkHub recovery drop-in occupies "
+                        "the NexTuxLinq-managed name."
+                    ),
+                )
+            enabled = inspection.state == "managed"
+            return ServiceOperationResult(
+                True,
+                (
+                    "OpenLinkHub startup recovery: "
+                    f"{'enabled' if enabled else 'disabled'}.",
+                ),
+            )
+        except ServiceManagerError as error:
+            return ServiceOperationResult(False, error=str(error))
+        finally:
+            self._close_once(dropin_descriptor)
+            self._close_once(unit_descriptor)
+
+    def openlinkhub_restart(self, action: str) -> ServiceOperationResult:
+        """Enable, disable, or inspect the fixed opt-in recovery drop-in."""
+        if action == "status":
+            return self._openlinkhub_dropin_status()
+        if action not in {"enable", "disable"}:
+            return ServiceOperationResult(False, error="Unknown workaround action.")
+        unit_descriptor: int | None = None
+        lock_descriptor: int | None = None
+        changed = False
+        try:
+            unit_descriptor = self._open_unit_directory(create=action == "enable")
+            if unit_descriptor is not None:
+                lock_descriptor = self._acquire_manager_lock(unit_descriptor)
+                changed = (
+                    self._enable_openlinkhub_dropin_locked(unit_descriptor)
+                    if action == "enable"
+                    else self._disable_openlinkhub_dropin_locked(unit_descriptor)
+                )
+        except ServiceManagerError as error:
+            result = ServiceOperationResult(False, error=str(error))
+        except OSError:
+            result = ServiceOperationResult(
+                False,
+                error="Could not safely update OpenLinkHub startup recovery.",
+            )
+        else:
+            result = ServiceOperationResult(True)
+        warnings = self._release_operation_descriptors(
+            lock_descriptor,
+            unit_descriptor,
+        )
+        result = self._add_cleanup_warnings(result, warnings)
+        if not result.success:
+            return result
+        if changed:
+            reload_result = self._run("daemon-reload")
+            if reload_result is None or reload_result.returncode != 0:
+                return ServiceOperationResult(
+                    False,
+                    (
+                        "OpenLinkHub startup recovery file was "
+                        f"{'installed' if action == 'enable' else 'removed'}.",
+                    ),
+                    "systemctl daemon-reload failed.",
+                )
+        return ServiceOperationResult(
+            True,
+            (
+                "OpenLinkHub startup recovery: "
+                f"{'enabled' if action == 'enable' else 'disabled'}.",
+            ),
+        )
 
     def _run(self, *arguments: str) -> CompletedProcessLike | None:
         try:

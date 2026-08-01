@@ -66,6 +66,35 @@ journalctl --user -u nextuxlinqd.service
 The GUI remains bound to `127.0.0.1:8765`; the service installer does not make
 it remotely accessible.
 
+## Optional OpenLinkHub startup recovery
+
+Some systems exhibit a shared USB/controller hand-off problem after the
+NexTuxLinq user service starts. Similar behavior has been observed with other
+control software, so it is not necessarily specific to NexTuxLinq. An optional
+managed drop-in can wait two seconds after a successful NexTuxLinq service
+start and then run `systemctl --user try-restart OpenLinkHub.service`.
+`try-restart` restarts OpenLinkHub only when it is already active; it never
+starts an inactive service, and a failure is nonfatal.
+
+Enable, inspect, or disable the workaround explicitly:
+
+```console
+nextuxlinqctl service openlinkhub-restart enable
+nextuxlinqctl service openlinkhub-restart status
+nextuxlinqctl service openlinkhub-restart disable
+```
+
+These commands manage only
+`nextuxlinqd.service.d/openlinkhub-restart.conf` under the user's systemd unit
+directory and preserve other drop-ins. Enable and disable perform a user
+`daemon-reload`; status performs no systemd command. The default installed unit
+does not contain this behavior, and manual `nextuxlinqd --host ...` starts are
+unaffected.
+
+This workaround does not add OpenLinkHub or Corsair-device control to
+NexTuxLinq. The Phanteks Matrix900 remains the only hardware supported by this
+project.
+
 ## Uninstall
 
 ```console

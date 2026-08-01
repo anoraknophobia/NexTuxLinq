@@ -172,9 +172,39 @@ function freeEditorFixture({
   }
   elements.get("#fl-region-enabled").type = "checkbox";
   elements.get("#fl-use-region-background").type = "checkbox";
+  function colorControl(target, picker) {
+    const control = new FakeElement();
+    const hex = new FakeElement("input");
+    picker.type = "color";
+    hex.type = "text";
+    hex.dataset.colorHex = "";
+    control.dataset.colorTarget = target;
+    control.querySelector = (selector) => (
+      selector === 'input[type="color"]' ? picker
+        : selector === "[data-color-hex]" ? hex : null
+    );
+    control.querySelectorAll = (selector) => (
+      selector === "input" ? [picker, hex] : []
+    );
+    return {control, picker, hex};
+  }
+  const canvasColor = colorControl(
+    "canvas_background",
+    elements.get("#fl-canvas-background"),
+  );
+  const regionColor = colorControl(
+    "region_background",
+    elements.get("#fl-region-background"),
+  );
   const root = new FakeElement();
-  root.querySelector = (selector) => elements.get(selector) || null;
-  root.querySelectorAll = () => [];
+  root.querySelector = (selector) => ({
+    '[data-color-target="canvas_background"]': canvasColor.control,
+    '[data-color-target="region_background"]': regionColor.control,
+  })[selector] || elements.get(selector) || null;
+  root.querySelectorAll = (selector) => (
+    selector === "[data-color-control]"
+      ? [canvasColor.control, regionColor.control] : []
+  );
   const documentListeners = {};
   const document = {
     hidden: false,
@@ -272,6 +302,8 @@ function freeEditorFixture({
   return {
     editor,
     elements,
+    canvasColor,
+    regionColor,
     windowListeners,
     documentListeners,
     calls,
@@ -2049,6 +2081,82 @@ test("Phase 6 browser file encoding preserves exact bytes", () => {
     (binary) => Buffer.from(binary, "binary").toString("base64"),
   );
   assert.deepEqual(Buffer.from(encoded, "base64"), Buffer.from(bytes));
+});
+
+test("reusable color state canonicalizes complete values without repairing invalid drafts", () => {
+  assert.equal(freeLayout.normalizeColorDraft("#a1b2c3"), "#A1B2C3");
+  assert.equal(freeLayout.normalizeColorDraft("#A1B2"), "#A1B2");
+  assert.equal(freeLayout.normalizeColorDraft("not-a-color"), "not-a-color");
+  assert.deepEqual(
+    freeLayout.colorControlState("#abcdef", "#123456"),
+    {valid: true, draft: "#ABCDEF", picker: "#ABCDEF"},
+  );
+  assert.deepEqual(
+    freeLayout.colorControlState("#ABC", "#123456"),
+    {valid: false, draft: "#ABC", picker: "#123456"},
+  );
+});
+
+test("color picker and hex draft stay synchronized and invalid color blocks Apply", async () => {
+  const fixture = freeEditorFixture();
+  await fixture.editor.initialize();
+  const {control, picker, hex} = fixture.canvasColor;
+
+  assert.equal(picker.value, "#000000");
+  assert.equal(hex.value, "#000000");
+  picker.value = "#12abef";
+  picker.dispatch("input");
+  assert.equal(hex.value, "#12ABEF");
+  assert.equal(
+    fixture.editor.state.draft.profiles.default.canvas.background_color,
+    "#12ABEF",
+  );
+
+  hex.value = "#a0b1c2";
+  hex.dispatch("input");
+  assert.equal(hex.value, "#A0B1C2");
+  assert.equal(picker.value, "#A0B1C2");
+  assert.equal(control.dataset.invalid, "false");
+
+  const lastPreview = fixture.editor.state.lastValidPreview;
+  hex.value = "#A0B";
+  hex.dispatch("input");
+  assert.equal(hex.value, "#A0B");
+  assert.equal(picker.value, "#A0B1C2");
+  assert.equal(control.dataset.invalid, "true");
+  assert.equal(hex.getAttribute("aria-invalid"), "true");
+  assert.equal(fixture.elements.get("#fl-apply").disabled, true);
+  assert.equal(fixture.elements.get("#fl-save").disabled, true);
+  assert.equal(fixture.editor.state.lastValidPreview, lastPreview);
+});
+
+test("region background toggle preserves its last selected color", async () => {
+  const fixture = freeEditorFixture();
+  await fixture.editor.initialize();
+  fixture.editor.state.selectedRegionId = "region-1";
+  fixture.editor.render();
+  const toggle = fixture.elements.get("#fl-use-region-background");
+
+  toggle.checked = true;
+  toggle.dispatch("change");
+  fixture.regionColor.hex.value = "#1a2b3c";
+  fixture.regionColor.hex.dispatch("input");
+  assert.equal(
+    fixture.editor.state.draft.profiles.default.regions[0].background_color,
+    "#1A2B3C",
+  );
+  toggle.checked = false;
+  toggle.dispatch("change");
+  assert.equal(
+    fixture.editor.state.draft.profiles.default.regions[0].background_color,
+    null,
+  );
+  toggle.checked = true;
+  toggle.dispatch("change");
+  assert.equal(
+    fixture.editor.state.draft.profiles.default.regions[0].background_color,
+    "#1A2B3C",
+  );
 });
 
 test("editor state distinguishes saved, draft, invalid, conflict, and reconnect", () => {

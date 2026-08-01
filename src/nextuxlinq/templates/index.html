@@ -102,7 +102,18 @@
                   Region background
                 </label>
                 <label>Background color
-                  <input id="fl-region-background" type="color" value="#000000">
+                  <span class="hex-color-control" data-color-control
+                        data-color-target="region_background">
+                    <input id="fl-region-background" class="color-swatch"
+                           type="color" value="#000000"
+                           aria-label="Region background color picker">
+                    <input class="color-hex" data-color-hex type="text"
+                           value="#000000" maxlength="7" inputmode="text"
+                           pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                           spellcheck="false"
+                           aria-label="Region background hexadecimal color"
+                           aria-describedby="fl-validation-errors">
+                  </span>
                 </label>
               </div>
 
@@ -152,7 +163,19 @@
                       data-setting="blink_separator"> Blink separator</label>
                     <label>Time zone <input data-setting="time_zone"
                       maxlength="128" placeholder="local"></label>
-                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label>Text color
+                      <span class="hex-color-control" data-color-control
+                            data-color-setting="color">
+                        <input class="color-swatch" type="color"
+                               aria-label="Clock text color picker">
+                        <input class="color-hex" data-color-hex type="text"
+                               maxlength="7" inputmode="text"
+                               pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                               spellcheck="false"
+                               aria-label="Clock text hexadecimal color"
+                               aria-describedby="fl-validation-errors">
+                      </span>
+                    </label>
                     <label>Font <select data-setting="font">
                       <option value="auto">Auto</option><option value="3x5">3×5</option>
                       <option value="3x7">3×7</option><option value="5x7">5×7</option>
@@ -175,7 +198,19 @@
                     <label class="wide-field">Text
                       <textarea data-setting="content" maxlength="64"></textarea>
                     </label>
-                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label>Text color
+                      <span class="hex-color-control" data-color-control
+                            data-color-setting="color">
+                        <input class="color-swatch" type="color"
+                               aria-label="Static Text color picker">
+                        <input class="color-hex" data-color-hex type="text"
+                               maxlength="7" inputmode="text"
+                               pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                               spellcheck="false"
+                               aria-label="Static Text hexadecimal color"
+                               aria-describedby="fl-validation-errors">
+                      </span>
+                    </label>
                     <label class="checkbox-label"><input type="checkbox"
                       data-setting="uppercase"> ASCII uppercase</label>
                     <label>Font <select data-setting="font">
@@ -204,7 +239,19 @@
                     <label class="wide-field">Text
                       <textarea data-setting="content" maxlength="64"></textarea>
                     </label>
-                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label>Text color
+                      <span class="hex-color-control" data-color-control
+                            data-color-setting="color">
+                        <input class="color-swatch" type="color"
+                               aria-label="Scrolling Text color picker">
+                        <input class="color-hex" data-color-hex type="text"
+                               maxlength="7" inputmode="text"
+                               pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                               spellcheck="false"
+                               aria-label="Scrolling Text hexadecimal color"
+                               aria-describedby="fl-validation-errors">
+                      </span>
+                    </label>
                     <label class="checkbox-label"><input type="checkbox"
                       data-setting="uppercase"> ASCII uppercase</label>
                     <label>Font <select data-setting="font">
@@ -241,7 +288,19 @@
                     </select></label>
                     <label>Time zone <input data-setting="time_zone"
                       maxlength="128" placeholder="local"></label>
-                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label>Text color
+                      <span class="hex-color-control" data-color-control
+                            data-color-setting="color">
+                        <input class="color-swatch" type="color"
+                               aria-label="Date text color picker">
+                        <input class="color-hex" data-color-hex type="text"
+                               maxlength="7" inputmode="text"
+                               pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                               spellcheck="false"
+                               aria-label="Date text hexadecimal color"
+                               aria-describedby="fl-validation-errors">
+                      </span>
+                    </label>
                     <label>Font <select data-setting="font">
                       <option value="auto">Auto</option><option value="3x5">3×5</option>
                       <option value="3x7">3×7</option><option value="5x7">5×7</option>
@@ -277,7 +336,19 @@
                       <input data-setting="precision" data-kind="integer" type="number"
                              min="0" max="2" step="1">
                     </label>
-                    <label>Text color <input type="color" data-setting="color"></label>
+                    <label>Text color
+                      <span class="hex-color-control" data-color-control
+                            data-color-setting="color">
+                        <input class="color-swatch" type="color"
+                               aria-label="System Metric text color picker">
+                        <input class="color-hex" data-color-hex type="text"
+                               maxlength="7" inputmode="text"
+                               pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                               spellcheck="false"
+                               aria-label="System Metric text hexadecimal color"
+                               aria-describedby="fl-validation-errors">
+                      </span>
+                    </label>
                     <label>Font <select data-setting="font">
                       <option value="auto">Auto</option><option value="3x5">3×5</option>
                       <option value="3x7">3×7</option><option value="5x7">5×7</option>
@@ -317,12 +388,46 @@
                       <option value="start_to_end">Left to right</option>
                       <option value="end_to_start">Right to left</option>
                     </select></label>
-                    <label>Fill color <input type="color" data-setting="fill_color"></label>
-                    <label>Empty color <input type="color" data-setting="empty_color"></label>
+                    <label>Fill color
+                      <span class="hex-color-control" data-color-control
+                            data-color-setting="fill_color">
+                        <input class="color-swatch" type="color"
+                               aria-label="Metric Bar fill color picker">
+                        <input class="color-hex" data-color-hex type="text"
+                               maxlength="7" inputmode="text"
+                               pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                               spellcheck="false"
+                               aria-label="Metric Bar fill hexadecimal color"
+                               aria-describedby="fl-validation-errors">
+                      </span>
+                    </label>
+                    <label>Empty color
+                      <span class="hex-color-control" data-color-control
+                            data-color-setting="empty_color">
+                        <input class="color-swatch" type="color"
+                               aria-label="Metric Bar empty color picker">
+                        <input class="color-hex" data-color-hex type="text"
+                               maxlength="7" inputmode="text"
+                               pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                               spellcheck="false"
+                               aria-label="Metric Bar empty hexadecimal color"
+                               aria-describedby="fl-validation-errors">
+                      </span>
+                    </label>
                     <label class="checkbox-label"><input type="checkbox"
                       data-setting="border_enabled"> Border</label>
                     <label data-bar-border-color-field>Border color
-                      <input type="color" data-setting="border_color">
+                      <span class="hex-color-control" data-color-control
+                            data-color-setting="border_color">
+                        <input class="color-swatch" type="color"
+                               aria-label="Metric Bar border color picker">
+                        <input class="color-hex" data-color-hex type="text"
+                               maxlength="7" inputmode="text"
+                               pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                               spellcheck="false"
+                               aria-label="Metric Bar border hexadecimal color"
+                               aria-describedby="fl-validation-errors">
+                      </span>
                     </label>
                   </div>
                   <p class="field-help">Vertical start-to-end fills bottom to top. Values use nearest-pixel rounding.</p>
@@ -361,7 +466,18 @@
             <select id="fl-profile" aria-label="Active draft profile"></select>
           </label>
           <label>Canvas background
-            <input id="fl-canvas-background" type="color" value="#000000">
+            <span class="hex-color-control" data-color-control
+                  data-color-target="canvas_background">
+              <input id="fl-canvas-background" class="color-swatch"
+                     type="color" value="#000000"
+                     aria-label="Canvas background color picker">
+              <input class="color-hex" data-color-hex type="text"
+                     value="#000000" maxlength="7" inputmode="text"
+                     pattern="#[0-9A-Fa-f]{6}" autocomplete="off"
+                     spellcheck="false"
+                     aria-label="Canvas background hexadecimal color"
+                     aria-describedby="fl-validation-errors">
+            </span>
           </label>
           <label>Brightness
             <select id="fl-brightness">

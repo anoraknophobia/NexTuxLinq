@@ -16,6 +16,13 @@ scroll direction, speed, and trailing gap where applicable. Geometry is always
 stored as integer `x`, `y`, `width`, and `height` pixels. Full/half canvas
 buttons are calculation helpers and do not persist percentages.
 
+Every editor color uses the same compact control: a visible swatch opens the
+native picker and a hexadecimal field beside it shows the canonical
+`#RRGGBB` value. Picker and field stay synchronized, and complete lowercase
+values normalize to uppercase. An incomplete or malformed hexadecimal value
+remains visible as an invalid local draft; it disables Apply and Save and
+keeps the last valid preview instead of silently substituting black.
+
 The primary page order is Device status, Free-layout editor, Physical display
 preview, Profile, then Validate, Apply, and Save. The full-width region
 inspector remains below the canvas. Moving Profile below the preview changes no

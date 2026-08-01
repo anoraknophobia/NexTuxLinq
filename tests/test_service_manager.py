@@ -22,6 +22,10 @@ from nextuxlinq.service_manager import (
     GUI_ADDRESS,
     HELPER_SERVICES,
     MANAGER_LOCK_NAME,
+    OPENLINKHUB_DROPIN_DIRECTORY,
+    OPENLINKHUB_DROPIN_MARKER,
+    OPENLINKHUB_DROPIN_NAME,
+    OPENLINKHUB_SERVICE_NAME,
     SERVICE_NAME,
     ServiceManager,
     ServiceManagerError,
@@ -29,6 +33,7 @@ from nextuxlinq.service_manager import (
     _default_runner,
     _resolve_config_root,
     generate_unit,
+    generate_openlinkhub_restart_dropin,
     systemd_quote_argument,
 )
 
@@ -157,6 +162,21 @@ def test_generated_unit_contains_required_directives_and_marker() -> None:
         'ExecStart="/opt/NexTuxLinq Python/bin/py%%thon" '
         "-m nextuxlinq.daemon --host 127.0.0.1 --port 8765"
     ) in unit
+
+
+def test_openlinkhub_recovery_dropin_is_fixed_nonfatal_and_delayed() -> None:
+    dropin = generate_openlinkhub_restart_dropin()
+
+    assert dropin.startswith(f"{OPENLINKHUB_DROPIN_MARKER}\n")
+    assert "[Service]" in dropin
+    assert "ExecStartPost=/usr/bin/sleep 2" in dropin
+    assert (
+        "ExecStartPost=-/usr/bin/systemctl --user try-restart "
+        f"{OPENLINKHUB_SERVICE_NAME}"
+    ) in dropin
+    assert " restart " not in dropin
+    assert "Requires=" not in dropin
+    assert "After=" not in dropin
 
 
 def test_systemd_quoting_handles_spaces_percent_dollar_quote_and_backslash() -> None:
@@ -2058,6 +2078,149 @@ def test_control_failure_is_sanitized_and_nonzero(tmp_path: Path) -> None:
     assert "/private/" not in (result.error or "")
 
 
+def test_openlinkhub_recovery_enable_status_disable_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    manager, runner = manager_for(tmp_path)
+
+    enabled = manager.openlinkhub_restart("enable")
+    enabled_again = manager.openlinkhub_restart("enable")
+    status = manager.openlinkhub_restart("status")
+
+    assert enabled.success and enabled_again.success and status.success
+    assert status.output == ("OpenLinkHub startup recovery: enabled.",)
+    assert manager.openlinkhub_dropin_path.read_text(encoding="utf-8") == (
+        generate_openlinkhub_restart_dropin()
+    )
+    assert stat.S_IMODE(manager.openlinkhub_dropin_path.stat().st_mode) == 0o644
+    assert stat.S_IMODE(
+        manager.openlinkhub_dropin_path.parent.stat().st_mode
+    ) == 0o700
+    assert runner.calls == [["systemctl", "--user", "daemon-reload"]]
+
+    unrelated = manager.openlinkhub_dropin_path.parent / "unrelated.conf"
+    unrelated.write_text("[Service]\nEnvironment=EXAMPLE=1\n", encoding="utf-8")
+    disabled = manager.openlinkhub_restart("disable")
+    disabled_again = manager.openlinkhub_restart("disable")
+    status = manager.openlinkhub_restart("status")
+
+    assert disabled.success and disabled_again.success and status.success
+    assert status.output == ("OpenLinkHub startup recovery: disabled.",)
+    assert not manager.openlinkhub_dropin_path.exists()
+    assert unrelated.read_text(encoding="utf-8") == (
+        "[Service]\nEnvironment=EXAMPLE=1\n"
+    )
+    assert runner.calls == [
+        ["systemctl", "--user", "daemon-reload"],
+        ["systemctl", "--user", "daemon-reload"],
+    ]
+
+
+def test_openlinkhub_recovery_status_never_invokes_systemctl(tmp_path: Path) -> None:
+    manager, runner = manager_for(tmp_path)
+
+    result = manager.openlinkhub_restart("status")
+
+    assert result.success
+    assert result.output == ("OpenLinkHub startup recovery: disabled.",)
+    assert runner.calls == []
+    assert not manager.unit_directory.exists()
+
+
+def test_openlinkhub_recovery_rejects_symlinked_dropin_path(tmp_path: Path) -> None:
+    manager, runner = manager_for(tmp_path)
+    manager.unit_directory.mkdir(parents=True)
+    dropin_directory = manager.unit_directory / OPENLINKHUB_DROPIN_DIRECTORY
+    dropin_directory.mkdir()
+    outside = tmp_path / "outside.conf"
+    outside.write_text("outside", encoding="utf-8")
+    (dropin_directory / OPENLINKHUB_DROPIN_NAME).symlink_to(outside)
+
+    result = manager.openlinkhub_restart("enable")
+
+    assert not result.success
+    assert "unsafe" in (result.error or "")
+    assert outside.read_text(encoding="utf-8") == "outside"
+    assert runner.calls == []
+
+
+def test_openlinkhub_recovery_rejects_symlinked_dropin_directory(
+    tmp_path: Path,
+) -> None:
+    manager, runner = manager_for(tmp_path)
+    manager.unit_directory.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (manager.unit_directory / OPENLINKHUB_DROPIN_DIRECTORY).symlink_to(outside)
+
+    result = manager.openlinkhub_restart("enable")
+
+    assert not result.success
+    assert "unsafe" in (result.error or "")
+    assert list(outside.iterdir()) == []
+    assert runner.calls == []
+
+
+def test_openlinkhub_recovery_atomic_write_failure_leaves_no_target(
+    tmp_path: Path,
+) -> None:
+    manager, runner = manager_for(tmp_path)
+
+    with patch.object(
+        manager,
+        "_create_temporary_unit",
+        side_effect=OSError("private atomic detail"),
+    ):
+        result = manager.openlinkhub_restart("enable")
+
+    assert not result.success
+    assert "private atomic detail" not in (result.error or "")
+    assert not manager.openlinkhub_dropin_path.exists()
+    assert runner.calls == []
+
+
+def test_openlinkhub_recovery_refuses_unmanaged_file(tmp_path: Path) -> None:
+    manager, runner = manager_for(tmp_path)
+    manager.openlinkhub_dropin_path.parent.mkdir(parents=True)
+    manager.openlinkhub_dropin_path.write_text(
+        "[Service]\nExecStartPost=/bin/false\n",
+        encoding="utf-8",
+    )
+
+    enable = manager.openlinkhub_restart("enable")
+    disable = manager.openlinkhub_restart("disable")
+
+    assert not enable.success and not disable.success
+    assert manager.openlinkhub_dropin_path.read_text(encoding="utf-8") == (
+        "[Service]\nExecStartPost=/bin/false\n"
+    )
+    assert runner.calls == []
+
+
+def test_openlinkhub_recovery_reload_failure_is_reported_after_commit(
+    tmp_path: Path,
+) -> None:
+    runner = RecordingRunner(lambda arguments: completed(3))
+    manager, _ = manager_for(tmp_path, runner=runner)
+
+    result = manager.openlinkhub_restart("enable")
+
+    assert not result.success
+    assert result.output == (
+        "OpenLinkHub startup recovery file was installed.",
+    )
+    assert result.error == "systemctl daemon-reload failed."
+    assert manager.openlinkhub_dropin_path.is_file()
+    assert runner.calls == [["systemctl", "--user", "daemon-reload"]]
+
+
+def test_default_unit_has_no_openlinkhub_hook() -> None:
+    unit = generate_unit("/usr/bin/python3")
+
+    assert "OpenLinkHub" not in unit
+    assert "ExecStartPost" not in unit
+
+
 @pytest.mark.parametrize(
     ("arguments", "operation", "success", "expected_code"),
     [
@@ -2068,6 +2231,24 @@ def test_control_failure_is_sanitized_and_nonzero(tmp_path: Path) -> None:
         (["service", "stop"], "control", True, 0),
         (["service", "restart"], "control", True, 0),
         (["service", "status"], "control", False, 1),
+        (
+            ["service", "openlinkhub-restart", "enable"],
+            "openlinkhub_restart",
+            True,
+            0,
+        ),
+        (
+            ["service", "openlinkhub-restart", "disable"],
+            "openlinkhub_restart",
+            True,
+            0,
+        ),
+        (
+            ["service", "openlinkhub-restart", "status"],
+            "openlinkhub_restart",
+            False,
+            1,
+        ),
     ],
 )
 def test_service_cli_exit_codes_without_hid_lock(
@@ -2085,6 +2266,7 @@ def test_service_cli_exit_codes_without_hid_lock(
     manager.install = lambda *, force: result
     manager.uninstall = lambda: result
     manager.control = lambda action: result
+    manager.openlinkhub_restart = lambda action: result
 
     with (
         patch("nextuxlinq.cli.ServiceManager", return_value=manager),

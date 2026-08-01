@@ -208,6 +208,19 @@ def build_parser() -> argparse.ArgumentParser:
             action,
             help=f"{action.capitalize()} nextuxlinqd.service.",
         )
+    recovery_parser = service_actions.add_parser(
+        "openlinkhub-restart",
+        help="Manage the optional OpenLinkHub post-start recovery workaround.",
+    )
+    recovery_actions = recovery_parser.add_subparsers(
+        dest="openlinkhub_restart_action",
+        required=True,
+    )
+    for action in ("enable", "disable", "status"):
+        recovery_actions.add_parser(
+            action,
+            help=f"{action.capitalize()} the OpenLinkHub startup workaround.",
+        )
 
     return parser
 
@@ -556,6 +569,10 @@ def manage_service(arguments: argparse.Namespace) -> int:
         result = manager.install(force=arguments.force)
     elif arguments.service_action == "uninstall":
         result = manager.uninstall()
+    elif arguments.service_action == "openlinkhub-restart":
+        result = manager.openlinkhub_restart(
+            arguments.openlinkhub_restart_action
+        )
     else:
         result = manager.control(arguments.service_action)
     for line in result.output:

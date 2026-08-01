@@ -260,11 +260,11 @@ def test_visual_editor_exposes_only_canonical_widget_controls() -> None:
         "minimum",
         "maximum",
         "orientation",
-        "fill_color",
-        "empty_color",
         "border_enabled",
     ):
         assert f'data-setting="{setting}"' in inspector
+    for color_setting in ("color", "fill_color", "empty_color", "border_color"):
+        assert f'data-color-setting="{color_setting}"' in inspector
     for date_format in (
         "day_month_full_year",
         "day_month_short_year",
@@ -296,6 +296,57 @@ def test_primary_section_order_places_profile_after_physical_preview() -> None:
     assert 'data-widget-panel="metric_bar"' in page
     assert 'data-metric-select="bar"' in page
     assert "Bottom to top" in editor
+
+
+def test_free_layout_colors_use_one_accessible_swatch_and_hex_structure() -> None:
+    page, _, css = _frontend_source()
+    editor = _editor_source()
+    free_layout = page.split('id="free-layout-root"', 1)[1].split(
+        'id="legacy-compatibility-host"', 1
+    )[0]
+    controls = re.findall(
+        r'<span class="hex-color-control" data-color-control.*?</span>',
+        free_layout,
+        flags=re.DOTALL,
+    )
+
+    assert len(controls) == 10
+    assert free_layout.count('type="color"') == len(controls)
+    for control in controls:
+        assert control.count('class="color-swatch"') == 1
+        assert control.count('class="color-hex"') == 1
+        assert 'pattern="#[0-9A-Fa-f]{6}"' in control
+        assert 'aria-label=' in control
+        assert 'aria-describedby="fl-validation-errors"' in control
+    for setting in (
+        "color",
+        "fill_color",
+        "empty_color",
+        "border_color",
+    ):
+        assert f'data-color-setting="{setting}"' in free_layout
+    assert 'data-color-target="canvas_background"' in free_layout
+    assert 'data-color-target="region_background"' in free_layout
+    assert "function synchronizeColorControl(" in editor
+    assert "normalizeColorDraft" in editor
+    assert ".hex-color-control" in css
+    assert "flex-wrap: wrap" in css
+    assert "width: 2.75rem" in css
+    assert "min-width: 7.5rem" in css
+    assert "npm" not in editor
+
+
+def test_region_background_toggle_and_widget_select_are_separate_controls() -> None:
+    page, _, css = _frontend_source()
+    inspector = page.split('id="fl-region-inspector"', 1)[1].split(
+        "</aside>", 1
+    )[0]
+
+    assert inspector.count('id="fl-widget-type"') == 1
+    assert inspector.count('id="fl-use-region-background"') == 1
+    assert 'class="checkbox-label"' in inspector
+    assert ".inspector-grid .checkbox-label" in css
+    assert "flex-wrap: nowrap" in css
 
 
 def test_built_wheel_contains_and_exposes_web_resources(tmp_path: Path) -> None:

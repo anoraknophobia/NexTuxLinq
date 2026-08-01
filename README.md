@@ -118,6 +118,12 @@ nextuxlinqctl service status
 journalctl --user -u nextuxlinqd.service
 ```
 
+For systems affected by a shared USB/controller hand-off issue, NexTuxLinq can
+optionally install a post-start drop-in that waits two seconds and
+`try-restart`s an already-active `OpenLinkHub.service`. It is disabled by
+default, does not affect manual daemon starts, and is documented with its
+enable, disable, and status commands in [`docs/systemd.md`](docs/systemd.md).
+
 Uninstalling preserves all configuration and profiles, reports the retained
 disabled-unit backup, and does not re-enable legacy helpers:
 

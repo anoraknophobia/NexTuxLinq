@@ -49,6 +49,44 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function normalizeColorDraft(value) {
+    const draft = typeof value === "string" ? value : "";
+    return COLOR.test(draft) ? draft.toUpperCase() : draft;
+  }
+
+  function colorControlState(value, lastValid = "#000000") {
+    const draft = normalizeColorDraft(value);
+    const fallback = COLOR.test(lastValid)
+      ? lastValid.toUpperCase() : "#000000";
+    const valid = COLOR.test(draft);
+    return Object.freeze({
+      valid,
+      draft,
+      picker: valid ? draft : fallback,
+    });
+  }
+
+  function synchronizeColorControl(control, value, lastValid = null) {
+    if (!control) return colorControlState(value, lastValid || "#000000");
+    const picker = control.querySelector('input[type="color"]');
+    const hex = control.querySelector("[data-color-hex]");
+    const state = colorControlState(
+      value,
+      lastValid || control.dataset.lastValidColor || "#000000",
+    );
+    if (state.valid) control.dataset.lastValidColor = state.picker;
+    control.dataset.invalid = String(!state.valid);
+    if (picker) {
+      picker.value = state.picker;
+      picker.setAttribute("aria-invalid", String(!state.valid));
+    }
+    if (hex) {
+      hex.value = state.draft;
+      hex.setAttribute("aria-invalid", String(!state.valid));
+    }
+    return state;
+  }
+
   function fingerprint(value) {
     return base.stableStringify(value);
   }
@@ -613,6 +651,9 @@
     const elements = {
       profile: element("#fl-profile"),
       canvasBackground: element("#fl-canvas-background"),
+      canvasColorControl: element(
+        '[data-color-target="canvas_background"]'
+      ),
       brightness: element("#fl-brightness"),
       layer: element("#fl-region-layer"),
       canvas: element("#fl-editor-canvas"),
@@ -623,6 +664,9 @@
       enabled: element("#fl-region-enabled"),
       useBackground: element("#fl-use-region-background"),
       background: element("#fl-region-background"),
+      backgroundColorControl: element(
+        '[data-color-target="region_background"]'
+      ),
       widget: element("#fl-widget-type"),
       x: element("#fl-x"),
       y: element("#fl-y"),
@@ -690,6 +734,7 @@
       backups: [],
       pendingFullImportBackup: false,
       backupLoading: false,
+      regionBackgroundColors: new Map(),
     };
     let validationTimer = null;
     let animationTimer = null;
@@ -802,7 +847,13 @@
       });
       elements.profile.replaceChildren(...options);
       const profile = activeProfile();
-      elements.canvasBackground.value = profile.canvas.background_color;
+      synchronizeColorControl(
+        elements.canvasColorControl,
+        profile.canvas.background_color,
+      );
+      if (!elements.canvasColorControl) {
+        elements.canvasBackground.value = profile.canvas.background_color;
+      }
       elements.brightness.value = profile.brightness === null
         ? "" : String(profile.brightness);
     }
@@ -962,6 +1013,16 @@
         if (control.type === "checkbox") control.checked = Boolean(value);
         else control.value = value === null || value === undefined ? "" : String(value);
       }
+      for (const control of elements.settings.querySelectorAll(
+        "[data-color-control][data-color-setting]"
+      )) {
+        if (control.closest("[data-widget-panel]").dataset.widgetPanel
+            !== region.widget.type) continue;
+        synchronizeColorControl(
+          control,
+          settings[control.dataset.colorSetting],
+        );
+      }
       const metricPanel = elements.settings.querySelector?.(
         '[data-widget-panel="system_metric"]',
       );
@@ -997,8 +1058,25 @@
       elements.name.value = region.name || "";
       elements.enabled.checked = region.enabled;
       elements.useBackground.checked = region.background_color !== null;
-      elements.background.disabled = region.background_color === null;
-      elements.background.value = region.background_color || "#000000";
+      const backgroundKey = `${state.draft.active_profile}:${region.id}`;
+      if (COLOR.test(region.background_color || "")) {
+        state.regionBackgroundColors.set(
+          backgroundKey,
+          region.background_color.toUpperCase(),
+        );
+      }
+      const backgroundValue = region.background_color
+        || state.regionBackgroundColors.get(backgroundKey) || "#000000";
+      synchronizeColorControl(
+        elements.backgroundColorControl,
+        backgroundValue,
+      );
+      elements.background.value = colorControlState(backgroundValue).picker;
+      for (const control of elements.backgroundColorControl?.querySelectorAll(
+        "input"
+      ) || [elements.background]) {
+        control.disabled = region.background_color === null;
+      }
       elements.widget.value = region.widget.type;
       elements.x.value = String(region.x);
       elements.y.value = String(region.y);
@@ -1010,9 +1088,11 @@
     function renderErrors() {
       const messages = [];
       const controls = [
+        elements.canvasBackground,
         elements.x, elements.y, elements.width, elements.height,
         elements.name, elements.enabled, elements.background, elements.widget,
         ...elements.settings.querySelectorAll("[data-setting]"),
+        ...elements.settings.querySelectorAll("[data-color-control] input"),
       ];
       for (const control of controls) control.removeAttribute("aria-invalid");
       for (const field of state.inputErrors.keys()) {
@@ -1022,6 +1102,17 @@
         const region = selectedRegion();
         if (error.region_id && error.region_id !== region?.id) return;
         const field = String(error.field || "");
+        if (error.category === "invalid_canvas"
+            && field.includes(state.draft.active_profile)) {
+          for (const input of elements.canvasColorControl?.querySelectorAll(
+            "input"
+          ) || [elements.canvasBackground]) {
+            input.setAttribute("aria-invalid", "true");
+          }
+          if (elements.canvasColorControl) {
+            elements.canvasColorControl.dataset.invalid = "true";
+          }
+        }
         if (field === "geometry") {
           for (const control of [
             elements.x, elements.y, elements.width, elements.height,
@@ -1036,12 +1127,29 @@
           widget: elements.widget,
         }[field];
         if (direct) direct.setAttribute("aria-invalid", "true");
+        if (field === "background_color" && elements.backgroundColorControl) {
+          elements.backgroundColorControl.dataset.invalid = "true";
+          for (const input of elements.backgroundColorControl.querySelectorAll(
+            "input"
+          )) input.setAttribute("aria-invalid", "true");
+        }
         for (const control of elements.settings.querySelectorAll(
           "[data-setting]"
         )) {
           if (field === control.dataset.setting
               || field.endsWith(`.${control.dataset.setting}`)) {
             control.setAttribute("aria-invalid", "true");
+          }
+        }
+        for (const colorControl of elements.settings.querySelectorAll(
+          "[data-color-control][data-color-setting]"
+        )) {
+          if (field === colorControl.dataset.colorSetting
+              || field.endsWith(`.${colorControl.dataset.colorSetting}`)) {
+            colorControl.dataset.invalid = "true";
+            for (const input of colorControl.querySelectorAll("input")) {
+              input.setAttribute("aria-invalid", "true");
+            }
           }
         }
       };
@@ -1073,7 +1181,9 @@
       const profile = activeProfile();
       const busy = state.submitting;
       elements.profile.disabled = busy;
-      elements.canvasBackground.disabled = busy;
+      for (const control of elements.canvasColorControl?.querySelectorAll(
+        "input"
+      ) || [elements.canvasBackground]) control.disabled = busy;
       elements.brightness.disabled = busy;
       elements.inspector.toggleAttribute("inert", busy);
       elements.canvas.setAttribute("aria-disabled", String(busy));
@@ -1506,6 +1616,45 @@
       }
     }
 
+    function updateColorDraft(control, value) {
+      const normalized = normalizeColorDraft(value);
+      if (control.dataset.colorTarget === "canvas_background") {
+        mutate((candidate) => {
+          candidate.profiles[
+            candidate.active_profile
+          ].canvas.background_color = normalized;
+        });
+        return;
+      }
+      if (control.dataset.colorTarget === "region_background") {
+        updateSelectedRegion((region) => {
+          region.background_color = normalized;
+        });
+        return;
+      }
+      const key = control.dataset.colorSetting;
+      if (key) {
+        updateSelectedRegion((region) => {
+          region.widget.settings[key] = normalized;
+        });
+      }
+    }
+
+    function bindColorControls() {
+      for (const control of root.querySelectorAll("[data-color-control]")) {
+        const picker = control.querySelector('input[type="color"]');
+        const hex = control.querySelector("[data-color-hex]");
+        picker?.addEventListener("input", () => {
+          updateColorDraft(control, picker.value.toUpperCase());
+        });
+        hex?.addEventListener("input", () => {
+          const draft = normalizeColorDraft(hex.value);
+          synchronizeColorControl(control, draft);
+          updateColorDraft(control, draft);
+        });
+      }
+    }
+
     function applyGeometryHelper(helper) {
       const presets = {
         full_width: {x: 0, width: 90},
@@ -1772,6 +1921,7 @@
     }
 
     function bind() {
+      bindColorControls();
       elements.layer.addEventListener("pointerdown", (event) => {
         const selectedRegionId = selectionForCanvasPointer(
           state.selectedRegionId,
@@ -1817,12 +1967,6 @@
           );
         });
       });
-      elements.canvasBackground.addEventListener("input", () => {
-        mutate((candidate) => {
-          candidate.profiles[candidate.active_profile].canvas.background_color
-            = elements.canvasBackground.value.toUpperCase();
-        });
-      });
       elements.brightness.addEventListener("change", () => {
         mutate((candidate) => {
           candidate.profiles[candidate.active_profile].brightness
@@ -1832,14 +1976,15 @@
       });
       elements.inspector.addEventListener("input", handleInspectorInput);
       elements.useBackground.addEventListener("change", () => {
+        const region = selectedRegion();
+        if (!region) return;
+        const backgroundKey = `${state.draft.active_profile}:${region.id}`;
+        const remembered = elements.backgroundColorControl?.dataset.lastValidColor
+          || state.regionBackgroundColors.get(backgroundKey) || "#000000";
+        state.regionBackgroundColors.set(backgroundKey, remembered);
         updateSelectedRegion((region) => {
           region.background_color = elements.useBackground.checked
-            ? elements.background.value.toUpperCase() : null;
-        });
-      });
-      elements.background.addEventListener("input", () => {
-        updateSelectedRegion((region) => {
-          region.background_color = elements.background.value.toUpperCase();
+            ? remembered : null;
         });
       });
       elements.widget.addEventListener("change", () => {
@@ -2211,6 +2356,9 @@
     CANVAS_WIDTH,
     CANVAS_HEIGHT,
     WIDGET_TYPES,
+    normalizeColorDraft,
+    colorControlState,
+    synchronizeColorControl,
     logicalToViewerX,
     viewerToLogicalX,
     clampInteger,
