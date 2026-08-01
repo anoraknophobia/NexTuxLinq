@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from nextuxlinq.rendering_v2.fonts import (
     FontDefinition,
@@ -10,13 +11,20 @@ from nextuxlinq.rendering_v2.fonts import (
     FontTextError,
     GlyphBitmap,
     create_builtin_font_registry,
-    draw_text,
+    draw_glyph,
+    horizontal_origin,
     measure_normalized_text,
+    vertical_origin,
 )
 from nextuxlinq.rendering_v2.registry import RenderContext
 from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.widgets.errors import WidgetRenderingError
-from nextuxlinq.system_metrics import format_metric_value, metric_value_format_envelope
+from nextuxlinq.system_metrics import (
+    METRIC_DEFINITIONS,
+    MetricValueType,
+    format_metric_value,
+    metric_value_format_envelope,
+)
 from nextuxlinq.widget_models import (
     BarDirection,
     BarOrientation,
@@ -82,6 +90,177 @@ def metric_text(settings: SystemMetricSettings, context: RenderContext) -> str:
     return rendered
 
 
+@dataclass(frozen=True, slots=True)
+class SystemMetricGlyphPlacement:
+    """One deterministic visible or reserved glyph cell in local coordinates."""
+
+    character: str
+    origin_x: int
+    origin_y: int
+    advance: int
+    visible: bool
+    role: str
+
+
+@dataclass(frozen=True, slots=True)
+class SystemMetricTextLayout:
+    """Immutable System Metric layout metadata used by rendering and tests."""
+
+    font_id: FontChoice
+    glyph_height: int
+    measured_width: int
+    origin_x: int
+    origin_y: int
+    placements: tuple[SystemMetricGlyphPlacement, ...]
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _GlyphSlot:
+    character: str
+    advance: int
+    glyph_offset: int
+    visible: bool
+    role: str
+
+
+def _ordinary_slots(
+    font: FontDefinition,
+    content: str,
+    *,
+    role: str,
+) -> tuple[_GlyphSlot, ...]:
+    return tuple(
+        _GlyphSlot(character, font.glyphs[character].width, 0, True, role)
+        for character in content
+    )
+
+
+def _digit_slots(
+    font: FontDefinition,
+    digits: str,
+    *,
+    hidden_leading_zero: bool,
+) -> tuple[_GlyphSlot, ...]:
+    cell_width = max(font.glyphs[str(digit)].width for digit in range(10))
+    characters = f"0{digits}" if hidden_leading_zero else digits
+    return tuple(
+        _GlyphSlot(
+            character,
+            cell_width,
+            (cell_width - font.glyphs[character].width) // 2,
+            not (hidden_leading_zero and index == 0),
+            "digit",
+        )
+        for index, character in enumerate(characters)
+    )
+
+
+def _fixed_value_slots(
+    font: FontDefinition,
+    settings: SystemMetricSettings,
+    value_text: str,
+) -> tuple[_GlyphSlot, ...] | None:
+    definition = METRIC_DEFINITIONS[settings.metric]
+    if definition.value_type is MetricValueType.PERCENTAGE:
+        if not value_text.endswith("%"):
+            return None
+        numeric = value_text[:-1]
+        integer, separator, fraction = numeric.partition(".")
+        if not integer.isdigit() or (separator and not fraction.isdigit()):
+            return None
+        slots = list(_digit_slots(
+            font,
+            integer,
+            hidden_leading_zero=len(integer) == 1,
+        ))
+        if separator:
+            slots.extend(_ordinary_slots(font, separator, role="decimal"))
+            slots.extend(_digit_slots(
+                font, fraction, hidden_leading_zero=False
+            ))
+        slots.extend(_ordinary_slots(font, "%", role="suffix"))
+        return tuple(slots)
+    if (
+        definition.value_type is MetricValueType.TEMPERATURE
+        and settings.precision == 0
+        and value_text.endswith("C")
+        and value_text[:-1].isdigit()
+    ):
+        integer = value_text[:-1]
+        return (
+            *_digit_slots(
+                font,
+                integer,
+                hidden_leading_zero=len(integer) == 1,
+            ),
+            *_ordinary_slots(font, "C", role="suffix"),
+        )
+    return None
+
+
+def _metric_slots(
+    font: FontDefinition,
+    settings: SystemMetricSettings,
+    value_text: str,
+    *,
+    available: bool,
+) -> tuple[_GlyphSlot, ...]:
+    prefix = (
+        f"{settings.label} "
+        if settings.display_mode is MetricDisplayMode.LABEL_AND_VALUE
+        else ""
+    )
+    content = f"{prefix}{value_text}"
+    measure_normalized_text(font, content)
+    value_slots = (
+        _fixed_value_slots(font, settings, value_text)
+        if available
+        else None
+    )
+    return (
+        *_ordinary_slots(font, prefix, role="label"),
+        *(
+            value_slots
+            if value_slots is not None
+            else _ordinary_slots(font, value_text, role="value")
+        ),
+    )
+
+
+def _slots_width(font: FontDefinition, slots: tuple[_GlyphSlot, ...]) -> int:
+    if not slots:
+        return 0
+    return (
+        sum(slot.advance for slot in slots)
+        + font.character_spacing * (len(slots) - 1)
+    )
+
+
+def _font_envelope_widths(
+    font: FontDefinition,
+    settings: SystemMetricSettings,
+) -> tuple[int, ...]:
+    widths = [
+        _slots_width(
+            font,
+            _metric_slots(
+                font, settings, value_text, available=True
+            ),
+        )
+        for value_text in metric_value_format_envelope(
+            settings.metric, settings.precision
+        )
+    ]
+    widths.append(_slots_width(
+        font,
+        _metric_slots(
+            font, settings, settings.unavailable_text, available=False
+        ),
+    ))
+    return tuple(widths)
+
+
 _AUTO_FONT_PRIORITY = (
     FontChoice.LEGACY_5X7,
     FontChoice.LEGACY_3X7,
@@ -108,7 +287,6 @@ def resolve_system_metric_font(
 ) -> FontDefinition:
     """Resolve a concrete font from the widget's complete format envelope."""
     registry = _metric_font_registry()
-    contents = metric_text_format_envelope(settings)
     choices = (
         (settings.font,)
         if settings.font is not FontChoice.AUTO
@@ -119,9 +297,7 @@ def resolve_system_metric_font(
     for choice in choices:
         font = registry.resolve(choice)
         try:
-            measurements = tuple(
-                measure_normalized_text(font, content) for content in contents
-            )
+            widths = _font_envelope_widths(font, settings)
         except FontTextError:
             if settings.font is not FontChoice.AUTO:
                 raise
@@ -132,9 +308,11 @@ def resolve_system_metric_font(
         supported_and_vertical = True
         if (
             settings.overflow is TextOverflow.ERROR
-            and max(measurement.width for measurement in measurements) > region_width
+            and max(widths) > region_width
         ):
-            continue
+            raise FontTextError(
+                "content_too_wide", field="content", font_id=font.font_id
+            )
         return font
     if supported_and_vertical and settings.overflow is TextOverflow.ERROR:
         category = "content_too_wide"
@@ -143,6 +321,100 @@ def resolve_system_metric_font(
     else:
         category = "unsupported_glyph"
     raise FontTextError(category, field="font")
+
+
+def _layout_system_metric_text(
+    font: FontDefinition,
+    settings: SystemMetricSettings,
+    context: RenderContext,
+    *,
+    region_width: int,
+    region_height: int,
+) -> SystemMetricTextLayout:
+    """Lay out one current value using one already-resolved concrete font."""
+    snapshot = context.metrics_snapshot
+    value = None if snapshot is None else snapshot.value(settings.metric)
+    value_text = (
+        settings.unavailable_text
+        if value is None
+        else format_metric_value(settings.metric, value, settings.precision)
+    )
+    slots = _metric_slots(
+        font, settings, value_text, available=value is not None
+    )
+    measured_width = _slots_width(font, slots)
+    truncated = False
+    if settings.overflow is TextOverflow.ERROR and measured_width > region_width:
+        raise FontTextError(
+            "content_too_wide", field="content", font_id=font.font_id
+        )
+    if settings.overflow is TextOverflow.TRUNCATE:
+        retained: list[_GlyphSlot] = []
+        retained_width = 0
+        for slot in slots:
+            candidate_width = (
+                retained_width
+                + (font.character_spacing if retained else 0)
+                + slot.advance
+            )
+            if candidate_width > region_width:
+                break
+            retained.append(slot)
+            retained_width = candidate_width
+        truncated = len(retained) != len(slots)
+        slots = tuple(retained)
+        measured_width = retained_width
+    origin_x = horizontal_origin(
+        region_width, measured_width, settings.horizontal_alignment
+    )
+    origin_y = vertical_origin(
+        region_height, font.glyph_height, settings.vertical_alignment
+    )
+    placements: list[SystemMetricGlyphPlacement] = []
+    cursor_x = origin_x
+    for index, slot in enumerate(slots):
+        placements.append(SystemMetricGlyphPlacement(
+            character=slot.character,
+            origin_x=cursor_x + slot.glyph_offset,
+            origin_y=origin_y,
+            advance=slot.advance,
+            visible=slot.visible,
+            role=slot.role,
+        ))
+        cursor_x += slot.advance
+        if index + 1 < len(slots):
+            cursor_x += font.character_spacing
+    return SystemMetricTextLayout(
+        font_id=font.font_id,
+        glyph_height=font.glyph_height,
+        measured_width=measured_width,
+        origin_x=origin_x,
+        origin_y=origin_y,
+        placements=tuple(placements),
+        truncated=truncated,
+    )
+
+
+def layout_system_metric_text(
+    settings: SystemMetricSettings,
+    context: RenderContext,
+    *,
+    region_width: int,
+    region_height: int,
+) -> SystemMetricTextLayout:
+    """Lay out one current value with fixed numeric cells where applicable."""
+    font = resolve_system_metric_font(
+        settings,
+        region_width=region_width,
+        region_height=region_height,
+    )
+    return _layout_system_metric_text(
+        font,
+        settings,
+        context,
+        region_width=region_width,
+        region_height=region_height,
+    )
 
 
 def render_system_metric(
@@ -162,21 +434,28 @@ def render_system_metric(
             or surface.height != context.region_height
         ):
             raise WidgetRenderingError("renderer_invariant", field="context")
-        content = metric_text(settings, context)
         font = resolve_system_metric_font(
             settings,
             region_width=surface.width,
             region_height=surface.height,
         )
-        draw_text(
-            surface,
-            content,
-            font=font,
-            color=RgbColor.from_schema_color(settings.color),
-            horizontal_alignment=settings.horizontal_alignment,
-            vertical_alignment=settings.vertical_alignment,
-            overflow=settings.overflow,
+        layout = _layout_system_metric_text(
+            font,
+            settings,
+            context,
+            region_width=surface.width,
+            region_height=surface.height,
         )
+        color = RgbColor.from_schema_color(settings.color)
+        for placement in layout.placements:
+            if placement.visible:
+                draw_glyph(
+                    surface,
+                    font.glyphs[placement.character],
+                    origin_x=placement.origin_x,
+                    origin_y=placement.origin_y,
+                    color=color,
+                )
         return None
     except WidgetRenderingError:
         raise

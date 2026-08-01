@@ -116,6 +116,9 @@ def test_metric_value_format_envelopes_are_deterministic_and_include_precision()
     assert metric_value_format_envelope(MetricId.CPU_TEMPERATURE, 1) == (
         "-20.0C", "150.0C",
     )
+    assert metric_value_format_envelope(MetricId.CPU_TEMPERATURE, 0) == (
+        "-20C", "150C", "5C",
+    )
     assert metric_value_format_envelope(MetricId.LOAD_AVERAGE_1M, 2) == (
         "9999.00",
     )

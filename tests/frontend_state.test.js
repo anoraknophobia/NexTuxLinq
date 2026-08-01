@@ -158,6 +158,7 @@ function freeEditorFixture({
   migrationPending = false,
   saveStatus = 200,
   profiles = null,
+  validationFrames = null,
 } = {}) {
   const ids = [
     "#fl-profile",
@@ -280,15 +281,22 @@ function freeEditorFixture({
   let pending = migrationPending;
   const calls = [];
   const frame = Buffer.alloc(90 * 10 * 3).toString("base64");
+  let validationFrameIndex = 0;
   const fetch = async (url, options = {}) => {
     calls.push({url, options});
     if (url.endsWith("/metadata")) return response(widgetMetadata);
     if (url.endsWith("/validate")) {
+      const validationFrame = validationFrames
+        ? validationFrames[Math.min(
+          validationFrameIndex,
+          validationFrames.length - 1,
+        )] : frame;
+      validationFrameIndex += 1;
       return response({
         valid: true,
         update_policy: "static",
         animated_content: false,
-        framebuffer_base64: frame,
+        framebuffer_base64: validationFrame,
       });
     }
     if (url.endsWith("/config") && options.method === "PUT") {
@@ -1524,6 +1532,40 @@ test("viewer framebuffer moves whole regions without mirroring their pixels", ()
   );
 });
 
+test("viewer framebuffer replacement clears relocated pixels from older frames", () => {
+  const firstRegions = frontend.placeRegionsForViewer([
+    {name: "Clock", start_pixel: 0, width: 2, height: 1, type: "clock"},
+  ], 6);
+  const secondRegions = frontend.placeRegionsForViewer([
+    {name: "Metric", start_pixel: 0, width: 1, height: 1, type: "system-metric"},
+  ], 6);
+  const image = {data: new Uint8ClampedArray(6 * 4).fill(127)};
+  const purpleFrame = String.fromCharCode(
+    128, 0, 255, 128, 0, 255,
+    1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3,
+  );
+  const whiteFrame = String.fromCharCode(
+    255, 255, 255,
+    1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3,
+  );
+
+  frontend.copyFramebufferForViewer(purpleFrame, image, 6, 1, firstRegions);
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 5].map((x) => Array.from(image.data.slice(x * 4, x * 4 + 3))),
+    [[1, 2, 3], [1, 2, 3], [1, 2, 3], [1, 2, 3], [128, 0, 255], [128, 0, 255]],
+  );
+
+  frontend.copyFramebufferForViewer(whiteFrame, image, 6, 1, secondRegions);
+  const fresh = {data: new Uint8ClampedArray(6 * 4)};
+  frontend.copyFramebufferForViewer(whiteFrame, fresh, 6, 1, secondRegions);
+  assert.deepEqual(image.data, fresh.data);
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 5].map((x) => Array.from(image.data.slice(x * 4, x * 4 + 3))),
+    [[1, 2, 3], [1, 2, 3], [1, 2, 3], [1, 2, 3], [1, 2, 3], [255, 255, 255]],
+  );
+  assert.equal(Array.from(image.data).includes(128), false);
+});
+
 test("preview refresh and reconnect preserve viewer perspective", async () => {
   const preview = previewPayload();
   const framebuffer = String.fromCharCode(
@@ -2152,6 +2194,54 @@ test("metric availability diagnostics render backend labels and sanitized states
   assert.equal(fixture.metricAvailability.replaceCalls, 1);
   fixture.editor.render();
   assert.equal(fixture.metricAvailability.replaceCalls, 1);
+});
+
+test("physical preview atomically replaces stale clock and metric pixels", async () => {
+  const first = Buffer.alloc(90 * 10 * 3);
+  const second = Buffer.alloc(90 * 10 * 3);
+  for (let y = 0; y < 10; y += 1) {
+    for (let x = 0; x < 10; x += 1) {
+      first.set([128, 0, 255], ((y * 90) + x) * 3);
+    }
+  }
+  second.set([255, 255, 255], 0);
+  second.set([20, 40, 60], 3);
+  const fixture = freeEditorFixture({
+    profiles: {
+      default: freeProfile([freeRegion({
+        x: 0, y: 0, width: 10, height: 10,
+        widget: {type: "system_metric", settings: {
+          ...widgetMetadata.widget_definitions.find(
+            (definition) => definition.type === "system_metric"
+          ).default_settings,
+        }},
+      })]),
+    },
+    validationFrames: [first.toString("base64"), second.toString("base64")],
+  });
+  await fixture.editor.initialize();
+  const preview = fixture.elements.get("#draft-preview");
+  const firstImage = preview.context.image;
+  assert.deepEqual(
+    Array.from(firstImage.data.slice(80 * 4, 80 * 4 + 3)),
+    [128, 0, 255],
+  );
+
+  await fixture.editor.validateDraft();
+  const secondImage = preview.context.image;
+  assert.notEqual(secondImage, firstImage);
+  assert.deepEqual(
+    Array.from(secondImage.data.slice(80 * 4, 80 * 4 + 8)),
+    [255, 255, 255, 255, 20, 40, 60, 255],
+  );
+  assert.equal(Array.from(secondImage.data).includes(128), false);
+  const rgbPixels = Array.from({length: 90 * 10}, (_value, pixel) => (
+    Array.from(secondImage.data.slice(pixel * 4, pixel * 4 + 3)).join(",")
+  ));
+  assert.deepEqual(
+    new Set(rgbPixels),
+    new Set(["0,0,0", "255,255,255", "20,40,60"]),
+  );
 });
 
 test("color picker and hex draft stay synchronized and invalid color blocks Apply", async () => {

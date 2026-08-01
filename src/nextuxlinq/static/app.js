@@ -343,13 +343,33 @@
     canvasHeight,
     regions,
   ) {
+    image.data.fill(0);
+    const covered = new Uint8Array(canvasWidth * canvasHeight);
+    for (const region of regions) {
+      if (region.enabled === false) continue;
+      const regionY = region.y ?? 0;
+      const regionHeight = region.height ?? canvasHeight;
+      for (let y = regionY; y < regionY + regionHeight; y += 1) {
+        for (let localX = 0; localX < region.width; localX += 1) {
+          covered[(y * canvasWidth) + region.start_pixel + localX] = 1;
+        }
+      }
+    }
+    const backgroundPixel = covered.findIndex((value) => value === 0);
+    const backgroundOffset = backgroundPixel < 0 ? -1 : backgroundPixel * 3;
+    const background = backgroundOffset < 0
+      ? [0, 0, 0]
+      : [
+        binary.charCodeAt(backgroundOffset),
+        binary.charCodeAt(backgroundOffset + 1),
+        binary.charCodeAt(backgroundOffset + 2),
+      ];
     for (let y = 0; y < canvasHeight; y += 1) {
       for (let x = 0; x < canvasWidth; x += 1) {
-        const sourcePixel = ((y * canvasWidth) + x) * 3;
         const targetPixel = ((y * canvasWidth) + x) * 4;
-        image.data[targetPixel] = binary.charCodeAt(sourcePixel);
-        image.data[targetPixel + 1] = binary.charCodeAt(sourcePixel + 1);
-        image.data[targetPixel + 2] = binary.charCodeAt(sourcePixel + 2);
+        image.data[targetPixel] = background[0];
+        image.data[targetPixel + 1] = background[1];
+        image.data[targetPixel + 2] = background[2];
         image.data[targetPixel + 3] = 255;
       }
     }

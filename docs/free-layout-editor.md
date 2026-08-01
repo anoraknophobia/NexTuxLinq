@@ -41,6 +41,14 @@ Unused pixels display the canvas background. A Blank region is optional and
 draws only its region background. Region backgrounds remain visible under
 unset glyph pixels.
 
+Each physical-preview refresh constructs a fresh 90×10 image from the current
+authoritative RGB888 framebuffer. Canvas-background pixels are established in
+the new buffer before enabled regions are moved once into viewer perspective,
+then the browser replaces the displayed image atomically. Editor selection
+outlines, labels, and resize handles remain separate DOM layers and never enter
+the physical-preview pixels, so an older Clock, Metric, or scrolling frame
+cannot leave fragments behind.
+
 ## Draft workflow
 
 Edits create a local draft. Bounds and overlap checks run immediately, then a

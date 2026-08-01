@@ -37,16 +37,24 @@ one day onward. Network rates automatically use uppercase `KB/S`, `MB/S`, or
 `GB/S`. Temperatures use the font-safe ASCII suffix `C`.
 
 System Metric font selection is snapshot-independent. An explicit font stays
-authoritative, while Auto checks the widest configured percentage (`100%`),
-the complete `-20C` to `150C` temperature range, the unavailable text, and the
-effective label before selecting one concrete font for that region. Precision
+authoritative. Auto uses `5x7` in a ten-pixel-high region when that font covers
+the configured text; width never causes a fallback to `3x5`. Auto checks the
+widest configured percentage (`100%`), the complete `-20C` to `150C`
+temperature range, the unavailable text, and the effective label. Precision
 is included in every envelope. The deterministic envelopes for intrinsically
 unbounded text are `9999.00` for load average, `9999.00GB/S` for network rates,
 and `999999D 23H` for uptime (shown here at two-decimal numeric precision).
-Values beyond those display ceilings retain the ceiling representation. This
-prevents glyph size changes as samples change; alignment may still move with
-the current text width. With `overflow=error`, the full envelope must fit,
-while Clip and Truncate retain their existing drawing behavior.
+Values beyond those display ceilings retain the ceiling representation.
+
+Integer percentages from zero through 99 use two fixed-width digit cells. A
+single-digit value reserves the leading zero cell without drawing its pixels,
+so `5%` remains visibly `5%` while its label, value field, and percent suffix
+stay anchored like a two-digit value. Non-negative integer temperatures below
+ten use the same rule. The digit-cell width is derived from the widest digit in
+the selected bitmap font; uptime, rates, and free decimal text do not receive
+hidden slots. With `overflow=error`, the complete stable layout must fit or
+validation reports `content_too_wide`; Clip and Truncate keep their configured
+behavior.
 
 Generic GPU selection first prefers one DRM device marked as the primary VGA
 device, then one uniquely active device, then the sole discovered card. An

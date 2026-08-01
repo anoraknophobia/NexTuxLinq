@@ -292,10 +292,13 @@ def metric_value_format_envelope(
     if METRIC_DEFINITIONS[metric].value_type is MetricValueType.PERCENTAGE:
         return (format_metric_value(metric, 100.0, precision),)
     if METRIC_DEFINITIONS[metric].value_type is MetricValueType.TEMPERATURE:
-        return (
+        envelope = [
             format_metric_value(metric, -20.0, precision),
             format_metric_value(metric, 150.0, precision),
-        )
+        ]
+        if precision == 0:
+            envelope.append(format_metric_value(metric, 5.0, precision))
+        return tuple(envelope)
     if metric is MetricId.UPTIME:
         return ("59:59", "23:59", "999999D 23H")
     if metric is MetricId.LOAD_AVERAGE_1M:
