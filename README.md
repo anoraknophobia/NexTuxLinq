@@ -2,8 +2,6 @@
 
 Open-source Linux control software for the Phanteks Matrix900 display.
 
-!!! Fully written via ChatGPT 5.6 Sol + Codex !!!
-
 ## Project scope
 
 This project currently targets only the Phanteks Matrix900.
@@ -114,13 +112,6 @@ Rear travel, and uses cycles per second; speed zero is static. Widget colors
 remain stored and return when the effect is disabled. Animated effects use the
 existing continuous scheduler and the preview and Matrix900 derive from the
 same framebuffer. See [`docs/display-effects.md`](docs/display-effects.md).
-
-### Showcase
-
-![NexTuxLinq Rainbow display preview](docs/images/rainbow-showcase.png)
-
-Example of a rendered NexTuxLinq layout using the global Foreground Rainbow
-effect.
 
 Text widgets use immutable native 3×5, 3×7, 5×7, 4×9, 5×9, and 5×10 bitmap
 fonts. Auto selects the largest fitting native fixture from backend metadata;
@@ -384,3 +375,10 @@ nextuxlinqctl telemetry --rpm-source pump
 
 The Matrix900 protocol currently exposes one verified RPM telemetry field, so
 fan and pump RPM cannot yet be transmitted simultaneously.
+
+## Showcase
+
+![NexTuxLinq Rainbow display preview](docs/images/rainbow-showcase.png)
+
+Example of a rendered NexTuxLinq layout using the global Foreground Rainbow
+effect.
