@@ -378,7 +378,7 @@ fan and pump RPM cannot yet be transmitted simultaneously.
 
 ## Showcase
 
-![NexTuxLinq Rainbow display preview](./docs/images/rainbow-showcase.png)
+![NexTuxLinq Rainbow display preview](./docs/images/rainbow-showcase-v1.png?raw=1)
 
 Example of a rendered NexTuxLinq layout using the global Foreground Rainbow
 effect.
