@@ -33,6 +33,7 @@ from nextuxlinq.system_metrics import (
     SystemMetricsSnapshot,
 )
 from nextuxlinq.web import MAX_REQUEST_BODY, create_app
+from nextuxlinq.widget_models import SystemMetricSettings
 
 
 class MemoryStore:
@@ -606,6 +607,97 @@ def test_canonical_renderer_errors_are_sanitized_and_addressable(
     assert body["field_errors"][0]["field"].endswith(f".{field}")
     assert prohibited not in str(body)
     assert service.snapshot().active_configuration_revision == 1
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_candidate_error_exposes_only_safe_authoritative_geometry_metadata(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+
+    class Provider:
+        def sample(self) -> SystemMetricsSnapshot:
+            return SystemMetricsSnapshot.unavailable(10.0, now)
+
+    service._metrics_provider = Provider()
+    candidate = legacy_equivalent_configuration_v2().to_dict()
+    profile = candidate["profiles"]["default"]
+    profile["regions"] = [{
+        "id": "metric", "name": "Metric",
+        "x": 0, "y": 0, "width": 34, "height": 10,
+        "enabled": True, "background_color": None,
+        "widget": {
+            "type": "system_metric",
+            "settings": SystemMetricSettings().to_dict(),
+        },
+    }]
+
+    response = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+
+    assert response.status_code == 422
+    error = response.json()["field_errors"][0]
+    assert error == {
+        "field": "regions.metric.content",
+        "message": "The widget settings cannot be rendered.",
+        "region_id": "metric",
+        "widget_type": "system_metric",
+        "category": "content_too_wide",
+        "renderer_field": "content",
+        "actual_width": 34,
+        "actual_height": 10,
+        "minimum_width": 35,
+        "minimum_height": 5,
+    }
+    serialized = json.dumps(response.json())
+    assert "/proc" not in serialized
+    assert "/sys" not in serialized
+    assert "FontTextError" not in serialized
+    assert store.saved == []
+    assert worker.frames == []
+
+
+def test_candidate_validation_reports_each_invalid_renderer_region(
+    api_client,
+) -> None:
+    client, service, store, worker = api_client
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+
+    class Provider:
+        calls = 0
+
+        def sample(self) -> SystemMetricsSnapshot:
+            self.calls += 1
+            return SystemMetricsSnapshot.unavailable(10.0, now)
+
+    provider = Provider()
+    service._metrics_provider = provider
+    candidate = legacy_equivalent_configuration_v2().to_dict()
+    settings = SystemMetricSettings().to_dict()
+    candidate["profiles"]["default"]["regions"] = [
+        {
+            "id": region_id, "name": None,
+            "x": x, "y": 0, "width": 34, "height": 10,
+            "enabled": True, "background_color": None,
+            "widget": {"type": "system_metric", "settings": settings},
+        }
+        for region_id, x in (("metric-a", 0), ("metric-b", 50))
+    ]
+
+    response = client.post(
+        "/api/v1/free-layout/validate",
+        json={"configuration": candidate},
+    )
+
+    assert response.status_code == 422
+    errors = response.json()["field_errors"]
+    assert [error["region_id"] for error in errors] == ["metric-a", "metric-b"]
+    assert all(error["minimum_width"] == 35 for error in errors)
+    assert provider.calls == 1
     assert store.saved == []
     assert worker.frames == []
 

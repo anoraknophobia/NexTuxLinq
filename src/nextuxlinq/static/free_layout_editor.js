@@ -126,6 +126,78 @@
     );
   }
 
+  const VALIDATION_PRIORITY = Object.freeze({
+    out_of_bounds: 0,
+    overlap: 1,
+    content_too_tall: 2,
+    content_too_wide: 3,
+    wrong_widget_settings: 4,
+    invalid_color: 4,
+    invalid_dimensions: 4,
+    unsupported_glyph: 5,
+    unknown_font: 5,
+    time_zone_unavailable: 5,
+  });
+
+  function validationPriority(error) {
+    return VALIDATION_PRIORITY[error?.category] ?? 6;
+  }
+
+  function validationExplanation(error, profile = null) {
+    const actualWidth = Number.isInteger(error?.actual_width)
+      ? error.actual_width : null;
+    const actualHeight = Number.isInteger(error?.actual_height)
+      ? error.actual_height : null;
+    const minimumWidth = Number.isInteger(error?.minimum_width)
+      ? error.minimum_width : null;
+    const minimumHeight = Number.isInteger(error?.minimum_height)
+      ? error.minimum_height : null;
+    const widthFails = minimumWidth !== null && actualWidth !== null
+      && actualWidth < minimumWidth;
+    const heightFails = minimumHeight !== null && actualHeight !== null
+      && actualHeight < minimumHeight;
+    if (widthFails && heightFails) {
+      return `Minimum size ${minimumWidth} × ${minimumHeight} px`;
+    }
+    if (error?.category === "out_of_bounds") return "Outside canvas";
+    if (error?.category === "overlap") {
+      const conflict = profile?.regions?.find(
+        (region) => region.id === error.conflicting_region_id,
+      );
+      return conflict?.name
+        ? `Overlaps ${conflict.name}` : "Overlaps another region";
+    }
+    if (heightFails || error?.category === "content_too_tall") {
+      return minimumHeight === null
+        ? "Text is too tall"
+        : `Too short · minimum height ${minimumHeight} px`;
+    }
+    if (widthFails || error?.category === "content_too_wide") {
+      return minimumWidth === null
+        ? "Text does not fit"
+        : `Too narrow · minimum width ${minimumWidth} px`;
+    }
+    return {
+      invalid_dimensions: "Invalid region size",
+      wrong_widget_settings: "Invalid widget setting",
+      invalid_color: "Invalid color",
+      unsupported_glyph: "Unsupported character",
+      unknown_font: "Unsupported font",
+      time_zone_unavailable: "Invalid time zone",
+      date_format_unavailable: "Invalid date format",
+      renderer_invariant: "Invalid widget setting",
+      unexpected_renderer_failure: "Widget cannot be rendered",
+    }[error?.category] || "Invalid region";
+  }
+
+  function regionValidationErrors(localErrors, serverErrors, regionId) {
+    return [...(localErrors || []), ...(serverErrors || [])]
+      .filter((error) => error.region_id === regionId)
+      .sort((left, right) => (
+        validationPriority(left) - validationPriority(right)
+      ));
+  }
+
   function totalRegionCount(configuration) {
     return Object.values(configuration.profiles).reduce(
       (total, profile) => total + profile.regions.length,
@@ -258,8 +330,8 @@
   function validateLocalCandidate(configuration, metadata = {}) {
     const errors = [];
     const invalidRegionIds = new Set();
-    const add = (category, field, regionId = null) => {
-      errors.push({category, field, region_id: regionId});
+    const add = (category, field, regionId = null, details = {}) => {
+      errors.push({category, field, region_id: regionId, ...details});
       if (regionId) invalidRegionIds.add(regionId);
     };
     if (!configuration || configuration.schema_version !== 2
@@ -306,11 +378,17 @@
           (field) => Number.isInteger(region[field]),
         );
         if (!integers || region.width < 1 || region.height < 1) {
-          add("invalid_dimensions", "geometry", id);
+          add("invalid_dimensions", "geometry", id, {
+            actual_width: region.width,
+            actual_height: region.height,
+          });
         } else if (region.x < 0 || region.y < 0
             || region.x + region.width > CANVAS_WIDTH
             || region.y + region.height > CANVAS_HEIGHT) {
-          add("out_of_bounds", "geometry", id);
+          add("out_of_bounds", "geometry", id, {
+            actual_width: region.width,
+            actual_height: region.height,
+          });
         }
         if (typeof region.enabled !== "boolean") {
           add("invalid_enabled", "enabled", id);
@@ -328,8 +406,12 @@
         const left = profile.regions[index];
         for (const right of profile.regions.slice(index + 1)) {
           if (rectanglesOverlap(left, right)) {
-            add("overlap", "geometry", left.id);
-            add("overlap", "geometry", right.id);
+            add("overlap", "geometry", left.id, {
+              conflicting_region_id: right.id,
+            });
+            add("overlap", "geometry", right.id, {
+              conflicting_region_id: left.id,
+            });
           }
         }
       }
@@ -655,9 +737,11 @@
       brightness: element("#fl-brightness"),
       layer: element("#fl-region-layer"),
       canvas: element("#fl-editor-canvas"),
+      regionValidationSummary: element("#fl-region-validation-summary"),
       inspector: element("#fl-region-inspector"),
       noSelection: element("#fl-no-selection"),
       selectedPanel: element("#fl-selected-region"),
+      regionValidationDetails: element("#fl-region-validation-details"),
       name: element("#fl-region-name"),
       enabled: element("#fl-region-enabled"),
       useBackground: element("#fl-use-region-background"),
@@ -839,10 +923,7 @@
         time_zone_unavailable: "The named time zone is unavailable.",
         renderer_invariant: "The widget settings are inconsistent.",
         unexpected_renderer_failure: "The widget could not be rendered.",
-      }[error.category] || (
-        typeof error.message === "string"
-          ? error.message : "Server validation failed."
-      );
+      }[error.category] || "Server validation failed.";
     }
 
     function updateDerivedState() {
@@ -944,7 +1025,13 @@
       for (const error of state.serverErrors) {
         if (error.region_id) invalidIds.add(error.region_id);
       }
+      const compactMessages = [];
       const regions = profile.regions.map((region) => {
+        const regionErrors = regionValidationErrors(
+          state.localValidation.errors,
+          state.serverErrors,
+          region.id,
+        );
         const overlay = documentObject.createElement("div");
         overlay.className = [
           "layout-region",
@@ -958,6 +1045,7 @@
           `${region.name || "Region"}: ${region.widget.type}`);
         overlay.setAttribute("aria-pressed",
           String(region.id === state.selectedRegionId));
+        overlay.setAttribute("aria-invalid", String(regionErrors.length > 0));
         overlay.dataset.regionId = region.id;
         overlay.style.setProperty("--viewer-x",
           String(logicalToViewerX(region.x, region.width)));
@@ -972,6 +1060,33 @@
           (definition) => definition.type === region.widget.type,
         )?.label || region.widget.type;
         overlay.append(label);
+        if (regionErrors.length > 0) {
+          const explanation = validationExplanation(regionErrors[0], profile);
+          const messageId = `fl-region-error-${region.id}`;
+          overlay.setAttribute("aria-describedby", messageId);
+          if (region.width >= 24 && region.height >= 4) {
+            const badge = documentObject.createElement("span");
+            badge.id = messageId;
+            badge.className = "region-validation-badge";
+            badge.setAttribute("role", "note");
+            badge.textContent = `Error · ${explanation}`;
+            badge.addEventListener("pointerdown", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              state.selectedRegionId = region.id;
+              render();
+            });
+            badge.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              state.selectedRegionId = region.id;
+              render();
+            });
+            overlay.append(badge);
+          } else {
+            compactMessages.push({region, explanation, messageId});
+          }
+        }
         for (const handle of ["nw", "ne", "sw", "se"]) {
           const resize = documentObject.createElement("span");
           resize.className = `resize-handle resize-${handle}`;
@@ -1003,6 +1118,20 @@
         return overlay;
       });
       elements.layer.replaceChildren(...regions);
+      elements.regionValidationSummary?.replaceChildren(
+        ...compactMessages.map(({region, explanation, messageId}) => {
+          const button = documentObject.createElement("button");
+          button.id = messageId;
+          button.type = "button";
+          button.className = "region-validation-summary-item";
+          button.textContent = `Error · ${region.name || "Region"}: ${explanation}`;
+          button.addEventListener("click", () => {
+            state.selectedRegionId = region.id;
+            render();
+          });
+          return button;
+        }),
+      );
     }
 
     function fieldValue(id, value) {
@@ -1085,7 +1214,32 @@
       const region = selectedRegion();
       elements.noSelection.hidden = Boolean(region);
       elements.selectedPanel.hidden = !region;
-      if (!region) return;
+      if (!region) {
+        if (elements.regionValidationDetails) {
+          elements.regionValidationDetails.hidden = true;
+          elements.regionValidationDetails.replaceChildren();
+        }
+        return;
+      }
+      const regionErrors = regionValidationErrors(
+        state.localValidation.errors,
+        state.serverErrors,
+        region.id,
+      );
+      if (elements.regionValidationDetails) {
+        elements.regionValidationDetails.hidden = regionErrors.length === 0;
+        elements.regionValidationDetails.replaceChildren(
+          ...regionErrors.map((error, index) => {
+            const item = documentObject.createElement("p");
+            item.className = index === 0
+              ? "region-validation-primary" : "region-validation-secondary";
+            item.textContent = `${index === 0 ? "Error" : "Also"} · ${
+              validationExplanation(error, activeProfile())
+            }`;
+            return item;
+          }),
+        );
+      }
       elements.name.value = region.name || "";
       elements.enabled.checked = region.enabled;
       elements.useBackground.checked = region.background_color !== null;
@@ -1133,6 +1287,22 @@
         const region = selectedRegion();
         if (error.region_id && error.region_id !== region?.id) return;
         const field = String(error.field || "");
+        if (error.category === "content_too_wide") {
+          elements.width.setAttribute("aria-invalid", "true");
+        }
+        if (error.category === "content_too_tall") {
+          elements.height.setAttribute("aria-invalid", "true");
+        }
+        if (Number.isInteger(error.minimum_width)
+            && Number.isInteger(error.actual_width)
+            && error.actual_width < error.minimum_width) {
+          elements.width.setAttribute("aria-invalid", "true");
+        }
+        if (Number.isInteger(error.minimum_height)
+            && Number.isInteger(error.actual_height)
+            && error.actual_height < error.minimum_height) {
+          elements.height.setAttribute("aria-invalid", "true");
+        }
         if (error.category === "invalid_canvas"
             && field.includes(state.draft.active_profile)) {
           for (const input of elements.canvasColorControl?.querySelectorAll(
@@ -2396,6 +2566,9 @@
     clampInteger,
     clampGeometry,
     rectanglesOverlap,
+    validationPriority,
+    validationExplanation,
+    regionValidationErrors,
     validateLocalCandidate,
     validateWidgetSettings,
     nextStableId,

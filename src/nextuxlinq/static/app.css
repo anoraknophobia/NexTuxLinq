@@ -345,6 +345,47 @@ button:hover:not(:disabled) { border-color: #65ded5; }
     -45deg, rgb(140 29 29 / 75%) 0 6px, rgb(77 20 20 / 75%) 6px 12px
   );
 }
+.region-validation-badge {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: .15rem;
+  max-width: calc(100% - 1.5rem);
+  padding: .12rem .3rem;
+  overflow: hidden;
+  color: #fff;
+  background: #9b2f2a;
+  border: 1px solid #ffb4aa;
+  border-radius: .25rem;
+  font-size: clamp(.52rem, 1vw, .68rem);
+  font-weight: 700;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  text-shadow: none;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  cursor: pointer;
+}
+.region-validation-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  margin-top: .4rem;
+}
+.region-validation-summary:empty { display: none; }
+.region-validation-summary-item {
+  min-width: 0;
+  padding: .3rem .5rem;
+  color: #fff;
+  background: #722622;
+  border-color: #df7f75;
+  font-size: .75rem;
+  text-align: left;
+}
+.region-validation-summary-item:focus-visible {
+  outline: 3px solid #65ded5;
+  outline-offset: 2px;
+}
 .layout-region-label {
   max-width: calc(100% - .5rem);
   overflow: hidden;
@@ -377,6 +418,19 @@ button:hover:not(:disabled) { border-color: #65ded5; }
   border-radius: .6rem;
 }
 .region-inspector h3 { margin-top: 0; }
+.region-validation-details {
+  margin: 0 0 .8rem;
+  padding: .65rem .75rem;
+  color: #ffd7d2;
+  background: #3a1a1a;
+  border: 1px solid #df7f75;
+  border-radius: .4rem;
+}
+.region-validation-details[hidden] { display: none; }
+.region-validation-details p { margin: 0; }
+.region-validation-details p + p { margin-top: .3rem; }
+.region-validation-primary { color: #fff; font-weight: 700; }
+.region-validation-secondary { font-size: .85rem; }
 .inspector-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));

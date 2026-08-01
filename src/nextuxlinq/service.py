@@ -16,6 +16,7 @@ from nextuxlinq.config_store import (
     ManagedBackup,
     ManagedBackupError,
 )
+from nextuxlinq.creator import MATRIX_HEIGHT, MATRIX_WIDTH
 from nextuxlinq.defaults import (
     default_configuration,
     legacy_equivalent_configuration_v2,
@@ -32,13 +33,18 @@ from nextuxlinq.models import ConfigurationDocument, ProfileConfig
 from nextuxlinq.models_v2 import (
     ConfigurationDocumentV2,
     ProfileConfigV2,
+    RegionConfig,
 )
 from nextuxlinq.rendering_v2.compositor import (
     Compositor,
     CompositorError,
     RenderResult,
 )
-from nextuxlinq.rendering_v2.registry import create_widget_registry
+from nextuxlinq.rendering_v2.registry import (
+    RenderContext,
+    create_widget_registry,
+)
+from nextuxlinq.rendering_v2.surface import RegionSurface, RgbColor
 from nextuxlinq.rendering_v2.update_policy import UpdatePolicy
 from nextuxlinq.scheduler import update_policy_delay
 from nextuxlinq.state import DaemonState, DaemonSnapshot
@@ -68,6 +74,20 @@ class WorkerSubmissionError(RuntimeError):
     """A sanitized candidate submission failure."""
 
 
+@dataclass(frozen=True, slots=True)
+class CandidateValidationIssue:
+    """Safe structured details for one invalid candidate region."""
+
+    category: str
+    region_id: str | None = None
+    widget_type: WidgetType | None = None
+    field: str | None = None
+    actual_width: int | None = None
+    actual_height: int | None = None
+    minimum_width: int | None = None
+    minimum_height: int | None = None
+
+
 class CandidateValidationError(ValueError):
     """A sanitized complete-candidate rendering failure."""
 
@@ -78,11 +98,30 @@ class CandidateValidationError(ValueError):
         region_id: str | None = None,
         widget_type: WidgetType | None = None,
         field: str | None = None,
+        actual_width: int | None = None,
+        actual_height: int | None = None,
+        minimum_width: int | None = None,
+        minimum_height: int | None = None,
+        issues: tuple[CandidateValidationIssue, ...] | None = None,
     ) -> None:
         self.category = category
         self.region_id = region_id
         self.widget_type = widget_type
         self.field = field
+        self.actual_width = actual_width
+        self.actual_height = actual_height
+        self.minimum_width = minimum_width
+        self.minimum_height = minimum_height
+        self.issues = issues or (CandidateValidationIssue(
+            category=category,
+            region_id=region_id,
+            widget_type=widget_type,
+            field=field,
+            actual_width=actual_width,
+            actual_height=actual_height,
+            minimum_width=minimum_width,
+            minimum_height=minimum_height,
+        ),)
         super().__init__("The free-layout candidate could not be rendered.")
 
 
@@ -621,14 +660,162 @@ class NexTuxLinqService:
             failure = None
         if failure is not None:
             category, region_id, widget_type, field = failure
+            issues = self._candidate_validation_issues(
+                profile,
+                wall_clock=wall_clock,
+                animation_time=max(0.0, generated_at - self._started_at),
+                metrics_snapshot=metrics_snapshot,
+            )
+            primary = next(
+                (issue for issue in issues if issue.region_id == region_id),
+                CandidateValidationIssue(
+                    category=category,
+                    region_id=region_id,
+                    widget_type=widget_type,
+                    field=field,
+                ),
+            )
             raise CandidateValidationError(
-                category,
-                region_id=region_id,
-                widget_type=widget_type,
-                field=field,
+                primary.category,
+                region_id=primary.region_id,
+                widget_type=primary.widget_type,
+                field=primary.field,
+                actual_width=primary.actual_width,
+                actual_height=primary.actual_height,
+                minimum_width=primary.minimum_width,
+                minimum_height=primary.minimum_height,
+                issues=issues or (primary,),
             )
         assert result is not None
         return result, generated_at
+
+    def _candidate_validation_issues(
+        self,
+        profile: ProfileConfigV2,
+        *,
+        wall_clock: datetime,
+        animation_time: float,
+        metrics_snapshot: SystemMetricsSnapshot | None,
+    ) -> tuple[CandidateValidationIssue, ...]:
+        issues: list[CandidateValidationIssue] = []
+        for region in profile.regions:
+            if not region.enabled:
+                continue
+            isolated = ProfileConfigV2.from_dict({
+                "brightness": profile.brightness,
+                "canvas": profile.canvas.to_dict(),
+                "regions": [region.to_dict()],
+            })
+            try:
+                self._compositor.render(
+                    isolated,
+                    generation_time=wall_clock,
+                    animation_time=animation_time,
+                    metrics_snapshot=metrics_snapshot,
+                )
+            except CompositorError as error:
+                failure = (
+                    error.category.value,
+                    error.region_id,
+                    error.widget_type,
+                    error.field,
+                )
+            else:
+                failure = None
+            if failure is None:
+                continue
+            category, region_id, widget_type, field = failure
+            minimum_width: int | None = None
+            minimum_height: int | None = None
+            if category in {"content_too_wide", "content_too_tall"}:
+                minimum_width, minimum_height = self._minimum_render_size(
+                    region,
+                    wall_clock=wall_clock,
+                    animation_time=animation_time,
+                    metrics_snapshot=metrics_snapshot,
+                )
+            issues.append(CandidateValidationIssue(
+                category=category,
+                region_id=region_id,
+                widget_type=widget_type,
+                field=field,
+                actual_width=region.width,
+                actual_height=region.height,
+                minimum_width=minimum_width,
+                minimum_height=minimum_height,
+            ))
+        return tuple(issues)
+
+    def _minimum_render_size(
+        self,
+        region: RegionConfig,
+        *,
+        wall_clock: datetime,
+        animation_time: float,
+        metrics_snapshot: SystemMetricsSnapshot | None,
+    ) -> tuple[int | None, int | None]:
+        """Probe the real renderer for safe, canvas-bounded size guidance."""
+        definition = self._widget_registry.resolve(region.widget.type)
+        renderer = definition.renderer
+        if renderer is None:
+            return None, None
+
+        def renders(width: int, height: int) -> bool:
+            try:
+                surface = RegionSurface(width, height, RgbColor(0, 0, 0))
+                context = RenderContext(
+                    wall_clock=wall_clock,
+                    animation_time=animation_time,
+                    canvas_width=MATRIX_WIDTH,
+                    canvas_height=MATRIX_HEIGHT,
+                    region_id=region.id,
+                    region_width=width,
+                    region_height=height,
+                    metrics_snapshot=metrics_snapshot,
+                )
+                return renderer(
+                    surface,
+                    region.widget.settings,
+                    context,
+                ) is None
+            except Exception:
+                return False
+
+        probe_height = region.height
+        minimum_width = next(
+            (
+                width for width in range(1, MATRIX_WIDTH + 1)
+                if renders(width, probe_height)
+            ),
+            None,
+        )
+        if minimum_width is None and probe_height != MATRIX_HEIGHT:
+            probe_height = MATRIX_HEIGHT
+            minimum_width = next(
+                (
+                    width for width in range(1, MATRIX_WIDTH + 1)
+                    if renders(width, probe_height)
+                ),
+                None,
+            )
+
+        probe_width = max(region.width, minimum_width or region.width)
+        minimum_height = next(
+            (
+                height for height in range(1, MATRIX_HEIGHT + 1)
+                if renders(probe_width, height)
+            ),
+            None,
+        )
+        if minimum_height is None and probe_width != MATRIX_WIDTH:
+            minimum_height = next(
+                (
+                    height for height in range(1, MATRIX_HEIGHT + 1)
+                    if renders(MATRIX_WIDTH, height)
+                ),
+                None,
+            )
+        return minimum_width, minimum_height
 
     def get_configuration(self) -> ServiceConfigurationSnapshot:
         with self._coordination_lock:

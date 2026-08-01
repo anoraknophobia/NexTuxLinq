@@ -352,6 +352,31 @@ def test_region_background_toggle_and_widget_select_are_separate_controls() -> N
     assert "flex-wrap: nowrap" in css
 
 
+def test_invalid_regions_have_inline_and_full_width_accessible_explanations() -> None:
+    page, _, css = _frontend_source()
+    editor = _editor_source()
+    canvas = page.split('id="fl-editor-canvas"', 1)[1].split(
+        'id="fl-region-inspector"', 1
+    )[0]
+    inspector = page.split('id="fl-region-inspector"', 1)[1].split(
+        "</aside>", 1
+    )[0]
+
+    assert 'id="fl-region-validation-summary"' in canvas
+    assert 'aria-live="polite"' in canvas
+    assert 'id="fl-region-validation-details"' in inspector
+    assert 'role="alert"' in inspector
+    assert "region-validation-badge" in editor
+    assert "region-validation-summary-item" in editor
+    assert "regionValidationErrors(" in editor
+    assert "validationExplanation(" in editor
+    assert ".region-validation-badge" in css
+    assert ".region-validation-summary" in css
+    assert ".region-validation-details" in css
+    assert "position: absolute" in css
+    assert "flex-wrap: wrap" in css
+
+
 def test_metric_dropdowns_are_backend_driven_without_extended_id_duplication() -> None:
     page, _, _ = _frontend_source()
     editor = _editor_source()

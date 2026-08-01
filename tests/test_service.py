@@ -22,6 +22,7 @@ from nextuxlinq.models_v2 import ConfigurationDocumentV2
 from nextuxlinq.migration import migrate_configuration_v1_to_v2
 from nextuxlinq.rendering import render_profile_at_elapsed
 from nextuxlinq.profile_presets import get_builtin_presets
+from nextuxlinq.rendering_v2.registry import create_widget_registry
 from nextuxlinq.service import (
     CandidateValidationError,
     NexTuxLinqService,
@@ -33,7 +34,13 @@ from nextuxlinq.system_metrics import (
     MetricId,
     SystemMetricsSnapshot,
 )
-from nextuxlinq.widget_models import SystemMetricSettings
+from nextuxlinq.widget_models import (
+    ClockSettings,
+    StaticTextSettings,
+    SystemMetricSettings,
+    WidgetSettings,
+    WidgetType,
+)
 from nextuxlinq.writer_lock import WriterLock
 
 
@@ -101,6 +108,37 @@ def metric_configuration(width: int) -> ConfigurationDocumentV2:
                     "widget": {
                         "type": "system_metric",
                         "settings": SystemMetricSettings().to_dict(),
+                    },
+                }],
+            },
+        },
+    })
+
+
+def single_widget_configuration(
+    widget_type: WidgetType,
+    settings: WidgetSettings,
+    *,
+    width: int,
+    height: int,
+) -> ConfigurationDocumentV2:
+    return ConfigurationDocumentV2.from_dict({
+        "schema_version": 2,
+        "active_profile": "default",
+        "profiles": {
+            "default": {
+                "brightness": None,
+                "canvas": {
+                    "width": 90, "height": 10,
+                    "background_color": "#000000",
+                },
+                "regions": [{
+                    "id": "region", "name": "Region",
+                    "x": 0, "y": 0, "width": width, "height": height,
+                    "enabled": True, "background_color": None,
+                    "widget": {
+                        "type": widget_type.value,
+                        "settings": settings.to_dict(),
                     },
                 }],
             },
@@ -431,6 +469,96 @@ def test_initial_controlled_render_failure_is_observable_and_fully_cleaned_up() 
         assert store.saved == []
 
     asyncio.run(scenario())
+
+
+def test_candidate_geometry_metadata_uses_the_configured_renderer() -> None:
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+
+    class Provider:
+        def sample(self) -> SystemMetricsSnapshot:
+            return SystemMetricsSnapshot.unavailable(0.0, now)
+
+    service = NexTuxLinqService(
+        config_store=FakeStore(default_configuration()),
+        device_worker=FakeWorker(),  # type: ignore[arg-type]
+        monotonic=lambda: 0.0,
+        wall_clock=lambda: now,
+        metrics_provider=Provider(),
+    )
+    registry = create_widget_registry()
+
+    with pytest.raises(CandidateValidationError) as metric_failure:
+        service.validate_configuration(metric_configuration(34))
+    metric = metric_failure.value
+    assert (metric.actual_width, metric.actual_height) == (34, 10)
+    assert (metric.minimum_width, metric.minimum_height) == (35, 5)
+
+    clock_defaults = registry.resolve(WidgetType.CLOCK).default_settings
+    assert type(clock_defaults) is ClockSettings
+    clock = ClockSettings(**{
+        **clock_defaults.to_dict(),
+        "show_seconds": True,
+    })
+    with pytest.raises(CandidateValidationError) as clock_failure:
+        service.validate_configuration(single_widget_configuration(
+            WidgetType.CLOCK, clock, width=26, height=10,
+        ))
+    assert clock_failure.value.category == "content_too_wide"
+    assert (
+        clock_failure.value.minimum_width,
+        clock_failure.value.minimum_height,
+    ) == (27, 5)
+
+    explicit_clock = ClockSettings(**{
+        **clock.to_dict(),
+        "font": "5x7",
+    })
+    with pytest.raises(CandidateValidationError) as both_failure:
+        service.validate_configuration(single_widget_configuration(
+            WidgetType.CLOCK, explicit_clock, width=38, height=6,
+        ))
+    both = both_failure.value
+    assert (both.actual_width, both.actual_height) == (38, 6)
+    assert (both.minimum_width, both.minimum_height) == (39, 7)
+    assert all(not isinstance(value, BaseException) for value in vars(both).values())
+
+    for widget_type, width, height in (
+        (WidgetType.SCROLLING_TEXT, 1, 5),
+        (WidgetType.METRIC_BAR, 1, 1),
+    ):
+        settings = registry.resolve(widget_type).default_settings
+        result = service.validate_configuration(single_widget_configuration(
+            widget_type, settings, width=width, height=height,
+        ))
+        assert len(result.logical_framebuffer) == 90 * 10 * 3
+
+
+@pytest.mark.parametrize("overflow", ["clip", "truncate"])
+def test_candidate_geometry_does_not_inflate_clipped_text_width(
+    overflow: str,
+) -> None:
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+    defaults = create_widget_registry().resolve(
+        WidgetType.STATIC_TEXT
+    ).default_settings
+    assert type(defaults) is StaticTextSettings
+    settings = StaticTextSettings(**{
+        **defaults.to_dict(),
+        "content": "THIS CONTENT IS INTENTIONALLY WIDE",
+        "font": "5x7",
+        "overflow": overflow,
+    })
+    service = NexTuxLinqService(
+        config_store=FakeStore(default_configuration()),
+        device_worker=FakeWorker(),  # type: ignore[arg-type]
+        monotonic=lambda: 0.0,
+        wall_clock=lambda: now,
+        metrics_provider=object(),
+    )
+    result = service.validate_configuration(single_widget_configuration(
+        WidgetType.STATIC_TEXT, settings, width=1, height=7,
+    ))
+    assert len(result.logical_framebuffer) == 90 * 10 * 3
 
 
 def test_worker_stop_timeout_marks_service_failed() -> None:

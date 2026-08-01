@@ -166,9 +166,11 @@ function freeEditorFixture({
     "#fl-brightness",
     "#fl-region-layer",
     "#fl-editor-canvas",
+    "#fl-region-validation-summary",
     "#fl-region-inspector",
     "#fl-no-selection",
     "#fl-selected-region",
+    "#fl-region-validation-details",
     "#fl-region-name",
     "#fl-region-enabled",
     "#fl-use-region-background",
@@ -1996,6 +1998,144 @@ test("local validation marks overlaps, bounds, dimensions, and duplicate IDs", (
       false,
     );
   }
+});
+
+test("region validation explanations expose exact safe geometry guidance", () => {
+  assert.equal(freeLayout.validationExplanation({
+    category: "content_too_wide",
+    actual_width: 34,
+    actual_height: 10,
+    minimum_width: 35,
+    minimum_height: 5,
+  }), "Too narrow · minimum width 35 px");
+  assert.equal(freeLayout.validationExplanation({
+    category: "content_too_tall",
+    actual_width: 38,
+    actual_height: 6,
+    minimum_width: 39,
+    minimum_height: 7,
+  }), "Minimum size 39 × 7 px");
+  assert.equal(freeLayout.validationExplanation({
+    category: "content_too_tall",
+    actual_width: 90,
+    actual_height: 6,
+    minimum_width: 39,
+    minimum_height: 7,
+  }), "Too short · minimum height 7 px");
+  assert.equal(freeLayout.validationExplanation({
+    category: "unsupported_glyph",
+    message: "PRIVATE USER CONTENT",
+  }), "Unsupported character");
+  assert.equal(freeLayout.validationExplanation({
+    category: "time_zone_unavailable",
+    message: "PRIVATE/TIMEZONE",
+  }), "Invalid time zone");
+});
+
+test("region validation priority and overlap explanations are deterministic", () => {
+  const profile = freeProfile([
+    freeRegion({name: "CPU Metric"}),
+    freeRegion({id: "region-2", name: "Clock", x: 5}),
+  ]);
+  const local = freeLayout.validateLocalCandidate(
+    freeConfiguration(profile), widgetMetadata,
+  );
+  const firstOverlap = local.errors.find(
+    (error) => error.region_id === "region-1"
+      && error.category === "overlap"
+  );
+  assert.equal(
+    freeLayout.validationExplanation(firstOverlap, profile),
+    "Overlaps Clock",
+  );
+  const ordered = freeLayout.regionValidationErrors([
+    {category: "content_too_wide", region_id: "region-1"},
+    {category: "overlap", region_id: "region-1"},
+    {category: "out_of_bounds", region_id: "region-1"},
+    {category: "content_too_tall", region_id: "region-1"},
+  ], [], "region-1");
+  assert.deepEqual(
+    ordered.map((error) => error.category),
+    ["out_of_bounds", "overlap", "content_too_tall", "content_too_wide"],
+  );
+});
+
+test("inline region error selects the region and inspector shows every error", async () => {
+  const settings = widgetMetadata.widget_definitions.find(
+    (definition) => definition.type === "system_metric"
+  ).default_settings;
+  const fixture = freeEditorFixture({
+    profiles: {default: freeProfile([freeRegion({
+      width: 34,
+      height: 10,
+      widget: {type: "system_metric", settings: {...settings}},
+    })])},
+  });
+  await fixture.editor.initialize();
+  const lastValidPreview = fixture.editor.state.lastValidPreview;
+  const previewImage = fixture.elements.get("#draft-preview").context.image;
+  fixture.editor.state.serverValidation = "invalid";
+  fixture.editor.state.serverErrors = [
+    {
+      category: "content_too_wide", field: "content",
+      region_id: "region-1", actual_width: 34, actual_height: 10,
+      minimum_width: 35, minimum_height: 5,
+    },
+    {
+      category: "unsupported_glyph", field: "content",
+      region_id: "region-1", message: "<script>private()</script>",
+    },
+  ];
+  fixture.editor.render();
+
+  const overlay = fixture.elements.get("#fl-region-layer").children[0];
+  const badge = overlay.children.find(
+    (child) => child.className === "region-validation-badge"
+  );
+  assert.equal(badge.textContent, "Error · Too narrow · minimum width 35 px");
+  assert.equal(badge.textContent.includes("script"), false);
+  badge.dispatch("click");
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
+
+  const details = fixture.elements.get("#fl-region-validation-details");
+  assert.equal(details.hidden, false);
+  assert.deepEqual(details.children.map((item) => item.textContent), [
+    "Error · Too narrow · minimum width 35 px",
+    "Also · Unsupported character",
+  ]);
+  assert.equal(fixture.elements.get("#fl-width").getAttribute("aria-invalid"), "true");
+  assert.equal(fixture.elements.get("#fl-apply").disabled, true);
+  assert.equal(fixture.elements.get("#fl-save").disabled, true);
+  assert.equal(fixture.editor.state.lastValidPreview, lastValidPreview);
+  assert.equal(
+    fixture.elements.get("#draft-preview").context.image,
+    previewImage,
+  );
+
+  fixture.editor.state.serverErrors = [];
+  fixture.editor.mutate((candidate) => {
+    candidate.profiles.default.regions[0].width = 35;
+  });
+  const repaired = fixture.elements.get("#fl-region-layer").children[0];
+  assert.equal(repaired.children.some(
+    (child) => child.className === "region-validation-badge"
+  ), false);
+  assert.equal(details.hidden, true);
+});
+
+test("small invalid regions use an accessible message below the canvas", async () => {
+  const fixture = freeEditorFixture({
+    profiles: {default: freeProfile([freeRegion({x: 85, width: 10})])},
+  });
+  await fixture.editor.initialize();
+  const summary = fixture.elements.get("#fl-region-validation-summary");
+  assert.equal(summary.children.length, 1);
+  assert.equal(
+    summary.children[0].textContent,
+    "Error · Region 1: Outside canvas",
+  );
+  summary.children[0].dispatch("click");
+  assert.equal(fixture.editor.state.selectedRegionId, "region-1");
 });
 
 test("widget selection uses exactly seven canonical defaults", () => {

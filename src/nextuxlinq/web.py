@@ -291,28 +291,37 @@ def create_app(
                 "This free-layout profile is read-only in the current editor.",
             )
         except CandidateValidationError as error:
-            field = error.field or "renderer"
-            region = error.region_id or "configuration"
-            widget = (
-                error.widget_type.value
-                if error.widget_type is not None
-                else None
-            )
+            field_errors = []
+            for issue in error.issues:
+                field = issue.field or "renderer"
+                region = issue.region_id or "configuration"
+                widget = (
+                    issue.widget_type.value
+                    if issue.widget_type is not None
+                    else None
+                )
+                field_errors.append({
+                    "field": f"regions.{region}.{field}",
+                    "message": "The widget settings cannot be rendered.",
+                    "region_id": issue.region_id,
+                    "widget_type": widget,
+                    "category": issue.category,
+                    "renderer_field": issue.field,
+                    **({"actual_width": issue.actual_width}
+                       if issue.actual_width is not None else {}),
+                    **({"actual_height": issue.actual_height}
+                       if issue.actual_height is not None else {}),
+                    **({"minimum_width": issue.minimum_width}
+                       if issue.minimum_width is not None else {}),
+                    **({"minimum_height": issue.minimum_height}
+                       if issue.minimum_height is not None else {}),
+                })
             return _error(
                 request,
                 422,
                 "candidate_rendering_failed",
                 "The free-layout candidate could not be rendered.",
-                field_errors=[
-                    {
-                        "field": f"regions.{region}.{field}",
-                        "message": "The widget settings cannot be rendered.",
-                        "region_id": error.region_id,
-                        "widget_type": widget,
-                        "category": error.category,
-                        "renderer_field": error.field,
-                    }
-                ],
+                field_errors=field_errors,
             )
         except TransferValidationError as error:
             messages = {

@@ -57,6 +57,24 @@ and compositor. A valid response supplies the draft preview and aggregate
 update policy without persistence or physical upload. Invalid drafts keep the
 last valid preview and cannot be applied or saved.
 
+Invalid regions retain their red outline and also show a concise textual
+reason at the region. When a region is too small to hold that label, the label
+appears immediately below the canvas without changing the 90×10 canvas size.
+Selecting a message opens the affected region, where the inspector lists every
+known sanitized error and marks the responsible geometry or widget control.
+The canvas message prioritizes bounds, overlap, height, width, settings, and
+content errors in that order.
+
+For renderer geometry failures, the validation API returns only safe numeric
+metadata: actual and authoritative minimum width and height when known. The
+service obtains these limits by probing the configured canonical widget
+renderer within the fixed canvas bounds; it does not parse exception text.
+Consequently font choice, Clock seconds, Date format, System Metric fixed digit
+slots, labels, and overflow behavior are reflected accurately. Clip,
+Truncate, Scrolling Text, and Metric Bar do not inherit a generic full-content
+width. Validation labels never include widget content, host paths, or raw
+exceptions.
+
 **Apply** publishes the validated candidate to runtime state. **Save applied
 configuration** persists only that applied state; it never saves a different
 local draft. Revision conflicts preserve the local draft and require an

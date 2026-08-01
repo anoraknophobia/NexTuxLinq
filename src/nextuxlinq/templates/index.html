@@ -71,6 +71,8 @@
                  aria-label="Viewer-perspective 90 by 10 layout canvas">
               <div id="fl-region-layer" class="layout-region-layer"></div>
             </div>
+            <div id="fl-region-validation-summary"
+                 class="region-validation-summary" aria-live="polite"></div>
             <p class="field-help">
               Drag regions or use the inspector. Resize with a corner handle.
               Coordinates sent to NexTuxLinq remain logical, not mirrored.
@@ -82,6 +84,8 @@
             <h3 id="inspector-heading">Selected region</h3>
             <p id="fl-no-selection">Select a region to edit it.</p>
             <div id="fl-selected-region" hidden>
+              <div id="fl-region-validation-details"
+                   class="region-validation-details" role="alert" hidden></div>
               <div class="inspector-grid">
                 <label>Name
                   <input id="fl-region-name" data-region-field="name"
