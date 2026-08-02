@@ -57,7 +57,16 @@ handle_signal() {
     case $signal in INT) exit 130;; TERM) exit 143;; HUP) exit 129;; *) exit 1;; esac
 }
 
+# Roll back as early as the failing command, not only at exit. The guard inside
+# rollback keeps this and the EXIT trap from restoring twice.
+handle_error() {
+    local status=$?
+    if [[ $UPDATE_STATE == switched ]]; then rollback; fi
+    return "$status"
+}
+
 trap finish_update EXIT
+trap handle_error ERR
 trap 'handle_signal INT' INT
 trap 'handle_signal TERM' TERM
 trap 'handle_signal HUP' HUP
@@ -70,7 +79,10 @@ UPDATE_STATE=switched
 # Sandbox-only synchronization point used to exercise the signal traps.
 if (( TEST_MODE )) && [[ -n ${NEXTUXLINQ_TEST_PAUSE_FILE:-} ]]; then
     : > "$NEXTUXLINQ_TEST_PAUSE_FILE"
-    while [[ -e $NEXTUXLINQ_TEST_PAUSE_FILE ]]; do sleep 0.05; done
+    pause_ticks=0
+    while [[ -e $NEXTUXLINQ_TEST_PAUSE_FILE ]] && (( pause_ticks < 1200 )); do
+        sleep 0.05; (( ++pause_ticks ))
+    done
 fi
 install_launchers
 if ! service_install "$was_enabled" 0; then rollback; exit 1; fi

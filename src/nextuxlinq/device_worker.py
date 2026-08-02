@@ -212,8 +212,7 @@ class DeviceWorker:
             self._require_accepting_locked()
             self._latest_frame = command
             self._pending_frame = command
-            self._snapshot = replace(
-                self._snapshot,
+            self._replace_snapshot_locked(
                 frame_submissions_received=(
                     self._snapshot.frame_submissions_received + 1
                 ),

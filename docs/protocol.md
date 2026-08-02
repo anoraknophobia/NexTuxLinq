@@ -73,9 +73,11 @@ Every section below is labelled:
 ## Creator framebuffer protocol
 
 **Verified.** This is the path NexTuxLinq uses for all normal display output.
-Report layouts below were reproduced from USB captures of the official
-application and confirmed on Linux hardware by observing the rendered result
-and the device echo.
+The report layouts below were reproduced from USB captures of the official
+application, and the implementation has been exercised against a physical
+Matrix900, which renders the uploaded frame and echoes every report. The byte
+layouts are transcribed here from the shipping implementation in
+`src/nextuxlinq/creator.py`.
 
 ### Framebuffer geometry
 
@@ -110,7 +112,7 @@ Command `0x05`, sent once before the data chunks:
 
 ### Framebuffer data chunks
 
-Command `0x05`, 49 reports carrying 56 payload bytes each:
+Command `0x05`, 49 reports carrying up to 56 payload bytes each:
 
 | Offset | Size | Meaning |
 |------:|-----:|---------|
