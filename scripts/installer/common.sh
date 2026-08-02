@@ -12,6 +12,11 @@ UDEV_SOURCE="$SOURCE_ROOT/udev/70-nextuxlinq.rules"
 UDEV_DEST="/etc/udev/rules.d/70-nexlinq.rules"
 DRY_RUN=0
 TEST_MODE=0
+# Build directories are created below a fixed, project-owned base instead of an
+# arbitrary caller-provided TMPDIR, so the cleanup safety check always matches
+# the directory that was actually created.
+TEMPORARY_BASE="/tmp"
+TEMPORARY_PREFIX="nextuxlinq-installer"
 
 info() { printf '[INFO] %s\n' "$*"; }
 ok() { printf '[OK] %s\n' "$*"; }
@@ -27,6 +32,8 @@ init_environment() {
         [[ $root == /tmp/* && -f $root/.nextuxlinq-installer-test-root ]] || die "Invalid installer test sandbox."
         TEST_MODE=1
         UDEV_DEST="$root/etc/udev/rules.d/70-nexlinq.rules"
+        # Keep sandbox build directories inside the approved test root.
+        TEMPORARY_BASE="$root/tmp"
     elif env | grep -q '^NEXTUXLINQ_INSTALLER_TEST_'; then
         die "Installer test overrides are unavailable outside test mode."
     fi
@@ -92,7 +99,7 @@ build_release() {
         "$stage/venv/bin/python" -c 'import importlib.resources as r, nextuxlinq; assert r.files("nextuxlinq").joinpath("installer_assets/70-nextuxlinq.rules").is_file()'
         "$stage/venv/bin/nextuxlinqctl" --help >/dev/null
         "$stage/venv/bin/nextuxlinqd" --help >/dev/null
-        version=$($stage/venv/bin/python -c 'import importlib.metadata as m; print(m.version("nextuxlinq"))')
+        version=$("$stage/venv/bin/python" -c 'import importlib.metadata as m; print(m.version("nextuxlinq"))')
         checksum=$(sha256sum "$wheel" | awk '{print $1}')
     fi
     commit=$(source_commit); now=$(timestamp)
@@ -224,8 +231,30 @@ safe_remove_tree() {
     rm -rf -- "$path"
 }
 
+create_temporary_directory() {
+    # An explicit absolute template makes mktemp ignore TMPDIR, so the created
+    # path always matches what cleanup_temporary accepts.
+    local path
+    mkdir -p -- "$TEMPORARY_BASE" || die "Could not prepare $TEMPORARY_BASE."
+    path=$(mktemp -d -- "$TEMPORARY_BASE/$TEMPORARY_PREFIX.XXXXXXXXXX") \
+        || die "Could not create a private temporary build directory."
+    chmod 0700 -- "$path" || die "Could not secure the temporary build directory."
+    printf '%s' "$path"
+}
+
 cleanup_temporary() {
-    local path=$1
-    [[ $path == /tmp/* && ! -L $path ]] || die "Refusing unsafe temporary cleanup."
-    rm -rf -- "$path"
+    # Never fails: this runs from EXIT traps, where turning a cleanup problem
+    # into a non-zero exit status would misreport a successful installation.
+    local path=${1:-}
+    if [[ -z $path || $path != "$TEMPORARY_BASE/$TEMPORARY_PREFIX."* ]]; then
+        warn "Skipping cleanup of an unrecognized temporary path: ${path:-<unset>}"
+        return 0
+    fi
+    if [[ -L $path || ! -d $path ]]; then
+        warn "Skipping cleanup of an unsafe temporary path: $path"
+        return 0
+    fi
+    rm -rf -- "$path" \
+        || warn "The temporary build directory requires manual cleanup: $path"
+    return 0
 }

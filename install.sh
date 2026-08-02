@@ -18,7 +18,7 @@ if (( DRY_RUN )); then
     (( NO_UDEV )) || info "Would request sudo only to install $UDEV_DEST and reload udev rules."
     exit 0
 fi
-temporary=$(mktemp -d); trap 'cleanup_temporary "$temporary"' EXIT
+temporary=$(create_temporary_directory); trap 'cleanup_temporary "$temporary"' EXIT
 identifier=$(release_id); stage="$temporary/$identifier"; wheel_dir="$temporary/wheels"
 build_release "$identifier" "$stage" "$wheel_dir"
 mkdir -p -- "$RELEASES"; final="$RELEASES/$identifier"; mv -- "$stage" "$final"

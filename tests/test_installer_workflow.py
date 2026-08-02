@@ -229,3 +229,313 @@ def test_no_showcase_image_is_changed_by_installer_tests(tmp_path: Path) -> None
     assert run_script(tmp_path, "install.sh", "--dry-run", "--no-udev").returncode == 0
     after = {path: path.read_bytes() for path in before}
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# Temporary-directory handling
+# ---------------------------------------------------------------------------
+
+
+def source_common(sandbox: Path, snippet: str, extra: dict[str, str] | None = None):
+    """Run a snippet against the real common.sh without touching the system."""
+    home = sandbox / "home with spaces"
+    home.mkdir(parents=True, exist_ok=True)
+    (sandbox / ".nextuxlinq-installer-test-root").touch()
+    environment = {
+        **os.environ,
+        "HOME": str(home),
+        "XDG_DATA_HOME": str(home / "data"),
+        "XDG_CONFIG_HOME": str(home / "config"),
+        "NEXTUXLINQ_INSTALLER_TEST_MODE": "1",
+        "NEXTUXLINQ_INSTALLER_TEST_ROOT": str(sandbox),
+        **(extra or {}),
+    }
+    script = (
+        'source "$1/scripts/installer/common.sh"\ninit_environment\n' + snippet
+    )
+    return subprocess.run(
+        ["bash", "-c", script, "bash", str(REPOSITORY)],
+        cwd=REPOSITORY,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "tmpdir_value",
+    ["/var/tmp", "/tmp/nextuxlinq installer spaces"],
+)
+def test_temporary_build_directory_ignores_a_foreign_tmpdir(
+    tmp_path: Path, tmpdir_value: str
+) -> None:
+    result = source_common(
+        tmp_path,
+        'path=$(create_temporary_directory)\n'
+        'printf "%s\\n" "$path"\n'
+        'cleanup_temporary "$path"\n'
+        '[[ -e $path ]] && exit 3\n'
+        'exit 0\n',
+        extra={"TMPDIR": tmpdir_value},
+    )
+
+    assert result.returncode == 0, result.stderr
+    created = result.stdout.strip().splitlines()[-1]
+    # The build directory lives under the approved base, never under TMPDIR.
+    assert created.startswith(f"{tmp_path}/tmp/nextuxlinq-installer.")
+    assert not created.startswith(tmpdir_value)
+    assert not Path(created).exists()
+
+
+def test_temporary_build_directory_is_private_and_unpredictable(
+    tmp_path: Path,
+) -> None:
+    result = source_common(
+        tmp_path,
+        'first=$(create_temporary_directory)\n'
+        'second=$(create_temporary_directory)\n'
+        'printf "%s\\n%s\\n" "$first" "$second"\n'
+        'stat -c "%a" "$first"\n',
+    )
+
+    assert result.returncode == 0, result.stderr
+    first, second, mode = result.stdout.strip().splitlines()[-3:]
+    assert first != second
+    assert mode == "700"
+    assert len(Path(first).name) > len("nextuxlinq-installer.")
+
+
+def test_cleanup_warns_and_succeeds_for_an_unrecognized_path(
+    tmp_path: Path,
+) -> None:
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    result = source_common(
+        tmp_path,
+        f'cleanup_temporary "{foreign}"\n'
+        'printf "exit=%s\\n" "$?"\n',
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "exit=0" in result.stdout
+    assert "[WARN]" in result.stderr
+    # A foreign directory is preserved, never removed.
+    assert foreign.exists()
+
+
+def test_cleanup_refuses_to_follow_a_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "precious"
+    target.mkdir()
+    (target / "keep").write_text("keep", encoding="utf-8")
+    result = source_common(
+        tmp_path,
+        'base="$TEMPORARY_BASE"\n'
+        'mkdir -p -- "$base"\n'
+        f'ln -s "{target}" "$base/nextuxlinq-installer.symlink"\n'
+        'cleanup_temporary "$base/nextuxlinq-installer.symlink"\n'
+        'printf "exit=%s\\n" "$?"\n',
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "exit=0" in result.stdout
+    assert (target / "keep").read_text() == "keep"
+
+
+def test_cleanup_warning_does_not_fail_a_successful_installation(
+    tmp_path: Path,
+) -> None:
+    installed = run_script(tmp_path, "install.sh", "--no-udev", "--no-start")
+
+    assert installed.returncode == 0, installed.stderr
+    assert "[OK] Installed NexTuxLinq" in installed.stdout
+    assert "Refusing unsafe temporary cleanup" not in installed.stderr
+    leftovers = list((tmp_path / "tmp").glob("nextuxlinq-installer.*"))
+    assert leftovers == []
+
+
+@pytest.mark.parametrize("tmpdir_value", ["/var/tmp", "/tmp/spaced dir"])
+def test_installation_succeeds_with_a_foreign_tmpdir(
+    tmp_path: Path, tmpdir_value: str
+) -> None:
+    installed = run_script(
+        tmp_path,
+        "install.sh",
+        "--no-udev",
+        "--no-start",
+        extra={"TMPDIR": tmpdir_value},
+    )
+
+    assert installed.returncode == 0, installed.stderr
+    assert (tmp_path / "home with spaces/data/nextuxlinq/current").is_symlink()
+
+
+def test_staged_python_invocation_is_quoted() -> None:
+    common = (REPOSITORY / "scripts/installer/common.sh").read_text()
+
+    assert '"$stage/venv/bin/python" -c' in common
+    assert "$stage/venv/bin/python -c" not in common.replace(
+        '"$stage/venv/bin/python" -c', ""
+    )
+
+
+# ---------------------------------------------------------------------------
+# Update rollback traps
+# ---------------------------------------------------------------------------
+
+
+def install_for_update(tmp_path: Path) -> Path:
+    assert run_script(
+        tmp_path, "install.sh", "--no-udev", "--no-start"
+    ).returncode == 0
+    return tmp_path / "home with spaces/data/nextuxlinq"
+
+
+def test_failure_immediately_after_the_switch_rolls_back(
+    tmp_path: Path,
+) -> None:
+    root = install_for_update(tmp_path)
+    original = (root / "current").resolve()
+    releases_before = {item.name for item in (root / "releases").iterdir()}
+
+    result = run_script(
+        tmp_path,
+        "update.sh",
+        extra={"NEXTUXLINQ_TEST_INSTALL_FAILURE": "1"},
+    )
+
+    assert result.returncode != 0
+    assert (root / "current").resolve() == original
+    # The known-good previous release is still present.
+    assert original.exists()
+    assert {
+        item.name for item in (root / "releases").iterdir()
+    } == releases_before
+    assert "Update failed; restoring" in result.stderr
+
+
+def test_rollback_runs_exactly_once_and_is_idempotent(tmp_path: Path) -> None:
+    root = install_for_update(tmp_path)
+    original = (root / "current").resolve()
+
+    result = run_script(
+        tmp_path,
+        "update.sh",
+        extra={
+            "NEXTUXLINQ_TEST_SERVICE_ACTIVE": "1",
+            "NEXTUXLINQ_TEST_SERVICE_FAILURE": "1",
+        },
+    )
+
+    assert result.returncode != 0
+    # The explicit failure path and the EXIT trap both request a rollback; the
+    # guard must collapse them into a single restoration.
+    assert result.stderr.count("Update failed; restoring") == 1
+    assert (root / "current").resolve() == original
+
+
+@pytest.mark.parametrize(
+    ("signal_name", "expected_code"),
+    [("INT", 130), ("TERM", 143)],
+)
+def test_signal_after_the_switch_rolls_back(
+    tmp_path: Path, signal_name: str, expected_code: int
+) -> None:
+    import signal as signal_module
+    import time
+
+    root = install_for_update(tmp_path)
+    original = (root / "current").resolve()
+    pause_file = tmp_path / "paused"
+
+    home = tmp_path / "home with spaces"
+    environment = {
+        **os.environ,
+        "HOME": str(home),
+        "XDG_DATA_HOME": str(home / "data"),
+        "XDG_CONFIG_HOME": str(home / "config"),
+        "XDG_STATE_HOME": str(home / "state"),
+        "XDG_CACHE_HOME": str(home / "cache"),
+        "NEXTUXLINQ_INSTALLER_TEST_MODE": "1",
+        "NEXTUXLINQ_INSTALLER_TEST_ROOT": str(tmp_path),
+        "NEXTUXLINQ_TEST_PAUSE_FILE": str(pause_file),
+    }
+    process = subprocess.Popen(
+        [str(REPOSITORY / "update.sh")],
+        cwd=REPOSITORY,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 30.0
+        while not pause_file.exists() and time.monotonic() < deadline:
+            if process.poll() is not None:
+                break
+            time.sleep(0.02)
+        assert pause_file.exists(), "update.sh never reached the switch point"
+        # The switch already happened; current now points at the new release.
+        assert (root / "current").resolve() != original
+        process.send_signal(getattr(signal_module, f"SIG{signal_name}"))
+        stdout, stderr = process.communicate(timeout=60)
+    finally:
+        if process.poll() is None:  # pragma: no cover - defensive
+            process.kill()
+            process.communicate(timeout=30)
+
+    assert process.returncode == expected_code, stderr
+    assert f"interrupted by SIG{signal_name}" in stderr
+    assert "Update failed; restoring" in stderr
+    assert (root / "current").resolve() == original
+    assert original.exists()
+    leftovers = list((tmp_path / "tmp").glob("nextuxlinq-installer.*"))
+    assert leftovers == []
+
+
+def test_successful_update_never_rolls_back(tmp_path: Path) -> None:
+    root = install_for_update(tmp_path)
+    original = (root / "current").resolve()
+
+    result = run_script(tmp_path, "update.sh", "--no-start")
+
+    assert result.returncode == 0, result.stderr
+    assert "Updated NexTuxLinq to" in result.stdout
+    assert "Update failed" not in result.stderr
+    assert (root / "current").resolve() != original
+    # The previous release is retained for a later manual rollback.
+    assert (root / "previous").resolve() == original
+    assert original.exists()
+
+
+def test_update_restores_the_previous_release_pointer_on_rollback(
+    tmp_path: Path,
+) -> None:
+    root = install_for_update(tmp_path)
+    first = (root / "current").resolve()
+    assert run_script(tmp_path, "update.sh", "--no-start").returncode == 0
+    second = (root / "current").resolve()
+    assert (root / "previous").resolve() == first
+
+    result = run_script(
+        tmp_path,
+        "update.sh",
+        extra={"NEXTUXLINQ_TEST_INSTALL_FAILURE": "1"},
+    )
+
+    assert result.returncode != 0
+    assert (root / "current").resolve() == second
+    assert (root / "previous").resolve() == first
+
+
+def test_installer_scripts_never_touch_the_real_system(tmp_path: Path) -> None:
+    """Sandbox runs must not reference real systemd, sudo, udev, or /etc."""
+    installed = run_script(tmp_path, "install.sh", "--no-udev", "--no-start")
+    updated = run_script(tmp_path, "update.sh", "--no-start")
+    removed = run_script(tmp_path, "uninstall.sh", "--keep-udev")
+
+    for result in (installed, updated, removed):
+        assert result.returncode == 0, result.stderr
+        combined = result.stdout + result.stderr
+        for forbidden in ("/etc/udev", "sudo ", "systemctl ", "udevadm "):
+            assert forbidden not in combined
