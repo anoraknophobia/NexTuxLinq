@@ -587,7 +587,7 @@ def test_metric_diagnostics_response_is_sanitized_and_read_only(api_client) -> N
     availability[MetricId.NETWORK_TRANSMIT_RATE] = (
         MetricAvailability.AWAITING_INITIAL_DELTA
     )
-    service._last_metrics_snapshot = SystemMetricsSnapshot(
+    seeded = SystemMetricsSnapshot(
         5.0,
         datetime(2026, 8, 1, tzinfo=timezone.utc),
         {MetricId.CPU_USAGE: 42.0},
@@ -606,6 +606,15 @@ def test_metric_diagnostics_response_is_sanitized_and_read_only(api_client) -> N
             for metric in MetricId
         },
     )
+
+    class SeededProvider:
+        def sample(self) -> SystemMetricsSnapshot:
+            return seeded
+
+    # The coordinator owns the shared snapshot, so seed it through the only
+    # entry point that may advance provider state.
+    service._metrics_provider = SeededProvider()
+    assert service._metrics.sample_if_due() is seeded
 
     response = client.get("/api/v1/free-layout/metrics")
 

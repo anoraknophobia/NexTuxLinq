@@ -129,6 +129,7 @@ def ready_service(
     *,
     sleep,
     metrics_provider=None,
+    monotonic=None,
 ) -> tuple[NexTuxLinqService, FakeWorker]:
     from nextuxlinq.models_v2 import ConfigurationDocumentV2
 
@@ -136,7 +137,7 @@ def ready_service(
     service = NexTuxLinqService(
         config_store=UnusedStore(),  # type: ignore[arg-type]
         device_worker=worker,  # type: ignore[arg-type]
-        monotonic=lambda: 0.0,
+        monotonic=(lambda: 0.0) if monotonic is None else monotonic,
         wall_clock=lambda: NOW,
         sleep=sleep,
         metrics_provider=metrics_provider,
@@ -217,10 +218,20 @@ def test_metric_scheduler_renders_immediately_then_refreshes_at_second_boundary(
             await asyncio.Future()
 
         metrics = Metrics()
+        # The two renders are a second apart, so the shared-snapshot
+        # coordinator samples again instead of reusing the first snapshot.
+        clock = {"now": 0.0}
+
+        def monotonic() -> float:
+            value = clock["now"]
+            clock["now"] += 0.5
+            return value
+
         service, worker = ready_service(
             profile(WidgetType.METRIC_BAR),
             sleep=sleep,
             metrics_provider=metrics,
+            monotonic=monotonic,
         )
         task = asyncio.create_task(service._render_loop())
         await asyncio.wait_for(entered_second_wait.wait(), 1)

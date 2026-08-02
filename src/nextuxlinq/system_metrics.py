@@ -5,12 +5,13 @@ from __future__ import annotations
 import math
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Protocol
 
 
 class MetricId(StrEnum):
@@ -1174,3 +1175,148 @@ class LinuxSystemMetricsProvider:
         )
         self._last_snapshot = snapshot
         return snapshot
+
+
+# One shared sample serves every render inside this window. The interval is a
+# deliberate trade-off: it keeps CPU and network deltas measured over a
+# meaningful span even while the editor polls previews, without making live
+# values visibly stale on the display.
+MINIMUM_METRIC_SAMPLE_INTERVAL_SECONDS = 0.5
+
+
+class MetricsProvider(Protocol):
+    """The stateful sampler owned by one snapshot coordinator."""
+
+    def sample(self) -> SystemMetricsSnapshot: ...
+
+
+class MetricsSnapshotCoordinator:
+    """Own the stateful provider and share one bounded immutable snapshot.
+
+    CPU and network metrics are deltas against the previous sample, so every
+    call to the provider moves those baselines forward. Preview, validation,
+    and the render loop must therefore never sample independently: a burst of
+    samples would shrink the measured interval to a few milliseconds and turn
+    live values into noise.
+
+    ``sample_if_due`` is the only entry point allowed to advance provider
+    state, and it does so at most once per minimum interval.
+    ``current_snapshot`` never advances anything.
+    """
+
+    __slots__ = (
+        "_lock",
+        "_minimum_interval",
+        "_monotonic",
+        "_provider",
+        "_sampled_at",
+        "_snapshot",
+        "_wall_clock",
+    )
+
+    def __init__(
+        self,
+        provider: MetricsProvider,
+        *,
+        monotonic: Callable[[], float],
+        wall_clock: Callable[[], datetime],
+        minimum_interval: float = MINIMUM_METRIC_SAMPLE_INTERVAL_SECONDS,
+    ) -> None:
+        if (
+            isinstance(minimum_interval, bool)
+            or not isinstance(minimum_interval, (int, float))
+            or not math.isfinite(float(minimum_interval))
+            or float(minimum_interval) < 0
+        ):
+            raise ValueError(
+                "minimum_interval must be finite and non-negative."
+            )
+        self._provider = provider
+        self._monotonic = monotonic
+        self._wall_clock = wall_clock
+        self._minimum_interval = float(minimum_interval)
+        # A single lock protects both the provider and the cached snapshot so
+        # concurrent callers can never interleave two partial samples.
+        self._lock = threading.Lock()
+        self._snapshot: SystemMetricsSnapshot | None = None
+        self._sampled_at: float | None = None
+
+    @property
+    def provider(self) -> MetricsProvider:
+        """Return the owned provider for tests and diagnostics only."""
+        return self._provider
+
+    @property
+    def minimum_interval(self) -> float:
+        return self._minimum_interval
+
+    def sample_if_due(self) -> SystemMetricsSnapshot:
+        """Return a snapshot, advancing provider deltas at most once per interval."""
+        with self._lock:
+            now = self._safe_monotonic()
+            cached = self._snapshot
+            sampled_at = self._sampled_at
+            if (
+                cached is not None
+                and sampled_at is not None
+                and now - sampled_at < self._minimum_interval
+            ):
+                return cached
+            snapshot = self._sample_without_escaping_failures(now)
+            self._snapshot = snapshot
+            self._sampled_at = now
+            return snapshot
+
+    def current_snapshot(self) -> SystemMetricsSnapshot | None:
+        """Return the last immutable snapshot without advancing counters."""
+        with self._lock:
+            return self._snapshot
+
+    def invalidate(self) -> None:
+        """Drop the cached snapshot so the next request samples again."""
+        with self._lock:
+            self._snapshot = None
+            self._sampled_at = None
+
+    def replace_provider(self, provider: MetricsProvider) -> None:
+        """Adopt a different provider and drop the snapshot it did not produce."""
+        with self._lock:
+            self._provider = provider
+            self._snapshot = None
+            self._sampled_at = None
+
+    def _safe_monotonic(self) -> float:
+        try:
+            value = float(self._monotonic())
+        except Exception:
+            return 0.0
+        return value if math.isfinite(value) else 0.0
+
+    def _fallback_wall_clock(self) -> datetime:
+        try:
+            value = self._wall_clock()
+        except Exception:
+            return _FALLBACK_SAMPLE_TIME
+        if (
+            not isinstance(value, datetime)
+            or value.tzinfo is None
+            or value.utcoffset() is None
+        ):
+            return _FALLBACK_SAMPLE_TIME
+        return value
+
+    def _sample_without_escaping_failures(
+        self,
+        now: float,
+    ) -> SystemMetricsSnapshot:
+        """Sample the provider, converting any failure into an unavailable snapshot."""
+        candidate: object = None
+        try:
+            candidate = self._provider.sample()
+        except Exception:
+            candidate = None
+        if type(candidate) is SystemMetricsSnapshot:
+            return candidate
+        return SystemMetricsSnapshot.unavailable(
+            max(0.0, now), self._fallback_wall_clock()
+        )

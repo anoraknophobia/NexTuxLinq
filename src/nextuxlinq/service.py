@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
@@ -62,6 +62,7 @@ from nextuxlinq.system_metrics import (
     MetricAvailability,
     MetricId,
     MetricReason,
+    MetricsSnapshotCoordinator,
     SystemMetricsSnapshot,
 )
 from nextuxlinq.widget_models import (
@@ -275,6 +276,23 @@ def _local_wall_clock() -> datetime:
     return datetime.now().astimezone()
 
 
+#: Sentinel distinguishing "resolve a snapshot for this profile" from an
+#: explicit ``None`` meaning "this render needs no metrics at all".
+_RESOLVE_METRICS: Any = object()
+
+
+def profile_requires_metrics(profile: ProfileConfigV2) -> bool:
+    """Return whether any enabled region of a profile reads system metrics."""
+    return any(
+        region.enabled
+        and region.widget.type in {
+            WidgetType.SYSTEM_METRIC,
+            WidgetType.METRIC_BAR,
+        }
+        for region in profile.regions
+    )
+
+
 def _canonical_configuration(
     configuration: ConfigurationDocumentV2 | ConfigurationDocument,
 ) -> ConfigurationDocumentV2:
@@ -315,15 +333,19 @@ class NexTuxLinqService:
         self._worker_stop_timeout = worker_stop_timeout
         self._task_factory = task_factory
         self._mutation_gate = mutation_gate
-        self._metrics_provider = (
+        # The coordinator is the only component allowed to advance the
+        # stateful CPU and network deltas, and it does so at most once per
+        # minimum sampling interval no matter how often previews are polled.
+        self._metrics = MetricsSnapshotCoordinator(
             LinuxSystemMetricsProvider(
                 monotonic=monotonic,
                 wall_clock=wall_clock,
             )
             if metrics_provider is None
-            else metrics_provider
+            else metrics_provider,
+            monotonic=monotonic,
+            wall_clock=wall_clock,
         )
-        self._last_metrics_snapshot: SystemMetricsSnapshot | None = None
         self._widget_registry = create_widget_registry()
         self._compositor = Compositor(self._widget_registry)
         self._configuration: ConfigurationDocumentV2 | None = None
@@ -344,6 +366,34 @@ class NexTuxLinqService:
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._worker_failure_event: asyncio.Event | None = None
         self._worker_exit_observed = threading.Event()
+
+    @property
+    def _metrics_provider(self) -> Any:
+        """Return the stateful provider owned by the snapshot coordinator."""
+        return self._metrics.provider
+
+    @_metrics_provider.setter
+    def _metrics_provider(self, provider: Any) -> None:
+        self._metrics.replace_provider(provider)
+
+    @property
+    def _last_metrics_snapshot(self) -> SystemMetricsSnapshot | None:
+        """Return the shared snapshot without advancing provider deltas."""
+        return self._metrics.current_snapshot()
+
+    def _shared_metrics_snapshot(
+        self,
+        profiles: Iterable[ProfileConfigV2],
+    ) -> SystemMetricsSnapshot | None:
+        """Resolve one snapshot shared by every profile of a single operation.
+
+        Rendering several profiles must never sample once per profile: each
+        sample advances the CPU and network baselines, so per-profile sampling
+        would compress the measured interval to a few milliseconds.
+        """
+        if not any(profile_requires_metrics(profile) for profile in profiles):
+            return None
+        return self._metrics.sample_if_due()
 
     @property
     def configuration(self) -> ConfigurationDocumentV2:
@@ -697,32 +747,13 @@ class NexTuxLinqService:
     def _render_profile(
         self,
         profile: ProfileConfigV2,
+        *,
+        metrics_snapshot: SystemMetricsSnapshot | None = _RESOLVE_METRICS,
     ) -> tuple[RenderResult, float]:
         generated_at = self._monotonic()
         wall_clock = self._wall_clock()
-        metrics_snapshot: SystemMetricsSnapshot | None = None
-        if any(
-            region.enabled
-            and region.widget.type in {
-                WidgetType.SYSTEM_METRIC,
-                WidgetType.METRIC_BAR,
-            }
-            for region in profile.regions
-        ):
-            sample_failed = False
-            try:
-                candidate_snapshot = self._metrics_provider.sample()
-                if type(candidate_snapshot) is not SystemMetricsSnapshot:
-                    sample_failed = True
-            except Exception:
-                sample_failed = True
-                candidate_snapshot = None
-            metrics_snapshot = (
-                SystemMetricsSnapshot.unavailable(generated_at, wall_clock)
-                if sample_failed
-                else candidate_snapshot
-            )
-            self._last_metrics_snapshot = metrics_snapshot
+        if metrics_snapshot is _RESOLVE_METRICS:
+            metrics_snapshot = self._shared_metrics_snapshot((profile,))
         failure: tuple[str, str | None, WidgetType | None, str | None] | None
         try:
             result = self._compositor.render(
@@ -997,8 +1028,13 @@ class NexTuxLinqService:
                 current_revision = self.snapshot().active_configuration_revision
                 self._check_revision(expected_revision, current_revision)
             rendered: dict[str, tuple[RenderResult, float]] = {}
+            shared_metrics = self._shared_metrics_snapshot(
+                configuration.profiles.values()
+            )
             for name, profile in configuration.profiles.items():
-                rendered[name] = self._render_profile(profile)
+                rendered[name] = self._render_profile(
+                    profile, metrics_snapshot=shared_metrics
+                )
             result, generated_at = rendered[
                 configuration.active_profile
             ]
@@ -1135,8 +1171,13 @@ class NexTuxLinqService:
                     current_saved_revision,
                 )
             rendered: dict[str, tuple[RenderResult, float]] = {}
+            shared_metrics = self._shared_metrics_snapshot(
+                configuration.profiles.values()
+            )
             for name, profile in configuration.profiles.items():
-                result, generated_at = self._render_profile(profile)
+                result, generated_at = self._render_profile(
+                    profile, metrics_snapshot=shared_metrics
+                )
                 rendered[name] = (result, generated_at)
             await self._mutation_gate(
                 "save-apply" if apply else "save",
@@ -1208,8 +1249,13 @@ class NexTuxLinqService:
             raise TypeError(
                 "configuration must be a ConfigurationDocumentV2."
             )
+        shared_metrics = self._shared_metrics_snapshot(
+            configuration.profiles.values()
+        )
         rendered = {
-            name: self._render_profile(profile)[0]
+            name: self._render_profile(
+                profile, metrics_snapshot=shared_metrics
+            )[0]
             for name, profile in configuration.profiles.items()
         }
         result = rendered[configuration.active_profile]
