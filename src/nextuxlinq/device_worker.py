@@ -73,7 +73,12 @@ class WorkerNotAcceptingError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class DeviceWorkerSnapshot:
-    """Immutable public state for the device worker."""
+    """Immutable public state for the device worker.
+
+    The counters describe transmission activity only. They never expose
+    framebuffer contents, framebuffer hashes, or device identity beyond the
+    already published device path.
+    """
 
     running: bool = False
     device_available: bool = False
@@ -82,6 +87,10 @@ class DeviceWorkerSnapshot:
     last_display_error: str | None = None
     pending_commands: int = 0
     successful_uploads: int = 0
+    frame_submissions_received: int = 0
+    duplicate_frames_skipped: int = 0
+    frame_transactions_failed: int = 0
+    last_frame_transmission_monotonic: float | None = None
 
 
 StatusCallback = Callable[[DeviceWorkerSnapshot], None]
@@ -138,6 +147,12 @@ class DeviceWorker:
         self._snapshot = DeviceWorkerSnapshot()
         self._lifecycle = "new"
         self._last_command_kind: str | None = None
+        # Worker-thread-only baseline: the exact device framebuffer of the
+        # last complete and successful Creator transaction on the currently
+        # trusted connection. ``None`` means the retained device framebuffer
+        # is unknown, so the next frame must always be transmitted. It is
+        # never published, persisted, or read by any other thread.
+        self._transmitted_frame: bytes | None = None
 
     def snapshot(self) -> DeviceWorkerSnapshot:
         with self._condition:
@@ -157,6 +172,9 @@ class DeviceWorker:
             if self._lifecycle not in ("new", "stopped"):
                 raise RuntimeError("DeviceWorker is already started.")
             self._writer_lock.acquire()
+            # A new worker session knows nothing about the retained device
+            # framebuffer, so the first frame is always transmitted.
+            self._invalidate_transmitted_frame()
             self._stop_event.clear()
             self._lifecycle = "starting"
             self._thread = self._thread_factory(
@@ -183,11 +201,23 @@ class DeviceWorker:
             raise startup_error
 
     def submit_frame(self, frame: bytes, revision: int = 0) -> None:
+        """Queue the latest frame; duplicates are resolved by the worker thread.
+
+        No duplicate filtering happens here. Coalescing keeps only the newest
+        submission, and comparing before enqueueing could let an older
+        duplicate hide a newer changed frame.
+        """
         command = UploadFrameCommand(bytes(frame), revision)
         with self._condition:
             self._require_accepting_locked()
             self._latest_frame = command
             self._pending_frame = command
+            self._snapshot = replace(
+                self._snapshot,
+                frame_submissions_received=(
+                    self._snapshot.frame_submissions_received + 1
+                ),
+            )
             snapshot = self._update_pending_count_locked()
             self._condition.notify()
         self._publish(snapshot)
@@ -295,6 +325,7 @@ class DeviceWorker:
                         cleanup_error = error
             finally:
                 try:
+                    self._invalidate_transmitted_frame()
                     with self._condition:
                         self._pending_frame = None
                         self._pending_brightness = None
@@ -331,6 +362,7 @@ class DeviceWorker:
         try:
             devices = sorted(self._discover(), key=lambda item: str(item.device_path))
         except Exception:
+            self._invalidate_transmitted_frame()
             self._update_status(
                 device_available=False,
                 device_path=None,
@@ -338,6 +370,7 @@ class DeviceWorker:
             )
             return None
         if not devices:
+            self._invalidate_transmitted_frame()
             self._update_status(
                 device_available=False,
                 device_path=None,
@@ -353,6 +386,7 @@ class DeviceWorker:
         try:
             connection = self._connection_factory(selected.device_path)
         except Exception:
+            self._invalidate_transmitted_frame()
             self._update_status(
                 device_available=False,
                 device_path=None,
@@ -360,6 +394,10 @@ class DeviceWorker:
                 last_display_error="Could not open the Matrix900 device.",
             )
             return None
+        # Any newly opened connection, including one to a different device
+        # path or a replaced device identity, has an unknown retained
+        # framebuffer, so the next frame is always transmitted in full.
+        self._invalidate_transmitted_frame()
         self._update_status(
             device_available=True,
             device_path=str(selected.device_path),
@@ -466,16 +504,63 @@ class DeviceWorker:
                     "Matrix900 report echo was missing or invalid."
                 )
 
+    def _invalidate_transmitted_frame(self) -> None:
+        """Forget the baseline because the retained device frame is unknown."""
+        self._transmitted_frame = None
+
     def _upload_frame(
         self,
         connection: ClosableReportConnection,
         command: UploadFrameCommand,
     ) -> None:
-        self._require_echoes(connection, build_creator_upload_reports(command.frame))
+        """Transmit one complete Creator transaction unless it is a duplicate.
+
+        The comparison uses the final device framebuffer: the exact immutable
+        bytes produced after widget rendering, effects, foreground-mask
+        processing, logical composition, and logical-to-device orientation
+        conversion, which are the same bytes consumed by
+        ``build_creator_upload_reports``. Nothing else participates, so a
+        refreshed metric sample or a changed profile revision that renders to
+        identical pixels transmits nothing.
+        """
+        frame = command.frame
+        if self._transmitted_frame is not None and frame == self._transmitted_frame:
+            with self._condition:
+                snapshot = self._replace_snapshot_locked(
+                    duplicate_frames_skipped=(
+                        self._snapshot.duplicate_frames_skipped + 1
+                    ),
+                    last_display_error=None,
+                )
+            self._publish(snapshot)
+            return
+
+        # The device framebuffer becomes unknown the moment the first report
+        # of a new transaction is sent, so an interrupted or failed upload can
+        # never leave a stale baseline behind.
+        self._invalidate_transmitted_frame()
+        try:
+            self._require_echoes(
+                connection, build_creator_upload_reports(frame)
+            )
+        except Exception:
+            with self._condition:
+                snapshot = self._replace_snapshot_locked(
+                    frame_transactions_failed=(
+                        self._snapshot.frame_transactions_failed + 1
+                    ),
+                )
+            self._publish(snapshot)
+            raise
+
+        # Only a complete transaction, including the activation echo, adopts a
+        # new baseline.
+        self._transmitted_frame = frame
         with self._condition:
             snapshot = self._replace_snapshot_locked(
                 successful_uploads=self._snapshot.successful_uploads + 1,
                 last_display_error=None,
+                last_frame_transmission_monotonic=self._monotonic(),
             )
         self._publish(snapshot)
 
@@ -484,6 +569,11 @@ class DeviceWorker:
         connection: ClosableReportConnection,
         command: SetBrightnessCommand,
     ) -> None:
+        # Brightness commands are never suppressed. Whether the firmware
+        # retains the uploaded framebuffer across a brightness change has not
+        # been verified on hardware, so the baseline is dropped conservatively
+        # and the next frame is transmitted in full.
+        self._invalidate_transmitted_frame()
         self._require_echoes(
             connection,
             (build_brightness_report(command.percentage),),
@@ -491,6 +581,7 @@ class DeviceWorker:
         self._update_status(last_display_error=None)
 
     def _disconnect(self, connection: ClosableReportConnection) -> None:
+        self._invalidate_transmitted_frame()
         try:
             connection.close()
         except Exception:
