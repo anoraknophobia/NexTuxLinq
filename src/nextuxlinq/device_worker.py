@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -17,6 +18,19 @@ from nextuxlinq.transport import HidrawConnection
 from nextuxlinq.writer_lock import WriterLock
 
 RECONNECT_DELAYS = (1.0, 2.0, 5.0, 10.0)
+
+# Conservative engineering defaults, not physically measured values.
+#
+# A complete Creator transaction is 51 reports. The Matrix900 interrupt
+# endpoints use a one-millisecond polling interval, so a healthy echo returns
+# in single-digit milliseconds and a complete transaction finishes well below
+# one second. Both limits therefore leave a large margin for normal operation
+# while bounding the worst case: without a total deadline, 51 reports could
+# otherwise consume the per-report timeout each and stall the worker for
+# roughly half a minute.
+CREATOR_REPORT_TIMEOUT_SECONDS = 0.5
+CREATOR_TRANSACTION_DEADLINE_SECONDS = 5.0
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -94,9 +108,19 @@ class DeviceWorker:
         waiter: Waiter = _default_waiter,
         reconnect_delays: Sequence[float] = RECONNECT_DELAYS,
         thread_factory: ThreadFactory = threading.Thread,
+        monotonic: Callable[[], float] = time.monotonic,
+        report_timeout: float = CREATOR_REPORT_TIMEOUT_SECONDS,
+        transaction_deadline: float = CREATOR_TRANSACTION_DEADLINE_SECONDS,
     ) -> None:
         if not reconnect_delays or any(delay < 0 for delay in reconnect_delays):
             raise ValueError("reconnect_delays must contain non-negative values.")
+        if report_timeout <= 0 or transaction_deadline <= 0:
+            raise ValueError(
+                "report_timeout and transaction_deadline must be positive."
+            )
+        self._monotonic = monotonic
+        self._report_timeout = float(report_timeout)
+        self._transaction_deadline = float(transaction_deadline)
         self._writer_lock = writer_lock
         self._discover = discover
         self._connection_factory = connection_factory
@@ -411,9 +435,28 @@ class DeviceWorker:
         connection: ClosableReportConnection,
         reports: Sequence[bytes],
     ) -> None:
+        """Send one complete transaction within a single monotonic deadline.
+
+        The deadline is established once, before the first report, so the
+        elapsed time of every report counts against the same budget. Any
+        failure aborts the remaining reports, which means the activation
+        report is never sent after an earlier report failed.
+        """
+        deadline = self._monotonic() + self._transaction_deadline
         for report in reports:
+            if self._stop_event.is_set():
+                raise DeviceCommunicationError(
+                    "Matrix900 transaction stopped before completion."
+                )
+            remaining = deadline - self._monotonic()
+            if remaining <= 0.0:
+                raise DeviceCommunicationError(
+                    "Matrix900 transaction exceeded its deadline."
+                )
             try:
-                response = connection.transact(report)
+                response = connection.transact(
+                    report, min(self._report_timeout, remaining)
+                )
             except Exception as error:
                 raise DeviceCommunicationError(
                     "Matrix900 report transaction failed."
