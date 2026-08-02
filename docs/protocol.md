@@ -2,8 +2,17 @@
 
 ## Status
 
-The Matrix900 USB protocol has not been reverse-engineered yet.
-This document separates verified observations from assumptions and open questions.
+Reverse engineering is partial but no longer preliminary. The Creator
+framebuffer path, brightness, live telemetry, and the captured widget and
+layout profiles are implemented and exercised against hardware. Several
+option bytes inside the captured profiles remain unassigned.
+
+Every section below is labelled:
+
+- **Verified** — confirmed by USB capture and reproduced on Linux hardware.
+- **Inferred** — consistent with all observations, but not proven by a
+  controlled one-variable experiment.
+- **Unknown** — not established.
 
 ## Verified device information
 
@@ -37,22 +46,19 @@ This document separates verified observations from assumptions and open question
 - The exact hidraw number may change between boots.
 - The device does not emit input reports while idle.
 - Opening the hidraw device for reading and writing does not change the display.
-- No protocol commands have been transmitted by this project yet.
+- The device echoes each complete 64-byte report it accepts through its
+  interrupt IN endpoint. NexTuxLinq treats a missing or mismatching echo as a
+  transaction failure.
 
-## Unknown protocol details
+## Remaining unknown protocol details
 
-- Command identifiers
-- Packet headers and sequence numbers
-- Checksums or integrity fields
-- Device acknowledgement format
+- Checksums or integrity fields, if any exist
 - Display power command
-- Brightness command
-- Pixel format and color depth
-- Pixel ordering and display orientation
-- Image transfer and frame segmentation
-- Text and widget representation
+- Whether the framebuffer survives a brightness command
+- Whether partial or changed-chunk framebuffer updates are accepted
 - Animation storage and playback
 - Persistent device storage behavior
+- The meaning of individual option bytes inside the captured widget profiles
 
 ## Reverse-engineering rules
 
@@ -63,6 +69,119 @@ This document separates verified observations from assumptions and open question
 - Do not test firmware, bootloader, reset, or update commands.
 - Keep original packet captures unchanged and document their provenance.
 - Remove serial numbers and other machine-specific identifiers before publishing captures.
+
+## Creator framebuffer protocol
+
+**Verified.** This is the path NexTuxLinq uses for all normal display output.
+Report layouts below were reproduced from USB captures of the official
+application and confirmed on Linux hardware by observing the rendered result
+and the device echo.
+
+### Framebuffer geometry
+
+| Property | Value |
+|---|---|
+| Width | 90 pixels |
+| Height | 10 pixels |
+| Pixel format | RGB888, three bytes per pixel |
+| Byte order | Row-major, left to right, top to bottom |
+| Complete frame | 2700 bytes |
+
+### Transaction shape
+
+One complete display update is exactly **51 HID reports** of 64 bytes each,
+always in this order:
+
+1. one initialization report,
+2. **49** framebuffer data chunks,
+3. one activation report that commits the frame.
+
+Every report uses HID report ID `0x01` in byte 0, so 63 payload bytes remain.
+The device echoes each report; NexTuxLinq requires all 51 echoes before it
+treats a frame as transmitted.
+
+### Initialization report
+
+Command `0x05`, sent once before the data chunks:
+
+```text
+01 05 ff 00 00 01 01 00 ... 00
+```
+
+### Framebuffer data chunks
+
+Command `0x05`, 49 reports carrying 56 payload bytes each:
+
+| Offset | Size | Meaning |
+|------:|-----:|---------|
+| 0 | 1 | HID report ID `0x01` |
+| 1 | 1 | Command `0x05` |
+| 2 | 3 | Zero-based chunk index, big-endian |
+| 5 | 1 | Payload length plus two |
+| 6 | 1 | Frame width, `0x5a` (90) |
+| 7 | 1 | Frame height, `0x0a` (10) |
+| 8 | up to 56 | Framebuffer bytes for this chunk |
+
+2700 bytes divided into 56-byte chunks yields 48 full chunks plus a final
+12-byte chunk, so chunk 48 carries length marker `0x0e` while chunks 0 to 47
+carry `0x3a`. Unused trailing bytes of the final report stay zero.
+
+### Activation report
+
+Command `0x03`, sent last. It commits the uploaded framebuffer and is
+reproduced byte for byte from the capture:
+
+```text
+01 03 01 00 00 22 01 04 01 01 02 ff ff ff 00 00 00 ff 00 64 00
+```
+
+**Inferred.** Byte 5 (`0x22`) and bytes 8 onward are the same widget-slot
+option block used by command `0x03` elsewhere. Their individual meanings are
+not assigned.
+
+### Logical versus device orientation
+
+**Verified.** NexTuxLinq composes into a *logical* framebuffer whose `x=0` is
+the physical front of the case, which is also the order the web preview uses.
+The Creator regions are arranged in reverse order relative to the physical
+case, so before upload each enabled region rectangle is moved to its mirrored
+horizontal origin:
+
+```text
+device_x = 90 - logical_x - region_width
+```
+
+Pixel order *inside* a region is not reversed, so glyphs and icons are never
+mirrored. The 2700-byte result of this conversion is the *device
+framebuffer*, and it is exactly what the data chunks carry.
+
+### Complete transactions only
+
+NexTuxLinq only ever sends complete 51-report transactions. It does not
+implement partial framebuffer updates or changed-chunk-only uploads, and it
+makes no claim that the firmware would accept them. Whether the device
+tolerates an incomplete chunk sequence is **unknown** and untested.
+
+A transaction is bounded in time: each report echo has a per-report timeout
+and the complete transaction has a single monotonic deadline. Any timeout,
+missing echo, or transport error aborts the remaining reports, so the
+activation report is never sent after an earlier report failed.
+
+### Duplicate frame suppression
+
+**Verified behavior of this project, not of the device.** NexTuxLinq compares
+the final 2700-byte device framebuffer against the last framebuffer it
+transmitted completely and successfully. When the bytes are identical it
+sends zero HID reports, because the device already retains that image. A
+changed metric value that renders to identical pixels therefore produces no
+USB traffic at all.
+
+The comparison happens only inside the device worker, immediately before the
+reports are built. The baseline is discarded whenever the retained device
+image can no longer be trusted: worker start and stop, device open, open or
+discovery failure, disconnect, transaction failure or timeout, and every
+brightness command. Brightness is treated conservatively because whether the
+firmware retains the framebuffer across a brightness change is **unknown**.
 
 ## Brightness encoding
 

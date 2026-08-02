@@ -18,9 +18,12 @@ Compatibility with untested devices must not be assumed. Support for additional 
 
 ## Status
 
-This project is in an early reverse-engineering stage. Matrix900 device
-control, a local daemon, and a loopback-only web GUI are implemented, while
-many protocol features remain capture-driven or intentionally limited.
+Matrix900 device control, a local daemon, a complete 90x10 software
+renderer, and a loopback-only web GUI are implemented and used daily. The
+Creator framebuffer path, brightness, and live telemetry are verified on
+hardware and documented in [`docs/protocol.md`](docs/protocol.md). Several
+option bytes inside the captured widget profiles remain unassigned, so
+reverse engineering is partial rather than finished.
 
 Currently identified hardware:
 
@@ -78,11 +81,30 @@ distributions, `./update.sh`, and configuration-preserving `./uninstall.sh`.
 The Linux implementation can currently:
 
 - Detect connected Phanteks Matrix900 devices through `hidraw`.
+- Render a complete 90x10 RGB888 framebuffer in the backend and upload it
+  through the verified Creator protocol.
+- Compose free-layout profiles from eight widgets: Blank, Static Text,
+  Scrolling Text, Clock, Date, System Metric, Metric Bar, and Built-in Icon.
+- Apply a global Foreground Rainbow effect across all 90 physical columns.
+- Read live system metrics from procfs and sysfs only: CPU, RAM, load,
+  uptime, root-filesystem storage, network rates, and kernel-exposed GPU,
+  VRAM, and temperature values.
+- Store multiple profiles with managed backups, JSON import and export, and
+  explicit revision-conflict handling.
+- Serve a loopback-only web editor with a backend-rendered preview.
 - Set brightness from 10% through 100% in ten-percent steps.
-- Read and display the Matrix900 response report.
+- Run as a systemd user service with an installer, updater, and uninstaller.
 
-The tracked Matrix900 permission rule is `udev/70-nextuxlinq.rules`. This
-repository rename does not install or modify rules on the running system.
+Only the final visible framebuffer is transmitted: when a render produces
+bytes identical to the last frame the device accepted, no HID reports are
+sent at all. A metric whose value changed but whose pixels did not therefore
+costs no USB traffic.
+
+The tracked Matrix900 permission rule is `udev/70-nextuxlinq.rules`.
+`./install.sh` installs it as `/etc/udev/rules.d/70-nexlinq.rules` after
+asking for sudo, records its checksum, and `./uninstall.sh` removes it again
+only when it is still unmodified. Use `--no-udev` to skip every sudo
+operation and manage device permissions yourself.
 
 Examples:
 
@@ -143,9 +165,13 @@ widget, including undersized drafts; its quick actions change only the local
 draft and previewing never applies, saves, persists, or uploads a frame.
 
 Live telemetry includes CPU, memory, uptime, load, fixed-root storage, network
-rates, and generic kernel-exposed GPU, VRAM, and temperature data. Sensor
-availability varies by hardware and driver; no vendor utility, shell command,
-fan control, or OpenLinkHub control is used. Sanitized availability diagnostics
+rates, and generic kernel-exposed GPU, VRAM, and temperature data. The daemon
+reads procfs and sysfs directly and runs no vendor utility, no shell command,
+no fan control, and **no OpenLinkHub query**. (The separate legacy developer
+command `nextuxlinqctl telemetry` is the only part of this project that talks
+to OpenLinkHub; see *Linux telemetry* below.) Sensor availability varies by
+hardware and driver. All metric sources share one bounded sample, so an open
+editor cannot distort CPU or network rates. Sanitized availability diagnostics
 are shown under Technical details. The preset library also includes Extended
 System Monitor and Temperature Monitor layouts.
 
@@ -168,14 +194,20 @@ journalctl --user -u nextuxlinqd.service -n 100 --no-pager
 journalctl --user -u nextuxlinqd.service -f
 ```
 
-For systems affected by a shared USB/controller hand-off issue, NexTuxLinq can
-optionally install a post-start drop-in that waits two seconds and
-`try-restart`s an already-active `OpenLinkHub.service`. It is disabled by
-default, does not affect manual daemon starts, and is documented with its
-enable, disable, and status commands in [`docs/systemd.md`](docs/systemd.md).
-It remains optional project functionality and must be enabled explicitly.
-OpenLinkHub is restarted only when already active, and failure is nonfatal.
+NexTuxLinq can optionally install a post-start drop-in that waits two seconds
+and `try-restart`s an already-active `OpenLinkHub.service`. It is **disabled
+unless you enable it explicitly**, does not affect manual daemon starts, and
+is documented with its enable, disable, and status commands in
+[`docs/systemd.md`](docs/systemd.md). OpenLinkHub is restarted only when it is
+already active, the restart briefly interrupts it, and failure is nonfatal.
 This does not add Corsair fan or RGB control.
+
+This option is a workaround, not a diagnosis. NexTuxLinq and OpenLinkHub use
+different USB device IDs and different `hidraw` device paths, and NexTuxLinq
+never opens or writes a device that is not the Matrix900 `2e3c:6500`.
+OpenLinkHub fan-control failures have also been observed while `nextuxlinqd`
+was inactive, so NexTuxLinq has **not** been shown to cause them. Enable this
+only if restarting OpenLinkHub after login actually helps on your system.
 
 After autostart is configured, direct `nextuxlinqd` execution is reserved for
 development while the user service is stopped. The application lock rejects a
@@ -198,6 +230,12 @@ dependency of NexTuxLinq or its packaged GUI.
 
 ### Linux telemetry
 
+> **Legacy developer command.** This path predates the software renderer. It
+> writes to `hidraw` directly instead of going through the daemon, so it
+> requires the user service to be stopped, and its sensor mapping is hardwired
+> to the original development machine. It is not used by the daemon or the
+> web GUI.
+
 Send one hardware telemetry update:
 
 ```console
@@ -210,13 +248,15 @@ Continuously update the display once per second:
 nextuxlinqctl telemetry --watch
 ```
 
-The initial Linux sensor mapping uses:
+This command's sensor mapping is hardwired to:
 
 - CPU temperature: `k10temp` / `Tctl`
 - GPU temperature: `amdgpu` / `edge`
 - Fan or pump speed: highest RPM reported by `nct6798`
 
-This mapping is currently hardware-specific and will become configurable.
+The command fails on hardware without those exact chips and will become
+configurable. It is unrelated to the daemon's metric sources, which are
+discovered generically through sysfs and procfs.
 
 ### System Data widget source
 
@@ -385,13 +425,11 @@ nextuxlinqctl telemetry --rpm-source fan
 nextuxlinqctl telemetry --rpm-source pump
 ```
 
-- `fan` reads all active non-AIO fans from OpenLinkHub and sends their rounded
-  average RPM. This is the default.
+- `fan` reads all active non-AIO fans from OpenLinkHub's local HTTP API and
+  sends their rounded average RPM. This is the default, and it is the only
+  place in the project that contacts OpenLinkHub. It reads values only and
+  never changes an OpenLinkHub setting.
 - `pump` reads the highest RPM value from the `nct6798` hwmon chip.
 
 The Matrix900 protocol currently exposes one verified RPM telemetry field, so
 fan and pump RPM cannot yet be transmitted simultaneously.
-
-## Showcase
-
-Wanted to show a picture but I am too dumb to uplaod a working picture it seems.

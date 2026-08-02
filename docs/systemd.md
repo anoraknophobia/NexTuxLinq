@@ -88,13 +88,30 @@ it remotely accessible.
 
 ## Optional OpenLinkHub startup recovery
 
-Some systems exhibit a shared USB/controller hand-off problem after the
-NexTuxLinq user service starts. Similar behavior has been observed with other
-control software, so it is not necessarily specific to NexTuxLinq. An optional
-managed drop-in can wait two seconds after a successful NexTuxLinq service
-start and then run `systemctl --user try-restart OpenLinkHub.service`.
-`try-restart` restarts OpenLinkHub only when it is already active; it never
-starts an inactive service, and a failure is nonfatal.
+An optional managed drop-in can wait two seconds after a successful
+NexTuxLinq service start and then run
+`systemctl --user try-restart OpenLinkHub.service`. `try-restart` restarts
+OpenLinkHub only when it is already active; it never starts an inactive
+service, and a failure is nonfatal.
+
+### This is a workaround, not a diagnosis
+
+Direct causality has **not** been established, and the naming of this option
+should not be read as a claim:
+
+- NexTuxLinq and OpenLinkHub drive different devices. NexTuxLinq scopes
+  discovery to the Matrix900 USB identity `2e3c:6500` and never opens or
+  writes any other `hidraw` device. OpenLinkHub controls a separate Corsair
+  iCUE LINK hub on a different `hidraw` path.
+- The NexTuxLinq daemon reads system metrics only from procfs and sysfs. It
+  issues no OpenLinkHub request of any kind.
+- OpenLinkHub fan-control failures have been observed on the development
+  system while `nextuxlinqd` was inactive, which rules out NexTuxLinq runtime
+  traffic as the sole cause.
+
+Enabling this option briefly interrupts OpenLinkHub while it restarts. Enable
+it only if restarting OpenLinkHub after login demonstrably helps on your
+system, and disable it again if it does not.
 
 Enable, inspect, or disable the workaround explicitly:
 

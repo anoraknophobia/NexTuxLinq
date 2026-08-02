@@ -203,7 +203,11 @@ def _classify_legacy_name(relative: str, line: str) -> str | None:
             return "legacy service migration"
         if f"`{legacy_name}-*`" in folded:
             return "legacy service migration"
-    if relative in {"docs/installation.md", "tests/test_installer_workflow.py"}:
+    if relative in {
+        "README.md",
+        "docs/installation.md",
+        "tests/test_installer_workflow.py",
+    }:
         if "70-" + legacy_name + ".rules" in folded:
             return "canonical installed udev-rule path"
     return None
