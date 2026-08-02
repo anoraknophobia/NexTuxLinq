@@ -17,6 +17,7 @@ from nextuxlinq.rendering_v2.fonts.builtin import (
     NATIVE_4X9_ROWS,
     NATIVE_5X9_ROWS,
     NATIVE_5X10_ROWS,
+    _build_builtin_font_registry,
     create_builtin_font_registry,
 )
 from nextuxlinq.rendering_v2.fonts.models import (
@@ -198,7 +199,7 @@ def test_registry_rejects_duplicate_and_auto_fonts() -> None:
         FontRegistry((definition,))
 
 
-def test_builtin_registry_is_fresh_deterministic_and_immutable() -> None:
+def test_builtin_registry_is_shared_deterministic_and_immutable() -> None:
     first = create_builtin_font_registry()
     second = create_builtin_font_registry()
 
@@ -212,8 +213,11 @@ def test_builtin_registry_is_fresh_deterministic_and_immutable() -> None:
     )
     assert tuple(item.font_id for item in first.definitions) == expected
     assert first.definitions == second.definitions
-    assert first is not second
-    assert first.definitions is not second.definitions
+    # The registry is shared, which is safe only because it stays immutable.
+    assert first is second
+    assert first.definitions is second.definitions
+    assert _build_builtin_font_registry().definitions == first.definitions
+    assert _build_builtin_font_registry() is not first
     with pytest.raises(AttributeError):
         first.definitions.append(first.definitions[0])  # type: ignore[attr-defined]
     with pytest.raises((AttributeError, TypeError)):

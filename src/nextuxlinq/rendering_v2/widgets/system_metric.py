@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 
 from nextuxlinq.rendering_v2.fonts import (
     FontDefinition,
@@ -58,8 +59,15 @@ _PERCENT_ROWS = {
 }
 
 
+@lru_cache(maxsize=1)
 def _metric_font_registry() -> FontRegistry:
-    """Extend fresh built-ins with the canonical ASCII percent suffix only."""
+    """Extend the shared built-ins with the canonical ASCII percent suffix only.
+
+    The derived registry is built once per process and reused. ``FontDefinition``
+    copies every supplied glyph mapping into a private dictionary exposed as a
+    ``MappingProxyType``, so neither the shared built-in registry nor this
+    derived registry can be mutated by a caller.
+    """
     definitions = []
     for definition in create_builtin_font_registry().definitions:
         glyphs = dict(definition.glyphs)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import lru_cache
 from types import MappingProxyType
 
 from nextuxlinq.rendering_v2.fonts.models import (
@@ -298,8 +299,8 @@ def _definition(
     )
 
 
-def create_builtin_font_registry() -> FontRegistry:
-    """Return a fresh deterministic registry of all native bitmap fonts."""
+def _build_builtin_font_registry() -> FontRegistry:
+    """Construct one deterministic registry of all native bitmap fonts."""
     return FontRegistry(
         (
             _definition(
@@ -334,3 +335,19 @@ def create_builtin_font_registry() -> FontRegistry:
             ),
         )
     )
+
+
+@lru_cache(maxsize=1)
+def create_builtin_font_registry() -> FontRegistry:
+    """Return the shared deterministic registry of all native bitmap fonts.
+
+    The registry is built once per process and then reused. Sharing is safe
+    because every returned object is immutable: ``FontRegistry`` and
+    ``FontDefinition`` are frozen dataclasses whose mappings are
+    ``MappingProxyType`` views over private dictionaries, and ``GlyphBitmap``
+    stores nested tuples. Callers therefore cannot mutate shared glyph data.
+
+    Construction stays lazy, so importing this module never builds fonts and an
+    unexpected font-fixture failure cannot break import.
+    """
+    return _build_builtin_font_registry()
