@@ -68,7 +68,10 @@ the selected bitmap font; uptime, rates, and free decimal text do not receive
 hidden slots. An actual three-digit value retains the same font and follows
 the configured overflow policy. With `overflow=error`, a too-wide current
 value reports `content_too_wide`; Clip and Truncate keep their configured
-behavior.
+behavior. In the running daemon that report never stops the service: the
+active profile keeps the last transmitted frame for that cadence step and
+renders normally again from the next value that fits. See
+[`daemon-core.md`](daemon-core.md).
 
 Temperature System Metrics default to `CPU`, `GPU`, and `DISK`. Exact legacy
 defaults `CPU TEMP`, `GPU TEMP`, and `DISK TEMP` are interpreted as those new

@@ -155,6 +155,21 @@ _CONTROLLED_FAILURES = {
         CompositorFailure.UNEXPECTED_RENDERER_FAILURE,
     )
 }
+
+#: Categorized failures that describe the content of one frame rather than a
+#: defect in the profile or in the renderer. The rendered content follows the
+#: current sample, the wall clock, and the host environment, so an accepted
+#: profile can report one of these for a single frame and compose normally
+#: again from the next value onward. Every other category means the profile or
+#: the renderer itself is broken, which no later value can repair.
+CONTENT_DEPENDENT_FAILURES = frozenset({
+    CompositorFailure.CONTENT_TOO_WIDE,
+    CompositorFailure.CONTENT_TOO_TALL,
+    CompositorFailure.UNSUPPORTED_GLYPH,
+    CompositorFailure.TIME_ZONE_UNAVAILABLE,
+    CompositorFailure.DATE_FORMAT_UNAVAILABLE,
+})
+
 _CONTROLLED_FIELDS = frozenset(
     {
         "animation_time",

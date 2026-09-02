@@ -29,6 +29,21 @@ The journal additionally records the complete Python traceback of a renderer
 failure so the root cause is diagnosable; the HTTP and GUI status surfaces
 stay sanitized.
 
+Candidate validation and steady-state rendering are separate. Once a profile
+has rendered one complete frame, a later content-dependent failure of that
+accepted profile no longer stops the renderer: the frame is not submitted, the
+device keeps the last transmitted frame, `rendering_state` becomes `degraded`
+with a sanitized `last_display_error`, and the next value that composes
+resumes normal rendering and clears both. The cadence is unchanged, so there
+is no retry loop, and each category is reported to the journal once per run.
+Content-dependent means the rendered content did not fit or could not be
+represented: `content_too_wide`, `content_too_tall`, `unsupported_glyph`,
+`time_zone_unavailable`, and `date_format_unavailable`. Every other category
+means the profile or the renderer is broken, and it still stops the renderer
+and the process. A profile that cannot render its first frame is still
+rejected at startup, and applying or saving an invalid candidate is still
+refused unchanged.
+
 The service keeps canonical schema-v2 configuration in memory. Valid schema-v1
 files migrate deterministically in memory without an automatic rewrite. The
 GUI's **Apply** action changes only the running configuration. **Save applied

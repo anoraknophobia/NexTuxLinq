@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
@@ -38,6 +39,7 @@ from nextuxlinq.models_v2 import (
     RegionConfig,
 )
 from nextuxlinq.rendering_v2.compositor import (
+    CONTENT_DEPENDENT_FAILURES,
     Compositor,
     CompositorError,
     RenderResult,
@@ -81,6 +83,8 @@ AsyncSleep = Callable[[float], Awaitable[None]]
 WallClock = Callable[[], datetime]
 TaskFactory = Callable[[Coroutine[Any, Any, None]], asyncio.Task[None]]
 MutationGate = Callable[[str, int], Awaitable[None]]
+
+LOGGER = logging.getLogger(__name__)
 
 
 def font_fit_payload(analysis: FontFitAnalysis) -> dict[str, object]:
@@ -201,7 +205,18 @@ class CandidateValidationError(ValueError):
             minimum_height=minimum_height,
             font_fit=font_fit,
         ),)
-        super().__init__("The free-layout candidate could not be rendered.")
+        context = ""
+        if region_id is not None:
+            context = f" Region {region_id!r}"
+            if widget_type is not None:
+                context += f", widget {widget_type.value!r}"
+            context += "."
+        if field is not None:
+            context += f" Field {field!r}."
+        super().__init__(
+            "The free-layout candidate could not be rendered. "
+            f"Category {category!r}.{context}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,6 +376,8 @@ class NexTuxLinqService:
         self._migration_pending = False
         self._last_render_result: RenderResult | None = None
         self._last_render_revision: int | None = None
+        self._retained_frame_category: str | None = None
+        self._reported_retentions: set[str] = set()
         self._mutation_lock = asyncio.Lock()
         self._coordination_lock = threading.RLock()
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -505,6 +522,8 @@ class NexTuxLinqService:
             self._render_wakeup = asyncio.Event()
             self._initial_render_ready = asyncio.Event()
             self._worker_exit_observed.clear()
+            self._retained_frame_category = None
+            self._reported_retentions = set()
             loaded = self.config_store.load()
             configuration = _canonical_configuration(loaded.configuration)
             with self._coordination_lock:
@@ -716,20 +735,38 @@ class NexTuxLinqService:
                     result = self._last_render_result
                     wall_clock = result.generation_time
                 else:
-                    result, generated_at = self._render_profile(profile)
-                    self.device_worker.submit_frame(
-                        result.device_framebuffer,
-                        revision=revision,
-                    )
-                    self._last_render_result = result
-                    self._last_render_revision = revision
-                    wall_clock = result.generation_time
-                    self.state.update(
-                        last_frame_generation_time=generated_at,
-                        update_policy=result.update_policy.value,
-                    )
-                    if reason == "initial" and self._initial_render_ready is not None:
-                        self._initial_render_ready.set()
+                    skipped = False
+                    try:
+                        result, generated_at = self._render_profile(profile)
+                    except CandidateValidationError as error:
+                        if not self._retain_frame_after(error):
+                            raise
+                        skipped = True
+                    if skipped:
+                        # The already accepted profile stays active and the
+                        # device keeps the last transmitted frame, so nothing
+                        # is submitted for this cadence step.
+                        result = self._last_render_result
+                        assert result is not None
+                        wall_clock = self._wall_clock()
+                    else:
+                        self.device_worker.submit_frame(
+                            result.device_framebuffer,
+                            revision=revision,
+                        )
+                        self._last_render_result = result
+                        self._last_render_revision = revision
+                        wall_clock = result.generation_time
+                        self.state.update(
+                            last_frame_generation_time=generated_at,
+                            update_policy=result.update_policy.value,
+                        )
+                        self._resume_after_retained_frames()
+                        if (
+                            reason == "initial"
+                            and self._initial_render_ready is not None
+                        ):
+                            self._initial_render_ready.set()
                 wakeup = self._render_wakeup
                 if wakeup is None:
                     raise RuntimeError("The render scheduler is unavailable.")
@@ -743,6 +780,50 @@ class NexTuxLinqService:
                     profile=profile,
                 )
             reason = await self._wait_for_update(delay)
+
+    def _retain_frame_after(self, error: CandidateValidationError) -> bool:
+        """Report whether one failed frame may keep the last transmitted frame.
+
+        Only a content-dependent failure of a profile that already rendered
+        successfully is recoverable: the next sample or wall-clock value can
+        compose normally again. A failure before the first successful frame,
+        or any category that means the profile or the renderer is broken, is
+        never retained and still stops the renderer.
+        """
+        if (
+            self._last_render_result is None
+            or error.category not in CONTENT_DEPENDENT_FAILURES
+        ):
+            return False
+        # A value at the edge of its range can alternate every cadence step,
+        # so each category is reported to the journal once per run. The
+        # published state stays live and is the authoritative diagnostic.
+        if error.category not in self._reported_retentions:
+            self._reported_retentions.add(error.category)
+            LOGGER.warning(
+                "Matrix900 kept the last frame; the active profile could not "
+                "be rendered (%s). Rendering resumes on the next value that "
+                "composes.",
+                error.category,
+            )
+        self._retained_frame_category = error.category
+        self.state.update(
+            rendering_state="degraded",
+            last_display_error=(
+                f"Matrix900 kept the last frame: {error.category}."
+            ),
+        )
+        return True
+
+    def _resume_after_retained_frames(self) -> None:
+        """Publish recovery once a later frame composes successfully again."""
+        if self._retained_frame_category is None:
+            return
+        self._retained_frame_category = None
+        self.state.update(
+            rendering_state="rendering",
+            last_display_error=None,
+        )
 
     def _render_profile(
         self,
