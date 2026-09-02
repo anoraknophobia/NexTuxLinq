@@ -25,6 +25,9 @@ submitted, the renderer's generic status remains observable, worker cleanup is
 awaited, and the HTTP lifespan is never started. A later renderer failure asks
 the HTTP server to shut down and consumes expected background-task
 cancellation so it cannot obscure the original sanitized rendering status.
+The journal additionally records the complete Python traceback of a renderer
+failure so the root cause is diagnosable; the HTTP and GUI status surfaces
+stay sanitized.
 
 The service keeps canonical schema-v2 configuration in memory. Valid schema-v1
 files migrate deterministically in memory without an automatic rewrite. The

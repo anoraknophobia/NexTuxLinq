@@ -128,6 +128,20 @@ async def wait_for_shutdown(
         await render_task
 
 
+def _render_task_exception(
+    render_task: asyncio.Task[None] | None,
+) -> BaseException | None:
+    """Return the renderer's own failure when it already finished with one.
+
+    The cancellation path handles a cancellation rather than the renderer
+    failure itself, so the original exception has to be read back from the
+    finished render task to reach the log.
+    """
+    if render_task is None or not render_task.done() or render_task.cancelled():
+        return None
+    return render_task.exception()
+
+
 def _create_service() -> NexTuxLinqService:
     writer_lock = WriterLock.from_environment(owner="nextuxlinqd")
     worker = DeviceWorker(writer_lock=writer_lock)
@@ -170,6 +184,7 @@ async def run_service(
     server_task: asyncio.Task[None] | None = None
     stop_task: asyncio.Task[bool] | None = None
     worker_failure_task: asyncio.Task[None] | None = None
+    render_task: asyncio.Task[None] | None = None
     logging.info(
         "Starting NexTuxLinq Matrix900 controller at http://%s:%d (%s).",
         host,
@@ -246,7 +261,10 @@ async def run_service(
         if current is not None and current.cancelling():
             raise
         if service.snapshot().rendering_state == "failed":
-            logging.error("NexTuxLinq Matrix900 rendering failed.")
+            logging.error(
+                "NexTuxLinq Matrix900 rendering failed.",
+                exc_info=_render_task_exception(render_task),
+            )
         else:
             logging.error("NexTuxLinq Matrix900 service failed.")
         exit_code = 1
@@ -265,7 +283,7 @@ async def run_service(
         exit_code = 1
     except (Exception, SystemExit):
         if service.snapshot().rendering_state == "failed":
-            logging.error("NexTuxLinq Matrix900 rendering failed.")
+            logging.exception("NexTuxLinq Matrix900 rendering failed.")
         else:
             logging.error("NexTuxLinq Matrix900 service failed.")
         exit_code = 1

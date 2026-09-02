@@ -22,6 +22,20 @@ from nextuxlinq.state import DaemonSnapshot
 from nextuxlinq.writer_lock import WriterLock, WriterLockHeldError
 
 
+RENDERING_FAILED = "NexTuxLinq Matrix900 rendering failed."
+
+
+def _rendering_failure_record(caplog):
+    """Return the single record that reports the Matrix900 rendering failure."""
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == RENDERING_FAILED
+    ]
+    assert len(records) == 1
+    return records[0]
+
+
 def test_daemon_parser_supports_foreground_mode_only() -> None:
     arguments = build_parser().parse_args(
         ["--foreground", "--host", "::1", "--port", "9000"]
@@ -141,7 +155,11 @@ def test_run_service_renderer_failure_cleans_up_and_returns_nonzero(
     replacement.release()
     messages = [record.getMessage() for record in caplog.records]
     assert "NexTuxLinq Matrix900 rendering failed." in messages
-    assert all("/private/renderer/detail" not in message for message in messages)
+    failure = _rendering_failure_record(caplog)
+    assert failure.exc_info is not None
+    assert failure.exc_info[0] is RuntimeError
+    assert "Traceback (most recent call last)" in caplog.text
+    assert "/private/renderer/detail" in caplog.text
 
 
 def test_initial_render_failure_never_starts_http_lifespan(caplog) -> None:
@@ -294,7 +312,82 @@ def test_renderer_failure_suppresses_server_cleanup_cancellation(caplog) -> None
     assert stopped
     messages = [record.getMessage() for record in caplog.records]
     assert "NexTuxLinq Matrix900 rendering failed." in messages
-    assert all("private renderer failure" not in message for message in messages)
+    failure = _rendering_failure_record(caplog)
+    assert failure.exc_info is not None
+    assert failure.exc_info[0] is RuntimeError
+    assert "Traceback (most recent call last)" in caplog.text
+    assert "private renderer failure" in caplog.text
+
+
+def test_renderer_failure_reaches_the_log_through_the_cancellation_path(
+    caplog,
+) -> None:
+    """A cancelling HTTP server must not hide the renderer's own exception."""
+
+    async def scenario() -> tuple[int, bool]:
+        class Service:
+            render_task = None
+            stopped = False
+
+            async def start(self) -> None:
+                async def render() -> None:
+                    raise OSError("/private/hidraw/write/detail")
+
+                self.render_task = asyncio.create_task(render())
+                await asyncio.sleep(0)
+
+            async def wait_for_worker_failure(self) -> None:
+                await asyncio.Future()
+
+            def snapshot(self) -> DaemonSnapshot:
+                failed = self.render_task is None or self.render_task.done()
+                return DaemonSnapshot(
+                    lifecycle_state="failed" if failed else "running",
+                    rendering_state="failed" if failed else "rendering",
+                    last_display_error=(
+                        "Matrix900 rendering failed." if failed else None
+                    ),
+                )
+
+            @property
+            def owns_resources(self) -> bool:
+                return self.render_task is not None
+
+            async def stop(self) -> None:
+                self.stopped = True
+                task = self.render_task
+                self.render_task = None
+                if task is not None:
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+        service = Service()
+
+        class CancelledServer:
+            should_exit = False
+
+            async def serve(self) -> None:
+                raise asyncio.CancelledError
+
+        result = await run_service(
+            service_factory=lambda: service,  # type: ignore[arg-type]
+            stop_requested=asyncio.Event(),
+            server_factory=lambda app, host, port: CancelledServer(),
+        )
+        return result, service.stopped
+
+    result, stopped = asyncio.run(scenario())
+
+    assert result == 1
+    assert stopped
+    failure = _rendering_failure_record(caplog)
+    assert failure.exc_info is not None
+    assert failure.exc_info[0] is OSError
+    assert "Traceback (most recent call last)" in caplog.text
+    assert "/private/hidraw/write/detail" in caplog.text
 
 
 def test_http_startup_failure_stops_service_and_releases_lock(
@@ -418,6 +511,8 @@ def test_normal_http_shutdown_stops_service_and_releases_lock(
     )
     assert any(message.startswith("Matrix900 selection: ") for message in messages)
     assert "NexTuxLinq Matrix900 service core stopped." in messages
+    assert RENDERING_FAILED not in messages
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 @pytest.mark.parametrize("simultaneous_stop", [False, True])
