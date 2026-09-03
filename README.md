@@ -63,6 +63,25 @@ Phanteks and NexLinq are trademarks of their respective owners. NexTuxLinq is
 an independent community project and is not affiliated with or endorsed by
 Phanteks.
 
+## Related work
+
+- [KLand Studio — Phanteks LCD6-HD Linux reverse engineering](https://klandstudio.net/labs/phanteks-lcd6-linux/)
+  documents independent Linux reverse-engineering work on the Phanteks
+  LCD6-HD. The LCD6-HD is separate hardware with a separate protocol and is
+  not supported by NexTuxLinq; none of that work applies to the Matrix900
+  protocol documented here. KLand Studio investigated the device themselves
+  and credit NexTuxLinq's documented reverse-engineering methodology as a
+  reference for their investigation: capturing known-good Windows USB traffic,
+  verifying device acknowledgements, changing one variable per capture,
+  separating verified observations from assumptions, and avoiding speculative
+  firmware, reset, and bootloader commands. We appreciate them publishing
+  their findings and adding to the Linux knowledge available for Phanteks
+  hardware.
+
+NexTuxLinq is not affiliated with or endorsed by KLand Studio. The link above
+is provided for reference only and does not extend the project's scope, which
+remains the Phanteks Matrix900 alone.
+
 ## Current Linux control support
 
 ### Installation
