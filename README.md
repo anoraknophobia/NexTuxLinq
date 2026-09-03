@@ -25,6 +25,8 @@ hardware and documented in [`docs/protocol.md`](docs/protocol.md). Several
 option bytes inside the captured widget profiles remain unassigned, so
 reverse engineering is partial rather than finished.
 
+Notable changes are recorded in [`CHANGELOG.md`](CHANGELOG.md).
+
 Currently identified hardware:
 
 - Device: Phanteks Matrix900
