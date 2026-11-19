@@ -33,7 +33,11 @@ code is downloaded or executed at any point, and no system package is
 installed.
 
 Build directories are created under a fixed `/tmp/nextuxlinq-installer.*`
-base with private permissions, independent of `TMPDIR`.
+base with private permissions, independent of `TMPDIR`. They hold only the
+wheel and the builder environment. The release's virtual environment is
+created directly at its final path below `releases/`, because pip binds the
+generated commands to the absolute interpreter path and a moved environment
+would no longer start.
 
 The managed installation lives in
 `~/.local/share/nextuxlinq/releases/`. Atomic `current` and `previous` symlinks

@@ -19,10 +19,8 @@ if (( DRY_RUN )); then
     exit 0
 fi
 temporary=$(create_temporary_directory); trap 'cleanup_temporary "$temporary"' EXIT
-identifier=$(release_id); stage="$temporary/$identifier"; wheel_dir="$temporary/wheels"
-build_release "$identifier" "$stage" "$wheel_dir"
-mkdir -p -- "$RELEASES"; final="$RELEASES/$identifier"; mv -- "$stage" "$final"
-installed_ok=0; udev_created=0; udev_sum=""
+identifier=$(release_id); wheel_dir="$temporary/wheels"
+installed_ok=0; udev_created=0; udev_sum=""; final=""
 cleanup_failed_install() {
     cleanup_temporary "$temporary"
     if (( ! installed_ok )); then
@@ -47,6 +45,10 @@ cleanup_failed_install() {
     fi
 }
 trap cleanup_failed_install EXIT
+# The virtual environment is created at its final path because pip binds
+# console scripts to the absolute interpreter path; a moved venv breaks them.
+mkdir -p -- "$RELEASES"; mkdir -- "$RELEASES/$identifier"; final="$RELEASES/$identifier"
+build_release "$identifier" "$final" "$wheel_dir"
 atomic_link "releases/$identifier" "$CURRENT"; install_launchers
 if (( ! NO_UDEV )); then
     [[ -e $UDEV_DEST ]] || udev_created=1

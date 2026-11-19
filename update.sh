@@ -40,10 +40,23 @@ rollback() {
     return 0
 }
 
+# Before the switch, a failure or interruption only has to remove the new,
+# possibly half-built release; nothing user-visible changed yet. A signal can
+# arrive after current was switched but before UPDATE_STATE says so, hence the
+# extra check that current does not already resolve to the new release.
+discard_unswitched_release() {
+    if [[ $UPDATE_STATE == pending && -n $final && -d $final && $final != "$old" ]] \
+        && [[ $(readlink -f "$CURRENT" 2>/dev/null) != "$(readlink -f "$final")" ]]; then
+        safe_remove_tree "$final" "$RELEASES" || true
+    fi
+    return 0
+}
+
 finish_update() {
     local status=$?
     trap - EXIT ERR INT TERM HUP
     if [[ $UPDATE_STATE == switched ]]; then rollback; fi
+    discard_unswitched_release
     cleanup_temporary "$temporary"
     exit "$status"
 }
@@ -53,6 +66,7 @@ handle_signal() {
     trap - EXIT ERR INT TERM HUP
     warn "Update interrupted by SIG$signal."
     if [[ $UPDATE_STATE == switched ]]; then rollback; fi
+    discard_unswitched_release
     cleanup_temporary "$temporary"
     case $signal in INT) exit 130;; TERM) exit 143;; HUP) exit 129;; *) exit 1;; esac
 }
@@ -71,8 +85,11 @@ trap 'handle_signal INT' INT
 trap 'handle_signal TERM' TERM
 trap 'handle_signal HUP' HUP
 
-identifier=$(release_id); stage="$temporary/$identifier"; build_release "$identifier" "$stage" "$temporary/wheels"
-mkdir -p -- "$RELEASES"; final="$RELEASES/$identifier"; mv -- "$stage" "$final"
+identifier=$(release_id)
+# The virtual environment is created at its final path because pip binds
+# console scripts to the absolute interpreter path; a moved venv breaks them.
+mkdir -p -- "$RELEASES"; mkdir -- "$RELEASES/$identifier"; final="$RELEASES/$identifier"
+build_release "$identifier" "$final" "$temporary/wheels"
 if (( was_recovery )); then recovery_control disable; fi
 atomic_link "$old" "$PREVIOUS"; atomic_link "releases/$identifier" "$CURRENT"
 UPDATE_STATE=switched

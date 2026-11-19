@@ -109,6 +109,15 @@ Work committed after the repository was prepared for public publication
 
 ### Fixed
 
+- `install.sh` and `update.sh` no longer produce a broken release. The
+  virtual environment used to be created in the temporary build directory and
+  then moved into `releases/`, but pip binds console scripts such as
+  `nextuxlinqctl` to the absolute interpreter path, so every fresh installation
+  failed with `bad interpreter: No such file or directory` and was rolled back
+  (issue #2). The venv is now created directly at its final release path; only
+  the wheel and the builder environment stay in the temporary directory. A
+  failed or interrupted build removes the partial release directory and leaves
+  existing releases untouched.
 - Content-dependent render failures of an already-accepted profile no longer
   terminate the daemon. System Metric font selection is snapshot-independent
   and deliberately sizes regions for the stable two-digit format envelope, so a

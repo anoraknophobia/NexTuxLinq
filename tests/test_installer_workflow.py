@@ -370,6 +370,58 @@ def test_installation_succeeds_with_a_foreign_tmpdir(
     assert (tmp_path / "home with spaces/data/nextuxlinq/current").is_symlink()
 
 
+def assert_launchers_run_from_their_release(home: Path, root: Path) -> None:
+    for name in ("nextuxlinqctl", "nextuxlinqd"):
+        launcher = home / ".local/bin" / name
+        result = subprocess.run(
+            [str(launcher), "--help"], text=True, capture_output=True, check=False
+        )
+        assert result.returncode == 0, result.stderr
+        assert str(launcher.resolve().parent) in launcher.read_text()
+    for path in (root / "releases").rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            assert "nextuxlinq-installer." not in path.read_text(errors="replace"), path
+
+
+def test_installed_and_updated_launchers_do_not_reference_the_build_directory(
+    tmp_path: Path,
+) -> None:
+    # pip binds console scripts to the absolute venv interpreter path, so the
+    # venv must be created where it stays instead of being moved into place.
+    home = tmp_path / "home with spaces"
+    root = home / "data/nextuxlinq"
+    installed = run_script(tmp_path, "install.sh", "--no-udev", "--no-start")
+    assert installed.returncode == 0, installed.stderr
+    assert_launchers_run_from_their_release(home, root)
+
+    updated = run_script(tmp_path, "update.sh", "--no-start")
+    assert updated.returncode == 0, updated.stderr
+    assert_launchers_run_from_their_release(home, root)
+
+
+def test_failed_update_build_leaves_the_release_set_unchanged(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "home with spaces/data/nextuxlinq"
+    assert run_script(tmp_path, "install.sh", "--no-udev", "--no-start").returncode == 0
+    original = (root / "current").resolve()
+    releases_before = {item.name for item in (root / "releases").iterdir()}
+
+    result = run_script(
+        tmp_path,
+        "update.sh",
+        "--no-start",
+        extra={"NEXTUXLINQ_TEST_BUILD_FAILURE": "1"},
+    )
+
+    assert result.returncode != 0
+    assert "package validation failure" in result.stderr
+    assert "Update failed; restoring" not in result.stderr
+    assert (root / "current").resolve() == original
+    assert {item.name for item in (root / "releases").iterdir()} == releases_before
+    assert list((tmp_path / "tmp").glob("nextuxlinq-installer.*")) == []
+
+
 def test_staged_python_invocation_is_quoted() -> None:
     common = (REPOSITORY / "scripts/installer/common.sh").read_text()
 

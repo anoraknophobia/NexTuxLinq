@@ -81,9 +81,12 @@ build_release() {
     if (( TEST_MODE )); then
         [[ ${NEXTUXLINQ_TEST_BUILD_FAILURE:-0} != 1 ]] || die "Simulated package validation failure."
         mkdir -p "$stage/venv/bin" "$stage/venv/lib/python3.11/site-packages/nextuxlinq/installer_assets"
-        printf '#!/usr/bin/env bash\nexit 0\n' > "$stage/venv/bin/nextuxlinqctl"
+        printf '#!/usr/bin/env bash\nexit 0\n' > "$stage/venv/bin/python"
+        # Like pip's console scripts, the fake launchers bind the absolute
+        # interpreter path of the venv they were built in, so a release whose
+        # venv was created elsewhere and then moved fails here as well.
+        printf '#!/bin/sh\nexec "%s/venv/bin/python" "$0" "$@"\n' "$stage" > "$stage/venv/bin/nextuxlinqctl"
         cp "$stage/venv/bin/nextuxlinqctl" "$stage/venv/bin/nextuxlinqd"
-        cp "$stage/venv/bin/nextuxlinqctl" "$stage/venv/bin/python"
         chmod 0755 "$stage/venv/bin/nextuxlinqctl" "$stage/venv/bin/nextuxlinqd" "$stage/venv/bin/python"
         cp "$UDEV_SOURCE" "$stage/venv/lib/python3.11/site-packages/nextuxlinq/installer_assets/70-nextuxlinq.rules"
         cp "$SOURCE_ROOT/systemd/nextuxlinqd.service" "$stage/venv/lib/python3.11/site-packages/nextuxlinq/installer_assets/nextuxlinqd.service"
