@@ -47,7 +47,8 @@ sampled value never changes that choice. For bounded
 integer metrics, validation checks the compact fixed numeric envelope, the
 unavailable text, and the effective label. Celsius and degree-only temperature
 formats reserve two integer cells; Fahrenheit reserves three. A hypothetical
-`100` does not invalidate an otherwise usable region. The deterministic
+`100` does not invalidate an otherwise usable region, and an actual 100 % is
+displayed as 99 (see below). The deterministic
 envelopes for intrinsically unbounded text are `9999.00` for load average,
 `9999.00GB/S` for network rates, and `999999D 23H` for uptime (shown here at
 two-decimal numeric precision). Values beyond those display ceilings retain
@@ -65,7 +66,10 @@ pixels: Celsius values reserve two integer cells, while Fahrenheit values
 reserve three, so `86°F` and `109°F` retain identical anchors and font size.
 The digit-cell width is derived from the widest digit in
 the selected bitmap font; uptime, rates, and free decimal text do not receive
-hidden slots. An actual three-digit value retains the same font and follows
+hidden slots. Displayed percentages are capped below three integer digits: 100 %
+(or a value that rounds up to 100) shows as `99%` at integer precision, `99.9%`
+at one decimal, and `99.99%` at two. An actual three-digit value of another
+kind, such as a temperature of 100 °C, retains the same font and follows
 the configured overflow policy. With `overflow=error`, a too-wide current
 value reports `content_too_wide`; Clip and Truncate keep their configured
 behavior. In the running daemon that report never stops the service: the

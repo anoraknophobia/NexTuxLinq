@@ -130,6 +130,16 @@ def test_metric_value_format_envelopes_are_deterministic_and_include_precision()
     )
 
 
+def test_percentages_are_capped_below_three_integer_digits() -> None:
+    for metric in (MetricId.CPU_USAGE, MetricId.GPU_USAGE, MetricId.MEMORY_USAGE):
+        assert format_metric_value(metric, 100.0, 0) == "99%"
+        assert format_metric_value(metric, 99.6, 0) == "99%"
+        assert format_metric_value(metric, 100.0, 1) == "99.9%"
+        assert format_metric_value(metric, 100.0, 2) == "99.99%"
+        assert format_metric_value(metric, 42.4, 0) == "42%"
+        assert format_metric_value(metric, 5.0, 0) == "5%"
+
+
 def test_unbounded_metric_formatters_observe_the_documented_display_ceiling() -> None:
     assert format_metric_value(MetricId.LOAD_AVERAGE_1M, 1e100, 2) == "9999.00"
     assert format_metric_value(

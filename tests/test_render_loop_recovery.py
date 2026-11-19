@@ -26,13 +26,15 @@ from nextuxlinq.widget_models import SystemMetricSettings
 
 NOW = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
 
-# The compact "99%" envelope of the 3x5 font measures exactly eleven pixels,
-# which is the geometry the reported production profile uses for cpu_usage.
-ENVELOPE_WIDTH = 11
+# Percentages are capped at 99 for display and can never be too wide, so these
+# tests drive the retention path with a Celsius temperature instead: its stable
+# two-digit "99°C" envelope in the 3x5 font measures thirteen pixels, and an
+# actual 100 °C sample is genuinely too wide for it.
+ENVELOPE_WIDTH = 13
 
 
 def percentage_configuration(width: int = ENVELOPE_WIDTH) -> ConfigurationDocumentV2:
-    """Return one accepted profile whose region fits the stable 99% envelope."""
+    """Return one accepted profile whose region fits the stable 99 °C envelope."""
     return ConfigurationDocumentV2.from_dict({
         "schema_version": 2,
         "active_profile": "default",
@@ -49,7 +51,7 @@ def percentage_configuration(width: int = ENVELOPE_WIDTH) -> ConfigurationDocume
                     "widget": {
                         "type": "system_metric",
                         "settings": SystemMetricSettings(
-                            metric="cpu_usage",  # type: ignore[arg-type]
+                            metric="cpu_temperature",  # type: ignore[arg-type]
                             font="3x5",  # type: ignore[arg-type]
                             display_mode="value_only",  # type: ignore[arg-type]
                             overflow="error",  # type: ignore[arg-type]
@@ -111,7 +113,7 @@ class StepMonotonic:
 
 
 class ScriptedMetrics:
-    """Return one scripted CPU percentage per sample; the last value repeats."""
+    """Return one scripted CPU temperature per sample; the last value repeats."""
 
     def __init__(self, values) -> None:
         self.values = list(values)
@@ -123,11 +125,11 @@ class ScriptedMetrics:
         return SystemMetricsSnapshot(
             float(self.samples),
             NOW,
-            {MetricId.CPU_USAGE: float(value)},
+            {MetricId.CPU_TEMPERATURE: float(value)},
             {
                 metric: (
                     MetricAvailability.AVAILABLE
-                    if metric is MetricId.CPU_USAGE
+                    if metric is MetricId.CPU_TEMPERATURE
                     else MetricAvailability.UNAVAILABLE
                 )
                 for metric in MetricId
@@ -239,8 +241,8 @@ def test_initial_render_succeeds_and_submits_one_frame() -> None:
     asyncio.run(scenario())
 
 
-def test_full_percentage_keeps_the_last_frame_instead_of_stopping() -> None:
-    """A 100% sample must not stop the renderer of an accepted profile.
+def test_three_digit_value_keeps_the_last_frame_instead_of_stopping() -> None:
+    """A three-digit sample must not stop the renderer of an accepted profile.
 
     Before the fix this raised CandidateValidationError out of the render
     loop, which stopped the daemon and produced the systemd restart loop.

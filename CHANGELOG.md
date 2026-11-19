@@ -19,6 +19,17 @@ an independent community project with no Phanteks affiliation.
 Work committed after the repository was prepared for public publication
 (`bcfa3b9`, 2026-08-01). Nothing here has been released under a version number.
 
+### Changed
+
+- System Metric percentages are now capped for display: a value of 100 % (or
+  one that rounds up to 100) is shown as `99%` (`99.9%` at one decimal,
+  `99.99%` at two). Displayed percentages therefore never need a third digit
+  and always fit the stable two-digit format envelope, so a CPU or GPU at full
+  load no longer reports `content_too_wide`, no longer freezes the Matrix900
+  on its last frame, and the editor no longer rejects an otherwise valid
+  region while a metric happens to read 100 %. Three-digit temperatures can
+  still exceed their envelope and follow the configured overflow policy.
+
 ### Added
 
 - Automated per-user installation, update, and removal tooling: `install.sh`,

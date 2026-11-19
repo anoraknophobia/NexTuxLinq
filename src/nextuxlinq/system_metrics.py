@@ -332,6 +332,11 @@ def format_metric_value(metric_id: MetricId, value: float, precision: int) -> st
         normalized = min(normalized, MAX_DISPLAY_LOAD_AVERAGE)
     if METRIC_DEFINITIONS[metric].value_type is MetricValueType.TEMPERATURE:
         return f"{normalized:.{precision}f}°C"
+    if METRIC_DEFINITIONS[metric].value_type is MetricValueType.PERCENTAGE:
+        # Displayed percentages never reach three integer digits: a full-scale
+        # (or rounds-up-to-100) value shows as 99 at integer precision, 99.9 at
+        # one decimal, so it always fits the stable two-digit format envelope.
+        normalized = min(normalized, 100.0 - 10.0 ** -precision)
     suffix = METRIC_DEFINITIONS[metric].unit
     return f"{normalized:.{precision}f}{suffix}"
 

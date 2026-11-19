@@ -80,8 +80,9 @@ ignores region width during font selection. Clock and Date use their configured
 required representation. System Metric uses its snapshot-independent format
 envelope and fixed numeric slots, so changing a sampled value never changes the
 resolved font. This includes one-, two-, and three-digit percentages and
-available/unavailable transitions; an actual `100%` retains the chosen font and
-uses the configured Error, Truncate, or Clip behavior.
+available/unavailable transitions; an actual `100%` is displayed as `99%`
+because percentages are capped, and other three-digit values retain the chosen
+font and use the configured Error, Truncate, or Clip behavior.
 
 Unset glyph pixels preserve the surface's existing background. The text layer
 does not fill backgrounds, scale glyphs, rotate content, apply device

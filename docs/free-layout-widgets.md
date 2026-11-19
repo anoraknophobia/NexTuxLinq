@@ -50,8 +50,9 @@ cells draw no pixels. One compact pixel separates label and number, with no
 ordinary space between number, degree symbol, and optional unit letter. Thus
 values retain the same label and suffix positions. Validation uses the stable
 layout rather than rejecting a region for a hypothetical three-digit value.
-An actual `100` retains the
-font and follows Error, Clip, or Truncate. Explicit fonts remain authoritative.
+An actual 100 % is displayed as `99%` (percentages are capped); other
+three-digit values, such as a 100 °C temperature, retain the font and follow
+Error, Clip, or Truncate. Explicit fonts remain authoritative.
 
 ## Metric Bar
 

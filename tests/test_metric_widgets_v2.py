@@ -667,40 +667,52 @@ def test_auto_font_and_alignment_are_stable_across_repeated_snapshots() -> None:
     assert surfaces[0] != surfaces[1]
 
 
-def test_normal_metric_width_ignores_hypothetical_100_but_actual_100_obeys_overflow() -> None:
+def test_normal_metric_width_fits_actual_100_because_percentages_cap_at_99() -> None:
     settings = SystemMetricSettings(metric="cpu_usage", label="CPU")  # type: ignore[arg-type]
     assert metric_text_format_envelope(settings) == ("CPU 99%", "CPU --")
-    for value in (5.0, 14.0, 99.0):
-        layout = layout_system_metric_text(
+    layouts = [
+        layout_system_metric_text(
             settings,
             context(36, 10, snapshot(cpu_usage=value)),
             region_width=36,
             region_height=10,
         )
-        assert layout.font_id.value == "5x10"
-        assert layout.measured_width == 35
+        for value in (5.0, 14.0, 99.0, 100.0)
+    ]
+    assert [layout.font_id.value for layout in layouts] == ["5x10"] * 4
+    # An actual 100 is displayed as 99, so it needs no more room than 99 and
+    # never reports content_too_wide in Error mode.
+    assert layouts[3].measured_width == layouts[2].measured_width == 35
+    render_system_metric(
+        RegionSurface(36, 10),
+        settings,
+        context(36, 10, snapshot(cpu_usage=100)),
+    )
+
+
+def test_actual_three_digit_temperature_obeys_overflow_policy() -> None:
+    """Only percentages are capped; a 100 °C temperature is genuinely too wide."""
+    settings = SystemMetricSettings(
+        metric="cpu_temperature", font="3x5", display_mode="value_only",  # type: ignore[arg-type]
+        precision=0,
+    )
+    width = 13  # the stable two-digit "99°C" envelope in the 3x5 font
+    for value in (5.0, 99.0):
+        render_system_metric(
+            RegionSurface(width, 5), settings,
+            context(width, 5, snapshot(cpu_temperature=value)),
+        )
     with pytest.raises(WidgetRenderingError) as raised:
         render_system_metric(
-            RegionSurface(36, 10),
-            settings,
-            context(36, 10, snapshot(cpu_usage=100)),
+            RegionSurface(width, 5), settings,
+            context(width, 5, snapshot(cpu_temperature=100.0)),
         )
     assert raised.value.category == "content_too_wide"
     for overflow in ("clip", "truncate"):
-        overflow_settings = SystemMetricSettings(
-            **{**settings.to_dict(), "overflow": overflow}
-        )
-        layout = layout_system_metric_text(
-            overflow_settings,
-            context(36, 10, snapshot(cpu_usage=100)),
-            region_width=36,
-            region_height=10,
-        )
-        assert layout.font_id.value == "5x10"
+        relaxed = SystemMetricSettings(**{**settings.to_dict(), "overflow": overflow})
         render_system_metric(
-            RegionSurface(36, 10),
-            overflow_settings,
-            context(36, 10, snapshot(cpu_usage=100)),
+            RegionSurface(width, 5), relaxed,
+            context(width, 5, snapshot(cpu_temperature=100.0)),
         )
 
 
